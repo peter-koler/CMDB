@@ -1,0 +1,85 @@
+from app import db
+from datetime import datetime
+import json
+
+
+class CmdbModel(db.Model):
+    __tablename__ = 'cmdb_models'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    code = db.Column(db.String(100), unique=True, nullable=False)
+    icon = db.Column(db.String(50), default='AppstoreOutlined')
+    category_id = db.Column(db.Integer, db.ForeignKey('model_categories.id'), nullable=False)
+    model_type_id = db.Column(db.Integer, db.ForeignKey('model_types.id'), nullable=True)
+    description = db.Column(db.Text)
+    config = db.Column(db.Text, default='{}')  # JSON格式存储额外配置
+    form_config = db.Column(db.Text, default='[]')  # JSON格式存储表单配置（用于拖拽设计器）
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id'))
+    
+    regions = db.relationship('ModelRegion', backref='model', lazy='dynamic', cascade='all, delete-orphan')
+    fields = db.relationship('ModelField', backref='model', lazy='dynamic', cascade='all, delete-orphan',
+                             foreign_keys='ModelField.model_id')
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'code': self.code,
+            'icon': self.icon,
+            'category_id': self.category_id,
+            'model_type_id': self.model_type_id,
+            'description': self.description,
+            'config': json.loads(self.config) if self.config else {},
+            'form_config': json.loads(self.form_config) if self.form_config else [],
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            'created_by': self.created_by,
+            'category_name': self.category.name if self.category else None,
+            'model_type_name': self.model_type.name if self.model_type else None
+        }
+    
+    def to_full_dict(self):
+        data = self.to_dict()
+        data['regions'] = [region.to_dict() for region in self.regions.order_by(ModelRegion.sort_order)]
+        data['fields'] = [field.to_dict() for field in self.fields.order_by(ModelField.sort_order)]
+        return data
+    
+    def save(self):
+        db.session.add(self)
+        db.session.commit()
+    
+    def delete(self):
+        db.session.delete(self)
+        db.session.commit()
+
+
+class ModelType(db.Model):
+    __tablename__ = 'model_types'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(50), nullable=False)
+    code = db.Column(db.String(50), unique=True, nullable=False)
+    description = db.Column(db.String(200))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    models = db.relationship('CmdbModel', backref='model_type', lazy='dynamic')
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'code': self.code,
+            'description': self.description,
+            'created_at': self.created_at.isoformat() if self.created_at else None
+        }
+    
+    def save(self):
+        db.session.add(self)
+        db.session.commit()
+    
+    def delete(self):
+        db.session.delete(self)
+        db.session.commit()

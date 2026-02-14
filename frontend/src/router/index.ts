@@ -1,0 +1,110 @@
+import { createRouter, createWebHistory } from 'vue-router'
+import { useUserStore } from '@/stores/user'
+
+const routes = [
+  {
+    path: '/login',
+    name: 'Login',
+    component: () => import('@/views/login/index.vue'),
+    meta: { requiresAuth: false }
+  },
+  {
+    path: '/',
+    component: () => import('@/layouts/BasicLayout.vue'),
+    meta: { requiresAuth: true },
+    children: [
+      {
+        path: '',
+        redirect: '/dashboard'
+      },
+      {
+        path: 'dashboard',
+        name: 'Dashboard',
+        component: () => import('@/views/dashboard/index.vue'),
+        meta: { title: '首页', icon: 'DashboardOutlined' }
+      },
+      {
+        path: 'config',
+        name: 'Config',
+        meta: { title: '配置管理', icon: 'AppstoreOutlined' },
+        children: [
+          {
+            path: 'model',
+            name: 'Model',
+            component: () => import('@/views/config/model/index.vue'),
+            meta: { title: '模型管理', icon: 'DatabaseOutlined' }
+          }
+        ]
+      },
+      {
+        path: 'cmdb',
+        name: 'CMDB',
+        meta: { title: 'CMDB', icon: 'CloudServerOutlined' },
+        children: [
+          {
+            path: 'instance',
+            name: 'Instance',
+            component: () => import('@/views/cmdb/instance/index.vue'),
+            meta: { title: '配置仓库', icon: 'HddOutlined' }
+          }
+        ]
+      },
+      {
+        path: 'system',
+        name: 'System',
+        meta: { title: '系统管理', icon: 'SettingOutlined' },
+        children: [
+          {
+            path: 'user',
+            name: 'User',
+            component: () => import('@/views/system/user/index.vue'),
+            meta: { title: '用户管理', icon: 'UserOutlined' }
+          },
+          {
+            path: 'department',
+            name: 'Department',
+            component: () => import('@/views/system/department/index.vue'),
+            meta: { title: '部门管理', icon: 'ApartmentOutlined' }
+          },
+          {
+            path: 'role',
+            name: 'Role',
+            component: () => import('@/views/system/role/index.vue'),
+            meta: { title: '角色管理', icon: 'SafetyOutlined' }
+          },
+          {
+            path: 'config',
+            name: 'SystemConfig',
+            component: () => import('@/views/system/config/index.vue'),
+            meta: { title: '系统配置', icon: 'ToolOutlined' }
+          },
+          {
+            path: 'log',
+            name: 'Log',
+            component: () => import('@/views/system/log/index.vue'),
+            meta: { title: '日志审计', icon: 'FileSearchOutlined' }
+          }
+        ]
+      }
+    ]
+  }
+]
+
+const router = createRouter({
+  history: createWebHistory(),
+  routes
+})
+
+router.beforeEach((to, from, next) => {
+  const userStore = useUserStore()
+  
+  if (to.meta.requiresAuth !== false && !userStore.token) {
+    next('/login')
+  } else if (to.path === '/login' && userStore.token) {
+    next('/')
+  } else {
+    next()
+  }
+})
+
+export default router
