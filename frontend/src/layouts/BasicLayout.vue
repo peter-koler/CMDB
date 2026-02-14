@@ -43,6 +43,10 @@
             <template #icon><HistoryOutlined /></template>
             <span>{{ t('menu.history') }}</span>
           </a-menu-item>
+          <a-menu-item key="topology" @click="navigateTo('/cmdb/topology')">
+            <template #icon><BranchOutlined /></template>
+            <span>{{ t('menu.topology') }}</span>
+          </a-menu-item>
         </a-sub-menu>
         
         <a-sub-menu key="config" v-if="userInfo?.role === 'admin'">
@@ -51,6 +55,14 @@
           <a-menu-item key="model" @click="navigateTo('/config/model')">
             <template #icon><DatabaseOutlined /></template>
             <span>{{ t('menu.model') }}</span>
+          </a-menu-item>
+          <a-menu-item key="relation-type" @click="navigateTo('/config/relation-type')">
+            <template #icon><NodeIndexOutlined /></template>
+            <span>{{ t('menu.relationType') }}</span>
+          </a-menu-item>
+          <a-menu-item key="relation-trigger" @click="navigateTo('/config/relation-trigger')">
+            <template #icon><ThunderboltOutlined /></template>
+            <span>{{ t('menu.relationTrigger') }}</span>
           </a-menu-item>
         </a-sub-menu>
         
@@ -179,7 +191,12 @@ import {
   DownOutlined,
   AppstoreOutlined,
   DashboardOutlined,
-  DatabaseOutlined
+  DatabaseOutlined,
+  NodeIndexOutlined,
+  ThunderboltOutlined,
+  BranchOutlined,
+  HddOutlined,
+  CloudServerOutlined
 } from '@ant-design/icons-vue'
 
 const { t } = useI18n()
@@ -199,7 +216,10 @@ const menuMap: Record<string, { parent: string; title: string }> = {
   '/cmdb/instance': { parent: t('menu.cmdb'), title: t('menu.instance') },
   '/cmdb/search': { parent: t('menu.cmdb'), title: t('menu.search') },
   '/cmdb/history': { parent: t('menu.cmdb'), title: t('menu.history') },
+  '/cmdb/topology': { parent: t('menu.cmdb'), title: t('menu.topology') },
   '/config/model': { parent: t('menu.config'), title: t('menu.model') },
+  '/config/relation-type': { parent: t('menu.config'), title: t('menu.relationType') },
+  '/config/relation-trigger': { parent: t('menu.config'), title: t('menu.relationTrigger') },
   '/system/user': { parent: t('menu.system'), title: t('menu.user') },
   '/system/department': { parent: t('menu.system'), title: t('menu.department') },
   '/system/role': { parent: t('menu.system'), title: t('menu.role') },
@@ -236,8 +256,17 @@ const updateSelectedKeys = () => {
   } else if (path.includes('/cmdb/history')) {
     selectedKeys.value = ['history']
     openKeys.value = ['cmdb']
+  } else if (path.includes('/cmdb/topology')) {
+    selectedKeys.value = ['topology']
+    openKeys.value = ['cmdb']
   } else if (path.includes('/config/model')) {
     selectedKeys.value = ['model']
+    openKeys.value = ['config']
+  } else if (path.includes('/config/relation-type')) {
+    selectedKeys.value = ['relation-type']
+    openKeys.value = ['config']
+  } else if (path.includes('/config/relation-trigger')) {
+    selectedKeys.value = ['relation-trigger']
     openKeys.value = ['config']
   } else if (path.includes('/system/user')) {
     selectedKeys.value = ['user']
