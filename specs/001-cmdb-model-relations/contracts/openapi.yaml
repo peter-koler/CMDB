@@ -1,0 +1,553 @@
+openapi: 3.0.3
+info:
+  title: CMDB Model Relations API
+  description: API for managing CMDB model relationship types and CI instance relationships
+  version: 1.0.0
+  contact:
+    name: CMDB Team
+
+servers:
+  - url: /api
+    description: API Base Path
+
+tags:
+  - name: Model Relation Types
+    description: Schema-level relationship type definitions
+  - name: CI Relations
+    description: Instance-level CI relationships
+  - name: Relationship Queries
+    description: Query and traversal operations
+
+paths:
+  /model-relation-types:
+    get:
+      summary: List all model relationship types
+      description: Retrieve all relationship type definitions with optional filtering
+      tags:
+        - Model Relation Types
+      parameters:
+        - name: source_model_id
+          in: query
+          schema:
+            type: integer
+          description: Filter by source model ID
+        - name: target_model_id
+          in: query
+          schema:
+            type: integer
+          description: Filter by target model ID
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+          description: Page number for pagination
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            default: 20
+          description: Items per page
+      responses:
+        '200':
+          description: List of relationship types
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ModelRelationType'
+                  total:
+                    type: integer
+                  page:
+                    type: integer
+                  per_page:
+                    type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    
+    post:
+      summary: Create a new relationship type
+      description: Define a new type of relationship between two models
+      tags:
+        - Model Relation Types
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ModelRelationTypeCreate'
+      responses:
+        '201':
+          description: Relationship type created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelRelationType'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /model-relation-types/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+    
+    get:
+      summary: Get relationship type by ID
+      tags:
+        - Model Relation Types
+      responses:
+        '200':
+          description: Relationship type details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelRelationType'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    
+    put:
+      summary: Update relationship type
+      description: Update metadata (name changes require no existing relationships)
+      tags:
+        - Model Relation Types
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ModelRelationTypeUpdate'
+      responses:
+        '200':
+          description: Relationship type updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelRelationType'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Cannot modify - existing relationships prevent changes
+    
+    delete:
+      summary: Delete relationship type
+      description: Soft delete - prevents new relationships but keeps existing ones
+      tags:
+        - Model Relation Types
+      responses:
+        '204':
+          description: Relationship type deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Cannot delete - existing relationships must be removed first
+
+  /ci-instances/{ci_id}/relations:
+    parameters:
+      - name: ci_id
+        in: path
+        required: true
+        schema:
+          type: integer
+    
+    get:
+      summary: Get all relations for a CI
+      description: Retrieve relationships where CI is source, target, or both
+      tags:
+        - Relationship Queries
+      parameters:
+        - name: direction
+          in: query
+          schema:
+            type: string
+            enum: [outgoing, incoming, both]
+            default: both
+          description: Filter by relationship direction
+        - name: relation_type_id
+          in: query
+          schema:
+            type: integer
+          description: Filter by specific relationship type
+      responses:
+        '200':
+          description: List of relationships
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  outgoing:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CiRelation'
+                  incoming:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CiRelation'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /ci-instances/{ci_id}/related:
+    parameters:
+      - name: ci_id
+        in: path
+        required: true
+        schema:
+          type: integer
+    
+    get:
+      summary: Get related CIs
+      description: Query CIs related to the given CI with optional filtering
+      tags:
+        - Relationship Queries
+      parameters:
+        - name: direction
+          in: query
+          schema:
+            type: string
+            enum: [outgoing, incoming, both]
+            default: both
+        - name: relation_type_id
+          in: query
+          schema:
+            type: integer
+        - name: depth
+          in: query
+          schema:
+            type: integer
+            default: 1
+            maximum: 5
+          description: Traversal depth for impact analysis
+      responses:
+        '200':
+          description: Tree of related CIs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RelatedCiTree'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /ci-relations:
+    post:
+      summary: Create CI relationship
+      description: Create a relationship between two CI instances
+      tags:
+        - CI Relations
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CiRelationCreate'
+      responses:
+        '201':
+          description: Relationship created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CiRelation'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Cardinality constraint violated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /ci-relations/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+    
+    get:
+      summary: Get relationship by ID
+      tags:
+        - CI Relations
+      responses:
+        '200':
+          description: Relationship details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CiRelation'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    
+    delete:
+      summary: Delete CI relationship
+      description: Remove relationship between CIs
+      tags:
+        - CI Relations
+      responses:
+        '204':
+          description: Relationship deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /ci-relations/validate:
+    post:
+      summary: Validate relationship creation
+      description: Check if a relationship can be created without actually creating it
+      tags:
+        - CI Relations
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CiRelationCreate'
+      responses:
+        '200':
+          description: Validation result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  valid:
+                    type: boolean
+                  errors:
+                    type: array
+                    items:
+                      type: string
+
+components:
+  schemas:
+    ModelRelationType:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+          example: "hosts"
+        reverse_name:
+          type: string
+          example: "runs on"
+        source_model_id:
+          type: integer
+        target_model_id:
+          type: integer
+        source_model:
+          $ref: '#/components/schemas/ModelSummary'
+        target_model:
+          $ref: '#/components/schemas/ModelSummary'
+        cardinality:
+          type: string
+          enum: [ONE_TO_ONE, ONE_TO_MANY, MANY_TO_ONE, MANY_TO_MANY]
+        on_delete:
+          type: string
+          enum: [CASCADE, RESTRICT, SET_NULL]
+          default: RESTRICT
+        description:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        created_by:
+          type: integer
+
+    ModelRelationTypeCreate:
+      type: object
+      required:
+        - name
+        - reverse_name
+        - source_model_id
+        - target_model_id
+        - cardinality
+      properties:
+        name:
+          type: string
+          maxLength: 100
+        reverse_name:
+          type: string
+          maxLength: 100
+        source_model_id:
+          type: integer
+        target_model_id:
+          type: integer
+        cardinality:
+          type: string
+          enum: [ONE_TO_ONE, ONE_TO_MANY, MANY_TO_ONE, MANY_TO_MANY]
+        on_delete:
+          type: string
+          enum: [CASCADE, RESTRICT, SET_NULL]
+        description:
+          type: string
+
+    ModelRelationTypeUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 100
+        reverse_name:
+          type: string
+          maxLength: 100
+        on_delete:
+          type: string
+          enum: [CASCADE, RESTRICT, SET_NULL]
+        description:
+          type: string
+
+    CiRelation:
+      type: object
+      properties:
+        id:
+          type: integer
+        source_ci_id:
+          type: integer
+        target_ci_id:
+          type: integer
+        source_ci:
+          $ref: '#/components/schemas/CiSummary'
+        target_ci:
+          $ref: '#/components/schemas/CiSummary'
+        relation_type_id:
+          type: integer
+        relation_type:
+          $ref: '#/components/schemas/ModelRelationType'
+        metadata:
+          type: object
+        created_at:
+          type: string
+          format: date-time
+        created_by:
+          type: integer
+
+    CiRelationCreate:
+      type: object
+      required:
+        - source_ci_id
+        - target_ci_id
+        - relation_type_id
+      properties:
+        source_ci_id:
+          type: integer
+        target_ci_id:
+          type: integer
+        relation_type_id:
+          type: integer
+        metadata:
+          type: object
+
+    RelatedCiTree:
+      type: object
+      properties:
+        ci_id:
+          type: integer
+        relations:
+          type: array
+          items:
+            type: object
+            properties:
+              related_ci:
+                $ref: '#/components/schemas/CiSummary'
+              relation:
+                $ref: '#/components/schemas/CiRelation'
+              direction:
+                type: string
+                enum: [outgoing, incoming]
+              depth:
+                type: integer
+              downstream:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RelatedCiTree'
+
+    ModelSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        code:
+          type: string
+
+    CiSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        code:
+          type: string
+        model_id:
+          type: integer
+        model_name:
+          type: string
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+
+  responses:
+    Unauthorized:
+      description: Authentication required
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    
+    BadRequest:
+      description: Invalid request data
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    
+    Conflict:
+      description: Resource already exists
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+security:
+  - bearerAuth: []

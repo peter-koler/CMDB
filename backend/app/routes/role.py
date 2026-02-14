@@ -3,7 +3,7 @@ from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 from app.models.role import Role, UserRole
 from app.models.user import User
 from app import db
-from app.utils.decorators import log_operation
+from app.routes.auth import log_operation
 
 role_bp = Blueprint('role', __name__, url_prefix='/api/v1/roles')
 

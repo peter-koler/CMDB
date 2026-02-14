@@ -28,13 +28,22 @@ def get_user_data_scope():
     if user.role == 'admin':
         return 'all'
     
+    scopes = set()
     user_roles = UserRole.query.filter_by(user_id=user.id).all()
     for ur in user_roles:
         role = Role.query.get(ur.role_id)
         if role:
             data_perms = role.get_data_permissions()
             scope = data_perms.get('scope', 'self')
-            return scope
+            scopes.add(scope)
+    
+    # 权限优先级: all > department_and_children > department > self
+    if 'all' in scopes:
+        return 'all'
+    if 'department_and_children' in scopes:
+        return 'department_and_children'
+    if 'department' in scopes:
+        return 'department'
     
     return 'self'
 

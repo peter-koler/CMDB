@@ -14,12 +14,8 @@
       :label-col="{ span: 6 }"
       :wrapper-col="{ span: 18 }"
     >
-      <!-- 基本信息 -->
       <a-form-item label="CI编码" name="code">
         <a-input v-model:value="formState.code" disabled />
-      </a-form-item>
-      <a-form-item label="CI名称" name="name">
-        <a-input v-model:value="formState.name" placeholder="请输入CI名称" />
       </a-form-item>
       <a-form-item label="所属部门" name="department_id">
         <a-tree-select
@@ -33,23 +29,26 @@
       </a-form-item>
 
       <!-- 动态字段 -->
-      <div v-for="region in modelRegions" :key="region.id">
-        <a-divider orientation="left">{{ region.name }}</a-divider>
+      <div v-if="modelFields.length === 0" style="padding: 16px; color: #999;">
+        暂无属性字段配置
+      </div>
+      <div v-else>
+        <a-divider orientation="left">属性信息</a-divider>
         <a-row :gutter="16">
-          <a-col v-for="field in getRegionFields(region.id)" :key="field.id" :span="field.layout === '2' ? 24 : 12">
-            <a-form-item :label="field.name" :required="field.is_required">
+          <a-col v-for="field in modelFields" :key="field.id" :span="field.span || 12">
+            <a-form-item :label="field.name" :required="field.required">
               <!-- 文本输入 -->
               <a-input
                 v-if="field.field_type === 'text'"
                 v-model:value="formState.attribute_values[field.code]"
-                :placeholder="`请输入${field.name}`"
+                :placeholder="field.placeholder || `请输入${field.name}`"
               />
               
               <!-- 数字输入 -->
               <a-input-number
                 v-else-if="field.field_type === 'number'"
                 v-model:value="formState.attribute_values[field.code]"
-                :placeholder="`请输入${field.name}`"
+                :placeholder="field.placeholder || `请输入${field.name}`"
                 style="width: 100%"
               />
               
@@ -63,28 +62,28 @@
               <a-input-password
                 v-else-if="field.field_type === 'password'"
                 v-model:value="formState.attribute_values[field.code]"
-                :placeholder="`请输入${field.name}`"
+                :placeholder="field.placeholder || `请输入${field.name}`"
               />
               
               <!-- IP地址 -->
               <a-input
                 v-else-if="field.field_type === 'ip'"
                 v-model:value="formState.attribute_values[field.code]"
-                :placeholder="`请输入${field.name}，如：192.168.1.1`"
+                :placeholder="field.placeholder || `请输入${field.name}，如：192.168.1.1`"
               />
               
               <!-- URL -->
               <a-input
                 v-else-if="field.field_type === 'url'"
                 v-model:value="formState.attribute_values[field.code]"
-                :placeholder="`请输入${field.name}，如：https://example.com`"
+                :placeholder="field.placeholder || `请输入${field.name}，如：https://example.com`"
               />
               
               <!-- 下拉选择 -->
               <a-select
                 v-else-if="field.field_type === 'select'"
                 v-model:value="formState.attribute_values[field.code]"
-                :placeholder="`请选择${field.name}`"
+                :placeholder="field.placeholder || `请选择${field.name}`"
                 allowClear
               >
                 <a-select-option v-for="opt in getFieldOptions(field)" :key="opt.value" :value="opt.value">
@@ -96,7 +95,7 @@
               <a-select
                 v-else-if="field.field_type === 'multiselect'"
                 v-model:value="formState.attribute_values[field.code]"
-                :placeholder="`请选择${field.name}`"
+                :placeholder="field.placeholder || `请选择${field.name}`"
                 mode="multiple"
                 allowClear
               >
@@ -110,7 +109,7 @@
                 v-else-if="field.field_type === 'cascade'"
                 v-model:value="formState.attribute_values[field.code]"
                 :options="getFieldOptions(field)"
-                :placeholder="`请选择${field.name}`"
+                :placeholder="field.placeholder || `请选择${field.name}`"
                 :load-data="(selectedOptions: any) => loadCascadeData(selectedOptions, field)"
               />
               
@@ -118,7 +117,7 @@
               <a-select
                 v-else-if="field.field_type === 'reference'"
                 v-model:value="formState.attribute_values[field.code]"
-                :placeholder="`请选择${field.name}`"
+                :placeholder="field.placeholder || `请选择${field.name}`"
                 show-search
                 :filter-option="false"
                 @search="(val: string) => handleReferenceSearch(val, field)"
@@ -189,7 +188,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, watch, onMounted } from 'vue'
+import { ref, reactive, watch, onMounted, computed } from 'vue'
 import { message } from 'ant-design-vue'
 import { PlusOutlined, UploadOutlined } from '@ant-design/icons-vue'
 import dayjs from 'dayjs'
@@ -219,17 +218,14 @@ const formRef = ref()
 const formState = reactive({
   id: null as number | null,
   code: '',
-  name: '',
   department_id: null as number | null,
   attribute_values: {} as Record<string, any>
 })
 
 const formRules = {
-  name: [{ required: true, message: '请输入CI名称' }],
   code: [{ required: true, message: 'CI编码不能为空' }]
 }
 
-const modelRegions = ref<any[]>([])
 const modelFields = ref<any[]>([])
 const departmentTree = ref<any[]>([])
 const referenceOptions = ref<Record<number, any[]>>({})
@@ -246,26 +242,27 @@ watch(() => props.modelId, (val) => {
   }
 })
 
+watch(() => props.visible, (val) => {
+  if (val) {
+    initForm()
+  }
+})
+
 onMounted(() => {
   fetchDepartments()
 })
 
 const initForm = async () => {
   if (props.instance) {
-    // 编辑模式
     formState.id = props.instance.id
     formState.code = props.instance.code
-    formState.name = props.instance.name
     formState.department_id = props.instance.department_id
-    formState.attribute_values = { ...props.instance.attribute_values }
+    formState.attribute_values = { ...props.instance.attributes, ...props.instance.attribute_values }
   } else {
-    // 新增模式
     formState.id = null
-    formState.name = ''
     formState.department_id = null
     formState.attribute_values = {}
     
-    // 生成编码
     try {
       const res = await generateCICode()
       if (res.code === 200) {
@@ -276,7 +273,6 @@ const initForm = async () => {
     }
   }
   
-  // 获取模型详情以渲染表单
   if (props.modelId) {
     fetchModelDetail()
   }
@@ -288,8 +284,39 @@ const fetchModelDetail = async () => {
   try {
     const res = await getModelDetail(props.modelId)
     if (res.code === 200) {
-      modelRegions.value = res.data.regions || []
-      modelFields.value = res.data.fields || []
+      // 优先使用 form_config（模型设计器配置）
+      let formConfig = res.data.form_config
+      if (formConfig) {
+        // form_config 可能是双重编码的字符串
+        if (typeof formConfig === 'string') {
+          formConfig = JSON.parse(formConfig)
+        }
+        if (typeof formConfig === 'string') {
+          formConfig = JSON.parse(formConfig)
+        }
+      } else {
+        formConfig = []
+      }
+      
+      if (formConfig.length > 0) {
+        // 从 form_config 解析字段
+        const fields = formConfig.map((item: any, index: number) => ({
+          id: item.id || `field_${index}`,
+          code: item.props?.code || item.id,
+          name: item.props?.label || item.props?.code || '',
+          field_type: mapControlTypeToFieldType(item.controlType),
+          required: item.props?.required || false,
+          default_value: item.props?.defaultValue || '',
+          placeholder: item.props?.placeholder || '',
+          span: item.props?.span || 12,
+          sort_order: index
+        }))
+        
+        modelFields.value = fields
+      } else {
+        // 使用传统的 regions/fields
+        modelFields.value = res.data.fields || []
+      }
       
       // 设置默认值
       modelFields.value.forEach(field => {
@@ -303,6 +330,26 @@ const fetchModelDetail = async () => {
   }
 }
 
+// 将控件类型映射为字段类型
+const mapControlTypeToFieldType = (controlType: string): string => {
+  const typeMap: Record<string, string> = {
+    'text': 'text',
+    'textarea': 'text',
+    'number': 'number',
+    'date': 'date',
+    'datetime': 'datetime',
+    'select': 'select',
+    'radio': 'select',
+    'checkbox': 'multiselect',
+    'switch': 'boolean',
+    'user': 'user',
+    'reference': 'reference',
+    'image': 'image',
+    'file': 'file'
+  }
+  return typeMap[controlType] || 'text'
+}
+
 const fetchDepartments = async () => {
   try {
     const res = await getDepartments()
@@ -312,10 +359,6 @@ const fetchDepartments = async () => {
   } catch (error) {
     console.error(error)
   }
-}
-
-const getRegionFields = (regionId: number) => {
-  return modelFields.value.filter(field => field.region_id === regionId)
 }
 
 const getFieldOptions = (field: any) => {
@@ -395,7 +438,6 @@ const handleOk = async () => {
     await formRef.value.validate()
     loading.value = true
     
-    // 转换日期格式
     const attributeValues = { ...formState.attribute_values }
     for (const key in attributeValues) {
       if (dayjs.isDayjs(attributeValues[key])) {
@@ -405,7 +447,6 @@ const handleOk = async () => {
     
     const data = {
       model_id: props.modelId,
-      name: formState.name,
       department_id: formState.department_id,
       attribute_values: attributeValues
     }

@@ -31,6 +31,8 @@ export default {
     dashboard: '首页',
     cmdb: 'CMDB',
     instance: '配置仓库',
+    search: '全文搜索',
+    history: '变更历史',
     config: '配置管理',
     model: '模型管理',
     system: '系统管理',

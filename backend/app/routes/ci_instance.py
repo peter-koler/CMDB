@@ -5,8 +5,9 @@ from app.models.cmdb_model import CmdbModel
 from app.models.model_field import ModelField
 from app.models.department import Department
 from app.models.user import User
+from app.models.cmdb_relation import CmdbRelation, RelationTrigger
 from app import db
-from app.utils.decorators import log_operation
+from app.routes.auth import log_operation
 from app.utils.code_generator import generate_ci_code_v2
 from app.utils.data_permission import filter_by_data_permissions, check_data_permission
 from datetime import datetime
@@ -32,6 +33,68 @@ def require_admin():
     return claims.get('role') == 'admin'
 
 
+def sync_reference_relations(instance, old_values=None):
+    """
+    同步引用属性关系
+    """
+    if not instance.model_id:
+        return
+    
+    # 获取该模型的所有启用的 reference 类型触发器
+    triggers = RelationTrigger.query.filter_by(
+        source_model_id=instance.model_id,
+        trigger_type='reference',
+        is_active=True
+    ).all()
+    
+    new_values = instance.get_attribute_values()
+    
+    for trigger in triggers:
+        try:
+            condition = json.loads(trigger.trigger_condition) if trigger.trigger_condition else {}
+            source_field = condition.get('source_field')
+            
+            if not source_field:
+                continue
+            
+            old_val = old_values.get(source_field) if old_values else None
+            new_val = new_values.get(source_field)
+            
+            # 如果旧值存在且不等于新值，删除旧关系
+            if old_val and str(old_val) != str(new_val):
+                old_rel = CmdbRelation.query.filter_by(
+                    source_ci_id=instance.id,
+                    relation_type_id=trigger.relation_type_id,
+                    source_type='reference'
+                ).first()
+                if old_rel:
+                    old_rel.delete()
+            
+            # 如果新值存在，创建新关系
+            if new_val:
+                # 检查关系是否已存在
+                existing = CmdbRelation.query.filter_by(
+                    source_ci_id=instance.id,
+                    target_ci_id=int(new_val),
+                    relation_type_id=trigger.relation_type_id
+                ).first()
+                
+                if not existing:
+                    try:
+                        relation = CmdbRelation(
+                            source_ci_id=instance.id,
+                            target_ci_id=int(new_val),
+                            relation_type_id=trigger.relation_type_id,
+                            source_type='reference'
+                        )
+                        relation.save()
+                    except Exception:
+                        # 如果关系创建失败（例如约束检查失败），跳过
+                        pass
+        except Exception:
+            continue
+
+
 # ==================== CI实例管理 ====================
 
 @ci_bp.route('', methods=['GET'])
@@ -41,29 +104,27 @@ def get_instances():
     model_id = request.args.get('model_id', type=int)
     department_id = request.args.get('department_id', type=int)
     keyword = request.args.get('keyword', '')
+    attr_field = request.args.get('attr_field', '')
+    attr_value = request.args.get('attr_value', '')
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 20, type=int)
     
     query = CiInstance.query
     
-    # 按模型筛选
     if model_id:
         query = query.filter_by(model_id=model_id)
     
-    # 按部门筛选
     if department_id:
         query = query.filter_by(department_id=department_id)
     
-    # 关键词搜索（编码、名称）
     if keyword:
+        query = query.filter(CiInstance.code.contains(keyword))
+    
+    if attr_field and attr_value:
         query = query.filter(
-            db.or_(
-                CiInstance.code.contains(keyword),
-                CiInstance.name.contains(keyword)
-            )
+            CiInstance.attribute_values.contains(f'"{attr_field}": "{attr_value}"')
         )
     
-    # 数据权限过滤
     query = filter_by_data_permissions(query, CiInstance)
     
     pagination = query.order_by(CiInstance.created_at.desc()).paginate(
@@ -95,7 +156,7 @@ def get_instance(id):
     return jsonify({
         'code': 200,
         'message': 'success',
-        'data': instance.to_dict()
+        'data': instance.to_detail_dict()
     })
 
 
@@ -110,23 +171,17 @@ def create_instance():
     if not data.get('model_id'):
         return jsonify({'code': 400, 'message': '请选择模型'}), 400
     
-    if not data.get('name'):
-        return jsonify({'code': 400, 'message': 'CI名称不能为空'}), 400
-    
-    # 检查模型是否存在
     model = CmdbModel.query.get(data['model_id'])
     if not model:
         return jsonify({'code': 400, 'message': '模型不存在'}), 400
     
-    # 生成唯一编码
     code = generate_ci_code_v2()
     
-    # 验证属性值
     attribute_values = data.get('attribute_values', {})
     
     instance = CiInstance(
         model_id=data['model_id'],
-        name=data['name'],
+        name=code,
         code=code,
         department_id=data.get('department_id'),
         created_by=int(identity),
@@ -135,12 +190,13 @@ def create_instance():
     instance.set_attribute_values(attribute_values)
     instance.save()
     
-    # 记录变更历史
-    _log_ci_history(instance.id, 'CREATE', None, None, identity, claims.get('username'))
+    # 同步引用属性关系
+    sync_reference_relations(instance)
     
-    # 记录操作日志
+    _log_ci_history(instance.id, 'CREATE', None, None, None, identity, claims.get('username'))
+    
     log_operation(int(identity), claims.get('username'), 'CREATE', 'ci_instance', instance.id, 
-                  f'创建CI: {instance.name} ({instance.code})')
+                  f'创建CI: {instance.code}')
     
     return jsonify({
         'code': 200,
@@ -158,37 +214,32 @@ def update_instance(id):
     identity = get_jwt_identity()
     claims = get_jwt()
     
-    # 权限检查
     if not check_data_permission(instance, int(identity)):
         return jsonify({'code': 403, 'message': '无权限编辑此CI'}), 403
     
-    # 记录旧值
     old_values = instance.get_attribute_values()
     
-    # 更新字段
-    if 'name' in data:
-        instance.name = data['name']
     if 'department_id' in data:
         instance.department_id = data['department_id']
     
-    # 更新属性值
     if 'attribute_values' in data:
         new_values = data['attribute_values']
         instance.set_attribute_values(new_values)
         
-        # 记录每个变更的属性
         for key, new_val in new_values.items():
             old_val = old_values.get(key)
             if old_val != new_val:
                 _log_ci_history(instance.id, 'UPDATE', key, str(old_val), str(new_val), 
-                              identity, claims.get('username'))
+                              int(identity), claims.get('username'))
     
     instance.updated_by = int(identity)
     instance.save()
     
-    # 记录操作日志
+    # 同步引用属性关系
+    sync_reference_relations(instance, old_values)
+    
     log_operation(int(identity), claims.get('username'), 'UPDATE', 'ci_instance', instance.id, 
-                  f'更新CI: {instance.name} ({instance.code})')
+                  f'更新CI: {instance.code}')
     
     return jsonify({
         'code': 200,
@@ -209,8 +260,18 @@ def delete_instance(id):
     if not check_data_permission(instance, int(identity)):
         return jsonify({'code': 403, 'message': '无权限删除此CI'}), 403
     
+    # 检查是否有关联的关系
+    out_relations_count = CmdbRelation.query.filter_by(source_ci_id=id).count()
+    in_relations_count = CmdbRelation.query.filter_by(target_ci_id=id).count()
+    
+    if out_relations_count + in_relations_count > 0:
+        # 删除所有关联的关系
+        CmdbRelation.query.filter_by(source_ci_id=id).delete()
+        CmdbRelation.query.filter_by(target_ci_id=id).delete()
+        db.session.commit()
+    
     # 记录变更历史
-    _log_ci_history(instance.id, 'DELETE', None, None, identity, claims.get('username'))
+    _log_ci_history(instance.id, 'DELETE', None, None, None, identity, claims.get('username'))
     
     instance_code = instance.code
     instance_name = instance.name
@@ -272,7 +333,7 @@ def batch_update():
         attr_values = instance.get_attribute_values()
         for key, value in updates.items():
             attr_values[key] = value
-            _log_ci_history(instance.id, 'UPDATE', key, None, str(value), identity, claims.get('username'))
+            _log_ci_history(instance.id, 'UPDATE', key, None, str(value), int(identity), claims.get('username'))
         
         instance.set_attribute_values(attr_values)
         instance.updated_by = int(identity)
@@ -312,7 +373,7 @@ def batch_delete():
         if not require_admin() and instance.created_by != int(identity):
             continue
         
-        _log_ci_history(instance.id, 'DELETE', None, None, identity, claims.get('username'))
+        _log_ci_history(instance.id, 'DELETE', None, None, None, int(identity), claims.get('username'))
         instance.delete()
         deleted_count += 1
     
@@ -332,16 +393,52 @@ def batch_delete():
 @jwt_required()
 def get_instance_history(ci_id):
     """获取CI变更历史"""
+    identity = get_jwt_identity()
     instance = CiInstance.query.get_or_404(ci_id)
     
     # 权限检查
     if not require_admin() and instance.created_by != int(identity):
         return jsonify({'code': 403, 'message': '无权限查看此CI历史'}), 403
     
+    query = CiHistory.query.filter_by(ci_id=ci_id)
+    histories = query.order_by(CiHistory.created_at.desc()).all()
+    
+    return jsonify({
+        'code': 200,
+        'message': 'success',
+        'data': [h.to_dict() for h in histories]
+    })
+
+
+@ci_bp.route('/history', methods=['GET'])
+@jwt_required()
+def get_all_history():
+    """获取所有CI变更历史（支持筛选）"""
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 20, type=int)
+    operator_id = request.args.get('operator_id', type=int)
+    ci_id = request.args.get('ci_id', type=int)
+    operation = request.args.get('operation', type=str)
+    date_from = request.args.get('date_from', type=str)
+    date_to = request.args.get('date_to', type=str)
     
-    query = CiHistory.query.filter_by(ci_id=ci_id)
+    query = CiHistory.query
+    
+    if ci_id:
+        query = query.filter_by(ci_id=ci_id)
+    
+    if operator_id:
+        query = query.filter_by(operator_id=operator_id)
+    
+    if operation:
+        query = query.filter_by(operation=operation)
+    
+    if date_from:
+        query = query.filter(CiHistory.created_at >= datetime.fromisoformat(date_from))
+    
+    if date_to:
+        query = query.filter(CiHistory.created_at <= datetime.fromisoformat(date_to))
+    
     pagination = query.order_by(CiHistory.created_at.desc()).paginate(
         page=page, per_page=per_page, error_out=False
     )

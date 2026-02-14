@@ -38,9 +38,8 @@ class CiInstance(db.Model):
         return {
             'id': self.id,
             'model_id': self.model_id,
-            'name': self.name,
             'code': self.code,
-            'attribute_values': self.get_attribute_values(),
+            'attributes': self.get_attribute_values(),
             'department_id': self.department_id,
             'created_by': self.created_by,
             'updated_by': self.updated_by,
@@ -52,28 +51,44 @@ class CiInstance(db.Model):
             'creator_name': self.creator.username if self.creator else None
         }
     
+    def to_detail_dict(self):
+        """详情展示用的字典，包含完整的模型信息"""
+        data = self.to_dict()
+        if self.model:
+            data['model'] = {
+                'id': self.model.id,
+                'name': self.model.name,
+                'code': self.model.code,
+                'icon': self.model.icon,
+                'form_config': self.model.form_config,
+                'fields': [{'id': f.id, 'code': f.code, 'name': f.name, 'field_type': f.field_type} 
+                          for f in self.model.fields] if self.model.fields else []
+            }
+        if self.department:
+            data['department'] = {
+                'id': self.department.id,
+                'name': self.department.name
+            }
+        if self.creator:
+            data['creator'] = {
+                'id': self.creator.id,
+                'username': self.creator.username
+            }
+        return data
+    
     def to_list_dict(self, fields=None):
         """列表展示用的简化字典"""
         data = {
             'id': self.id,
             'code': self.code,
-            'name': self.name,
             'model_id': self.model_id,
             'model_name': self.model.name if self.model else None,
             'department_id': self.department_id,
             'department_name': self.department.name if self.department else None,
             'created_at': self.created_at.isoformat() if self.created_at else None,
-            'creator_name': self.creator.username if self.creator else None
+            'creator_name': self.creator.username if self.creator else None,
+            'attributes': self.get_attribute_values()
         }
-        
-        # 如果指定了字段，添加前3个属性字段
-        if fields and self.model:
-            attr_values = self.get_attribute_values()
-            model_fields = self.model.fields.order_by('sort_order').limit(3).all()
-            for field in model_fields:
-                field_code = field.code
-                if field_code in attr_values:
-                    data[field_code] = attr_values[field_code]
         
         return data
     
@@ -108,6 +123,11 @@ class CiHistory(db.Model):
         return {
             'id': self.id,
             'ci_id': self.ci_id,
+            'ci': {
+                'id': self.ci_id,
+                'name': self.ci.name if self.ci else None,
+                'code': self.ci.code if self.ci else None
+            } if self.ci else None,
             'operation': self.operation,
             'attribute_name': self.attribute_name,
             'old_value': self.old_value,
@@ -123,45 +143,7 @@ class CiHistory(db.Model):
         db.session.commit()
 
 
-class CiRelation(db.Model):
-    __tablename__ = 'ci_relations'
-    
-    id = db.Column(db.Integer, primary_key=True)
-    source_ci_id = db.Column(db.Integer, db.ForeignKey('ci_instances.id'), nullable=False)
-    target_ci_id = db.Column(db.Integer, db.ForeignKey('ci_instances.id'), nullable=False)
-    relation_type = db.Column(db.String(50), nullable=False)  # contain/depend/parent/associate
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    
-    # 关联
-    source_ci = db.relationship('CiInstance', foreign_keys=[source_ci_id], backref='source_relations')
-    target_ci = db.relationship('CiInstance', foreign_keys=[target_ci_id], backref='target_relations')
-    
-    __table_args__ = (
-        db.UniqueConstraint('source_ci_id', 'target_ci_id', 'relation_type', name='unique_ci_relation'),
-    )
-    
-    def to_dict(self):
-        return {
-            'id': self.id,
-            'source_ci_id': self.source_ci_id,
-            'target_ci_id': self.target_ci_id,
-            'relation_type': self.relation_type,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'source_ci': {
-                'id': self.source_ci.id,
-                'name': self.source_ci.name,
-                'code': self.source_ci.code
-            } if self.source_ci else None,
-            'target_ci': {
-                'id': self.target_ci.id,
-                'name': self.target_ci.name,
-                'code': self.target_ci.code
-            } if self.target_ci else None
-        }
-    
-    def save(self):
-        db.session.add(self)
-        db.session.commit()
+
 
 
 class CodeSequence(db.Model):

@@ -43,8 +43,8 @@ class CmdbModel(db.Model):
     
     def to_full_dict(self):
         data = self.to_dict()
-        data['regions'] = [region.to_dict() for region in self.regions.order_by(ModelRegion.sort_order)]
-        data['fields'] = [field.to_dict() for field in self.fields.order_by(ModelField.sort_order)]
+        data['regions'] = [region.to_dict() for region in self.regions]
+        data['fields'] = [field.to_dict() for field in self.fields]
         return data
     
     def save(self):

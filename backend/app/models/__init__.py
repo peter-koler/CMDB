@@ -8,11 +8,13 @@ from app.models.model_region import ModelRegion
 from app.models.model_field import ModelField
 from app.models.department import Department, DepartmentUser
 from app.models.role import Role, UserRole
-from app.models.ci_instance import CiInstance, CiHistory, CiRelation, CodeSequence
+from app.models.ci_instance import CiInstance, CiHistory, CodeSequence
+from app.models.cmdb_relation import RelationType, CmdbRelation, RelationTrigger
 
 __all__ = [
     'User', 'SystemConfig', 'OperationLog', 'PasswordHistory',
     'ModelCategory', 'CmdbModel', 'ModelType', 'ModelRegion', 'ModelField',
     'Department', 'DepartmentUser', 'Role', 'UserRole',
-    'CiInstance', 'CiHistory', 'CiRelation', 'CodeSequence'
+    'CiInstance', 'CiHistory', 'CodeSequence',
+    'RelationType', 'CmdbRelation', 'RelationTrigger'
 ]

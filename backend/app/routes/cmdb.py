@@ -297,7 +297,6 @@ def get_models():
 
 @cmdb_bp.route('/models/<int:id>', methods=['GET'])
 @token_required
-@admin_required
 def get_model_detail(id):
     """获取模型详情"""
     model = CmdbModel.query.get_or_404(id)
@@ -386,6 +385,12 @@ def update_model(id):
 def delete_model(id):
     """删除模型"""
     model = CmdbModel.query.get_or_404(id)
+    
+    # 检查是否有关联的CI实例
+    count = CiInstance.query.filter_by(model_id=id).count()
+    if count > 0:
+        return jsonify({'code': 400, 'message': f'该模型下存在{count}个CI实例，无法删除'}), 400
+    
     model.delete()
     
     return jsonify({

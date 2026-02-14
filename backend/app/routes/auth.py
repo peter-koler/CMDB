@@ -111,7 +111,7 @@ def login():
     
     access_token = create_access_token(
         identity=str(user.id),
-        additional_claims={'username': user.username, 'role': user.role},
+        additional_claims={'username': user.username, 'role': 'admin' if user.is_admin else 'user'},
         expires_delta=timedelta(minutes=access_token_expires)
     )
     refresh_token = create_refresh_token(
@@ -132,7 +132,7 @@ def login():
             'user': {
                 'id': user.id,
                 'username': user.username,
-                'role': user.role,
+                'role': 'admin' if user.is_admin else 'user',
                 'email': user.email
             }
         }
@@ -162,7 +162,7 @@ def refresh():
     
     access_token = create_access_token(
         identity=str(user.id),
-        additional_claims={'username': user.username, 'role': user.role},
+        additional_claims={'username': user.username, 'role': 'admin' if user.is_admin else 'user'},
         expires_delta=timedelta(minutes=access_token_expires)
     )
     
@@ -185,24 +185,33 @@ def get_current_user():
     if not user or user.deleted_at:
         return jsonify({'code': 404, 'message': '用户不存在'}), 404
     
-    permissions = []
-    if user.role == 'admin':
-        permissions = ['user:create', 'user:view', 'user:update', 'user:delete', 
-                       'config:view', 'config:update', 'log:view', 'log:export']
+    permissions = set()
+    if user.is_admin:
+        permissions.add('*')
+        permissions.update(['user:create', 'user:view', 'user:update', 'user:delete', 
+                       'config:view', 'config:update', 'log:view', 'log:export',
+                       'model:view', 'instance:view', 'department:view', 'role:view'])
     else:
-        permissions = ['user:view', 'log:view']
+        permissions.update(['user:view', 'log:view'])
+    
+    # Merge permissions from roles
+    for ur in user.role_links:
+        if ur.role:
+            for p in ur.role.get_menu_permissions():
+                permissions.add(p)
     
     return jsonify({
         'code': 200,
         'data': {
             'id': user.id,
             'username': user.username,
-            'role': user.role,
+            'role': 'admin' if user.is_admin else 'user',
+            'permissions': list(permissions),
+            'department_id': user.department_id,
+            'department_name': user.department.name if user.department else None,
             'email': user.email,
             'phone': user.phone,
-            'department': user.department,
-            'last_password_change': user.last_password_change.isoformat() if user.last_password_change else None,
-            'permissions': permissions
+            'avatar': None
         }
     })
 

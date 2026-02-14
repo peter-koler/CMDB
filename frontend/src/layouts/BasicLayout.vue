@@ -27,30 +27,35 @@
           <template #icon><DashboardOutlined /></template>
           <span>{{ t('menu.dashboard') }}</span>
         </a-menu-item>
+        
         <a-sub-menu key="cmdb">
-          <template #icon>
-            <CloudServerOutlined />
-          </template>
+          <template #icon><CloudServerOutlined /></template>
           <template #title>{{ t('menu.cmdb') }}</template>
           <a-menu-item key="instance" @click="navigateTo('/cmdb/instance')">
             <template #icon><HddOutlined /></template>
             <span>{{ t('menu.instance') }}</span>
           </a-menu-item>
+          <a-menu-item key="search" @click="navigateTo('/cmdb/search')">
+            <template #icon><SearchOutlined /></template>
+            <span>{{ t('menu.search') }}</span>
+          </a-menu-item>
+          <a-menu-item key="history" @click="navigateTo('/cmdb/history')">
+            <template #icon><HistoryOutlined /></template>
+            <span>{{ t('menu.history') }}</span>
+          </a-menu-item>
         </a-sub-menu>
-        <a-sub-menu key="config" v-role="'admin'">
-          <template #icon>
-            <AppstoreOutlined />
-          </template>
+        
+        <a-sub-menu key="config" v-if="userInfo?.role === 'admin'">
+          <template #icon><AppstoreOutlined /></template>
           <template #title>{{ t('menu.config') }}</template>
           <a-menu-item key="model" @click="navigateTo('/config/model')">
             <template #icon><DatabaseOutlined /></template>
             <span>{{ t('menu.model') }}</span>
           </a-menu-item>
         </a-sub-menu>
+        
         <a-sub-menu key="system">
-          <template #icon>
-            <SettingOutlined />
-          </template>
+          <template #icon><SettingOutlined /></template>
           <template #title>{{ t('menu.system') }}</template>
           <a-menu-item key="user" @click="navigateTo('/system/user')">
             <template #icon><UserOutlined /></template>
@@ -162,6 +167,8 @@ import {
   SafetyOutlined,
   ToolOutlined,
   FileSearchOutlined,
+  SearchOutlined,
+  HistoryOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   LogoutOutlined,
@@ -183,13 +190,15 @@ const appStore = useAppStore()
 
 const collapsed = ref(false)
 const selectedKeys = ref<string[]>([])
-const openKeys = ref<string[]>(['system'])
+const openKeys = ref<string[]>([])
 
 const userInfo = computed(() => userStore.userInfo)
 
 const menuMap: Record<string, { parent: string; title: string }> = {
   '/dashboard': { parent: '', title: t('menu.dashboard') },
   '/cmdb/instance': { parent: t('menu.cmdb'), title: t('menu.instance') },
+  '/cmdb/search': { parent: t('menu.cmdb'), title: t('menu.search') },
+  '/cmdb/history': { parent: t('menu.cmdb'), title: t('menu.history') },
   '/config/model': { parent: t('menu.config'), title: t('menu.model') },
   '/system/user': { parent: t('menu.system'), title: t('menu.user') },
   '/system/department': { parent: t('menu.system'), title: t('menu.department') },
@@ -217,14 +226,34 @@ const updateSelectedKeys = () => {
   const path = route.path
   if (path.includes('/dashboard')) {
     selectedKeys.value = ['dashboard']
+    openKeys.value = []
+  } else if (path.includes('/cmdb/instance')) {
+    selectedKeys.value = ['instance']
+    openKeys.value = ['cmdb']
+  } else if (path.includes('/cmdb/search')) {
+    selectedKeys.value = ['search']
+    openKeys.value = ['cmdb']
+  } else if (path.includes('/cmdb/history')) {
+    selectedKeys.value = ['history']
+    openKeys.value = ['cmdb']
   } else if (path.includes('/config/model')) {
     selectedKeys.value = ['model']
+    openKeys.value = ['config']
   } else if (path.includes('/system/user')) {
     selectedKeys.value = ['user']
+    openKeys.value = ['system']
+  } else if (path.includes('/system/department')) {
+    selectedKeys.value = ['department']
+    openKeys.value = ['system']
+  } else if (path.includes('/system/role')) {
+    selectedKeys.value = ['role']
+    openKeys.value = ['system']
   } else if (path.includes('/system/config')) {
     selectedKeys.value = ['system-config']
+    openKeys.value = ['system']
   } else if (path.includes('/system/log')) {
     selectedKeys.value = ['log']
+    openKeys.value = ['system']
   }
 }
 

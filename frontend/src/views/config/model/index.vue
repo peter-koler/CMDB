@@ -141,7 +141,18 @@
       @ok="handleCategorySubmit"
       :confirm-loading="categoryLoading"
     >
-      <a-form :model="categoryForm" :rules="categoryRules" ref="categoryFormRef">
+      <a-form :model="categoryForm" :rules="categoryRules" ref="categoryFormRef" :label-col="{ span: 4 }" :wrapper-col="{ span: 20 }">
+        <a-form-item label="上级目录" name="parent_id">
+          <a-tree-select
+            v-model:value="categoryForm.parent_id"
+            :tree-data="categoryTreeForSelect"
+            :field-names="{ label: 'name', value: 'id', children: 'children' }"
+            placeholder="请选择上级目录（不选则为顶级目录）"
+            allowClear
+            style="width: 100%"
+            :dropdown-style="{ maxHeight: '300px', overflow: 'auto' }"
+          />
+        </a-form-item>
         <a-form-item label="目录名称" name="name">
           <a-input v-model:value="categoryForm.name" placeholder="请输入目录名称" />
         </a-form-item>
@@ -204,7 +215,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, h } from 'vue'
+import { ref, reactive, onMounted, h, computed } from 'vue'
 import { message } from 'ant-design-vue'
 import {
   PlusOutlined,
@@ -230,6 +241,22 @@ const categoryTree = ref<any[]>([])
 const selectedCategoryKeys = ref<string[]>([])
 const expandedKeys = ref<string[]>([])
 const currentCategoryId = ref<number | null>(null)
+
+// 用于选择的目录树（过滤掉当前编辑的目录）
+const categoryTreeForSelect = computed(() => {
+  if (!isEditCategory.value || !categoryForm.id) {
+    return categoryTree.value
+  }
+  const filterTree = (items: any[]): any[] => {
+    return items
+      .filter(item => item.id !== categoryForm.id)
+      .map(item => ({
+        ...item,
+        children: item.children ? filterTree(item.children) : []
+      }))
+  }
+  return filterTree(categoryTree.value)
+})
 
 // 模型类型
 const modelTypes = ref<any[]>([])
@@ -324,6 +351,18 @@ const fetchCategories = async () => {
     const res = await getCategories()
     if (res.code === 200) {
       categoryTree.value = res.data
+      // 自动展开所有目录
+      const getAllIds = (items: any[]): number[] => {
+        const ids: number[] = []
+        items.forEach(item => {
+          ids.push(item.id)
+          if (item.children && item.children.length > 0) {
+            ids.push(...getAllIds(item.children))
+          }
+        })
+        return ids
+      }
+      expandedKeys.value = getAllIds(res.data).map(String)
     }
   } catch (error) {
     console.error(error)

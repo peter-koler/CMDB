@@ -39,8 +39,8 @@
           <a-space wrap>
             <a-input-search
               v-model:value="searchKeyword"
-              placeholder="搜索CI编码或名称"
-              style="width: 250px"
+              placeholder="搜索CI编码"
+              style="width: 200px"
               @search="handleSearch"
             />
             <a-select
@@ -53,6 +53,26 @@
                 {{ dept.name }}
               </a-select-option>
             </a-select>
+            <template v-if="currentModelId && modelFields.length > 0">
+              <a-select
+                v-model:value="attrFilterField"
+                placeholder="选择属性筛选"
+                style="width: 150px"
+                allowClear
+                @change="handleAttrFieldChange"
+              >
+                <a-select-option v-for="field in modelFields" :key="field.code" :value="field.code">
+                  {{ field.name }}
+                </a-select-option>
+              </a-select>
+              <a-input
+                v-if="attrFilterField"
+                v-model:value="attrFilterValue"
+                placeholder="输入属性值"
+                style="width: 150px"
+                @pressEnter="handleSearch"
+              />
+            </template>
             <a-range-picker v-model:value="dateRange" @change="handleSearch" />
             <a-button type="primary" @click="handleSearch">
               <SearchOutlined />
@@ -61,47 +81,40 @@
             <a-button @click="handleReset">重置</a-button>
           </a-space>
           <a-space wrap style="margin-left: auto">
-            <a-button type="primary" @click="handleAdd" :disabled="!currentModelId">
+            <a-button type="primary" @click="handleAdd" v-if="currentModelId">
               <PlusOutlined />
               新增CI
             </a-button>
-            <a-button @click="handleExport" :disabled="!currentModelId || instances.length === 0">
+            <a-button @click="handleExport" v-if="currentModelId && instances.length > 0">
               <ExportOutlined />
               导出
             </a-button>
-            <a-button @click="handleImport" :disabled="!currentModelId">
+            <a-button @click="handleImport" v-if="currentModelId">
               <ImportOutlined />
               导入
             </a-button>
-            <a-button @click="showColumnSetting">
+            <a-button @click="showColumnSetting" v-if="currentModelId && modelFields.length > 0">
               <SettingOutlined />
               列设置
             </a-button>
-            <a-button-group>
-              <a-button :type="viewMode === 'table' ? 'primary' : 'default'" @click="viewMode = 'table'">
-                <TableOutlined />
-              </a-button>
-              <a-button :type="viewMode === 'card' ? 'primary' : 'default'" @click="viewMode = 'card'">
-                <AppstoreOutlined />
-              </a-button>
-            </a-button-group>
           </a-space>
         </a-card>
 
         <!-- 表格视图 -->
-        <a-card v-if="viewMode === 'table'" :bordered="false" class="table-card">
+        <a-card :bordered="false" class="table-card">
           <a-table
             :columns="displayColumns"
             :data-source="instances"
             :loading="loading"
             :pagination="pagination"
-            :row-selection="{ selectedRowKeys: selectedRowKeys, onChange: onSelectChange }"
+            :row-selection="currentModelId ? { selectedRowKeys: selectedRowKeys, onChange: onSelectChange } : undefined"
             @change="handleTableChange"
             row-key="id"
+            :scroll="{ x: 'max-content' }"
           >
             <template #bodyCell="{ column, record }">
-              <template v-if="column.key === 'name'">
-                <a-link @click="handleView(record)">{{ record.name }}</a-link>
+              <template v-if="column.key === 'code'">
+                <a @click="handleView(record)" style="color: #1890ff; cursor: pointer;">{{ record.code }}</a>
               </template>
               <template v-else-if="column.key === 'action'">
                 <a-space>
@@ -126,45 +139,6 @@
             </a-space>
           </div>
         </a-card>
-
-        <!-- 卡片视图 -->
-        <a-card v-else :bordered="false" class="card-view">
-          <a-row :gutter="[16, 16]">
-            <a-col v-for="item in instances" :key="item.id" :xs="24" :sm="12" :md="8" :lg="6">
-              <a-card hoverable class="ci-card" @click="handleView(item)">
-                <div class="ci-card-header">
-                  <a-avatar :size="48" style="background-color: #1890ff">
-                    {{ item.name?.charAt(0)?.toUpperCase() }}
-                  </a-avatar>
-                  <div class="ci-card-info">
-                    <div class="ci-name">{{ item.name }}</div>
-                    <div class="ci-code">{{ item.code }}</div>
-                  </div>
-                </div>
-                <div class="ci-card-body">
-                  <p><span class="label">部门：</span>{{ item.department_name || '-' }}</p>
-                  <p><span class="label">创建人：</span>{{ item.creator_name || '-' }}</p>
-                  <p><span class="label">创建时间：</span>{{ formatDate(item.created_at) }}</p>
-                </div>
-                <template #actions>
-                  <a-button type="link" size="small" @click.stop="handleEdit(item)">编辑</a-button>
-                  <a-button type="link" size="small" @click.stop="handleCopy(item)">复制</a-button>
-                  <a-popconfirm title="确定删除吗？" @confirm.stop="handleDelete(item)">
-                    <a-button type="link" size="small" danger>删除</a-button>
-                  </a-popconfirm>
-                </template>
-              </a-card>
-            </a-col>
-          </a-row>
-          <a-pagination
-            v-model:current="pagination.current"
-            v-model:pageSize="pagination.pageSize"
-            :total="pagination.total"
-            show-size-changer
-            style="margin-top: 16px; text-align: right"
-            @change="handleTableChange"
-          />
-        </a-card>
       </a-col>
     </a-row>
 
@@ -176,10 +150,18 @@
       @success="handleSuccess"
     />
 
+    <!-- CI详情抽屉 -->
+    <CiDetailDrawer
+      v-model:visible="detailDrawerVisible"
+      :instance-id="currentInstanceId"
+      @edit="handleEditFromDetail"
+      @deleted="handleSuccess"
+    />
+
     <!-- 列设置弹窗 -->
     <a-modal
       v-model:open="columnModalVisible"
-      title="列设置"
+      title="列设置 - 选择要显示的属性"
       @ok="handleColumnOk"
       width="500px"
     >
@@ -209,25 +191,22 @@
     >
       <a-alert
         message="导入说明"
-        description="请先导出数据了解CSV格式，然后按相同格式编辑后导入。CSV文件第一行为表头，包括：CI编码、CI名称、部门、创建人、创建时间，以及模型的所有字段名称。"
+        description="请上传CSV格式文件，第一行为表头，包含所有必填属性字段。系统将自动验证数据并导入。"
         type="info"
         show-icon
         style="margin-bottom: 16px"
       />
       <a-upload-dragger
-        :before-upload="(file: File) => {
-          importFile = file
-          return false
-        }"
-        :file-list="importFile ? [{ name: importFile.name, uid: '-1', status: 'done' }] : []"
-        accept=".csv,.xlsx,.xls"
-        :remove="() => { importFile = null }"
+        v-model:fileList="importFileList"
+        :before-upload="beforeUpload"
+        accept=".csv"
+        :max-count="1"
       >
         <p class="ant-upload-drag-icon">
           <InboxOutlined />
         </p>
-        <p class="ant-upload-text">点击或拖拽文件到此处上传</p>
-        <p class="ant-upload-hint">支持 CSV、Excel 文件</p>
+        <p class="ant-upload-text">点击或拖拽文件到此区域上传</p>
+        <p class="ant-upload-hint">支持 .csv 格式文件</p>
       </a-upload-dragger>
     </a-modal>
   </div>
@@ -249,9 +228,10 @@ import {
   InboxOutlined
 } from '@ant-design/icons-vue'
 import { getInstances, deleteInstance, batchDeleteInstances, generateCICode, exportInstances, importInstances } from '@/api/ci'
-import { getModelsTree } from '@/api/cmdb'
+import { getModelsTree, getModelDetail } from '@/api/cmdb'
 import { getDepartments } from '@/api/department'
 import CiInstanceModal from './components/CiInstanceModal.vue'
+import CiDetailDrawer from './components/CiDetailDrawer.vue'
 import dayjs from 'dayjs'
 
 // 模型树（带分类和CI数量）
@@ -268,20 +248,18 @@ const searchKeyword = ref('')
 const searchDept = ref<number | null>(null)
 const dateRange = ref<[dayjs.Dayjs, dayjs.Dayjs] | null>(null)
 const departmentOptions = ref<any[]>([])
+const modelFields = ref<any[]>([])
+const attrFilterField = ref<string | null>(null)
+const attrFilterValue = ref<string>('')
 
-const viewMode = ref<'table' | 'card'>('table')
 const selectedRowKeys = ref<string[]>([])
 
-const columns = [
-  { title: '编码', dataIndex: 'code', key: 'code', width: 160 },
-  { title: '名称', key: 'name', width: 150 },
-  { title: '部门', dataIndex: 'department_name', key: 'department_name', width: 120 },
-  { title: '创建人', dataIndex: 'creator_name', key: 'creator_name', width: 100 },
-  { title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 170 },
-  { title: '操作', key: 'action', width: 200, fixed: 'right' }
+const baseColumns = [
+  { title: 'CI编码', dataIndex: 'code', key: 'code', width: 160, visible: true },
+  { title: '操作', key: 'action', width: 180, fixed: 'right', visible: true }
 ]
 
-const availableColumns = ref(columns.map(col => ({ ...col, visible: true })))
+const availableColumns = ref<any[]>([...baseColumns])
 const displayColumns = computed(() => availableColumns.value.filter(col => col.visible))
 
 const pagination = reactive({
@@ -294,6 +272,8 @@ const pagination = reactive({
 
 const editModalVisible = ref(false)
 const currentInstance = ref<any>(null)
+const detailDrawerVisible = ref(false)
+const currentInstanceId = ref<number | null>(null)
 const columnModalVisible = ref(false)
 
 let dragItem: any = null
@@ -301,15 +281,6 @@ let dragItem: any = null
 onMounted(() => {
   fetchModels()
   fetchDepartments()
-  // 从localStorage读取视图偏好
-  const savedViewMode = localStorage.getItem('ci_view_mode')
-  if (savedViewMode) {
-    viewMode.value = savedViewMode as 'table' | 'card'
-  }
-})
-
-watch(viewMode, (val) => {
-  localStorage.setItem('ci_view_mode', val)
 })
 
 const fetchModels = async () => {
@@ -406,7 +377,6 @@ const fetchInstances = async () => {
       keyword: searchKeyword.value
     }
     
-    // 如果选中了特定模型，添加model_id筛选
     if (currentModelId.value) {
       params.model_id = currentModelId.value
     }
@@ -417,6 +387,11 @@ const fetchInstances = async () => {
     if (dateRange.value) {
       params.date_from = dateRange.value[0].format('YYYY-MM-DD')
       params.date_to = dateRange.value[1].format('YYYY-MM-DD')
+    }
+    
+    if (attrFilterField.value && attrFilterValue.value) {
+      params.attr_field = attrFilterField.value
+      params.attr_value = attrFilterValue.value
     }
     
     const res = await getInstances(params)
@@ -431,27 +406,102 @@ const fetchInstances = async () => {
   }
 }
 
-const onModelSelect = (keys: any, info: any) => {
+const onModelSelect = async (keys: any, info: any) => {
   selectedModelKeys.value = keys
   const node = info.node
   
   if (node.is_model) {
-    // 点击了模型节点
     currentModelId.value = node.model_id
     currentModelName.value = node.title
+    await fetchModelFields(node.model_id)
   } else if (node.is_all) {
-    // 点击了"全部"节点
     currentModelId.value = null
     currentModelName.value = '全部'
+    modelFields.value = []
+    resetColumns()
   } else if (node.is_category) {
-    // 点击了分类节点，显示该分类下所有模型的CI
     currentModelId.value = null
     currentModelName.value = node.name
-    // 可以在这里添加按分类筛选的逻辑
+    modelFields.value = []
+    resetColumns()
   }
   
   pagination.current = 1
   fetchInstances()
+}
+
+const fetchModelFields = async (modelId: number) => {
+  try {
+    const res = await getModelDetail(modelId)
+    if (res.code === 200 && res.data.form_config) {
+      let formConfig = res.data.form_config
+      if (typeof formConfig === 'string') {
+        formConfig = JSON.parse(formConfig)
+      }
+      const fields: any[] = []
+      if (Array.isArray(formConfig)) {
+        formConfig.forEach((item: any) => {
+          if (item.controlType === 'group' && item.children) {
+            item.children.forEach((child: any) => {
+              if (child.props && child.props.code) {
+                fields.push({
+                  code: child.props.code,
+                  name: child.props.label || child.props.code,
+                  ...child.props
+                })
+              }
+            })
+          } else if (item.props && item.props.code) {
+            fields.push({
+              code: item.props.code,
+              name: item.props.label || item.props.code,
+              ...item.props
+            })
+          }
+        })
+      }
+      modelFields.value = fields
+      updateColumns()
+    } else {
+      modelFields.value = []
+    }
+  } catch (error) {
+    console.error(error)
+    modelFields.value = []
+  }
+}
+
+const updateColumns = () => {
+  const newColumns: any[] = [
+    { title: 'CI编码', dataIndex: 'code', key: 'code', width: 160, visible: true }
+  ]
+  
+  modelFields.value.forEach((field: any) => {
+    newColumns.push({
+      title: field.name,
+      key: `attr_${field.code}`,
+      width: 150,
+      visible: true,
+      customRender: ({ record }: any) => {
+        const attrs = record.attributes || record.attribute_values || {}
+        const val = attrs[field.code]
+        if (val === null || val === undefined) return '-'
+        if (typeof val === 'object') return JSON.stringify(val)
+        return val
+      }
+    })
+  })
+  
+  newColumns.push({ title: '操作', key: 'action', width: 180, fixed: 'right', visible: true })
+  
+  availableColumns.value = newColumns
+}
+
+const resetColumns = () => {
+  availableColumns.value = [
+    { title: 'CI编码', dataIndex: 'code', key: 'code', width: 160, visible: true },
+    { title: '操作', key: 'action', width: 180, fixed: 'right', visible: true }
+  ]
 }
 
 const handleSearch = () => {
@@ -462,8 +512,14 @@ const handleSearch = () => {
 const handleReset = () => {
   searchKeyword.value = ''
   searchDept.value = null
+  attrFilterField.value = null
+  attrFilterValue.value = ''
   dateRange.value = null
   handleSearch()
+}
+
+const handleAttrFieldChange = () => {
+  attrFilterValue.value = ''
 }
 
 const handleTableChange = (pag: any) => {
@@ -482,8 +538,15 @@ const handleAdd = async () => {
 }
 
 const handleView = (record: any) => {
-  // 查看详情，可以跳转到详情页或打开抽屉
-  message.info('查看功能开发中')
+  currentInstanceId.value = record.id
+  detailDrawerVisible.value = true
+}
+
+const handleEditFromDetail = (instance: any) => {
+  currentInstance.value = instance
+  currentInstanceId.value = instance.id
+  detailDrawerVisible.value = false
+  editModalVisible.value = true
 }
 
 const handleEdit = (record: any) => {
@@ -568,22 +631,27 @@ const handleExport = async () => {
 
 const importModalVisible = ref(false)
 const importing = ref(false)
-const importFile = ref<File | null>(null)
+const importFileList = ref<any[]>([])
+
+const beforeUpload = (file: File) => {
+  importFileList.value = [file]
+  return false
+}
 
 const handleImport = () => {
-  importFile.value = null
+  importFileList.value = []
   importModalVisible.value = true
 }
 
 const handleImportOk = async () => {
-  if (!importFile.value) {
+  if (importFileList.value.length === 0) {
     message.warning('请选择要导入的文件')
     return
   }
   
   try {
     importing.value = true
-    const res = await importInstances(importFile.value, currentModelId.value!)
+    const res = await importInstances(importFileList.value[0], currentModelId.value!)
     message.success(res.message || '导入成功')
     importModalVisible.value = false
     fetchInstances()

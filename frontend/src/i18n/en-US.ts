@@ -31,6 +31,8 @@ export default {
     dashboard: 'Dashboard',
     cmdb: 'CMDB',
     instance: 'Configuration Repository',
+    search: 'Global Search',
+    history: 'Change History',
     config: 'Config Management',
     model: 'Model Management',
     system: 'System Management',

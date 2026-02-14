@@ -42,7 +42,7 @@ def admin_required(f):
         if not hasattr(request, 'current_user'):
             return jsonify({'code': 401, 'message': 'Authentication required'}), 401
         
-        if request.current_user.role != 'admin':
+        if not request.current_user.is_admin:
             return jsonify({'code': 403, 'message': 'Admin permission required'}), 403
         
         return f(*args, **kwargs)

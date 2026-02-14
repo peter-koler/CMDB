@@ -65,6 +65,31 @@ export const getInstanceHistory = (ciId: number, params?: any) => {
   })
 }
 
+// 获取CI详情（含模型信息）
+export const getInstanceDetail = (id: number) => {
+  return request({
+    url: `/cmdb/instances/${id}`,
+    method: 'GET'
+  })
+}
+
+// 获取CI变更历史
+export const getCiHistory = (ciId: number) => {
+  return request({
+    url: `/cmdb/instances/${ciId}/history`,
+    method: 'GET'
+  })
+}
+
+// 获取所有CI变更历史（支持筛选）
+export const getAllCiHistory = (params?: any) => {
+  return request({
+    url: '/cmdb/instances/history',
+    method: 'GET',
+    params
+  })
+}
+
 // 全文搜索
 export const searchInstances = (data: any) => {
   return request({

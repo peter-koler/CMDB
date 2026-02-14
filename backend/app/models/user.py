@@ -22,6 +22,22 @@ class User(db.Model):
     
     department = db.relationship('Department', backref='users', foreign_keys=[department_id])
     
+    @property
+    def is_admin(self):
+        """检查是否是管理员"""
+        # 兼容旧字段
+        if self.role == 'admin':
+            return True
+        
+        # 检查 UserRole
+        # 避免循环引用，在方法内导入
+        from app.models.role import Role
+        
+        for ur in self.role_links:
+            if ur.role and ur.role.code == 'admin':
+                return True
+        return False
+    
     def set_password(self, password):
         self.password_hash = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
     
