@@ -192,3 +192,75 @@ export function importModel(data: any) {
     data
   })
 }
+
+// 字典类型
+export function getDictTypes(params?: any) {
+  return request({
+    url: '/cmdb/dict/types',
+    method: 'get',
+    params
+  })
+}
+
+export function createDictType(data: any) {
+  return request({
+    url: '/cmdb/dict/types',
+    method: 'post',
+    data
+  })
+}
+
+export function updateDictType(id: number, data: any) {
+  return request({
+    url: `/cmdb/dict/types/${id}`,
+    method: 'put',
+    data
+  })
+}
+
+export function deleteDictType(id: number) {
+  return request({
+    url: `/cmdb/dict/types/${id}`,
+    method: 'delete'
+  })
+}
+
+// 字典项
+export function getDictItems(typeId: number, params?: any) {
+  return request({
+    url: `/cmdb/dict/types/${typeId}/items`,
+    method: 'get',
+    params
+  })
+}
+
+export function createDictItem(typeId: number, data: any) {
+  return request({
+    url: `/cmdb/dict/types/${typeId}/items`,
+    method: 'post',
+    data
+  })
+}
+
+export function updateDictItem(id: number, data: any) {
+  return request({
+    url: `/cmdb/dict/items/${id}`,
+    method: 'put',
+    data
+  })
+}
+
+export function deleteDictItem(id: number) {
+  return request({
+    url: `/cmdb/dict/items/${id}`,
+    method: 'delete'
+  })
+}
+
+export function getDictItemsByTypeCode(typeCode: string, params?: any) {
+  return request({
+    url: `/cmdb/dict/items/by-type-code/${typeCode}`,
+    method: 'get',
+    params
+  })
+}

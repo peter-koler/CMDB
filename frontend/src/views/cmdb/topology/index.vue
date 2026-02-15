@@ -2,8 +2,8 @@
   <div class="topology-page">
     <a-card :bordered="false" class="search-card">
       <a-form layout="inline" class="search-form">
-        <a-row :gutter="[16, 16]" style="width: 100%">
-          <a-col :xs="24" :sm="12" :md="4">
+        <a-row :gutter="[12, 12]" class="topology-filter-row">
+          <a-col :xs="24" :sm="12" :md="8" :lg="5">
             <a-form-item label="关键词">
               <a-input
                 v-model:value="searchKeyword"
@@ -12,7 +12,7 @@
               />
             </a-form-item>
           </a-col>
-          <a-col :xs="24" :sm="12" :md="4">
+          <a-col :xs="24" :sm="12" :md="8" :lg="5">
             <a-form-item label="模型">
               <a-select
                 v-model:value="searchModelId"
@@ -26,7 +26,7 @@
               </a-select>
             </a-form-item>
           </a-col>
-          <a-col :xs="24" :sm="12" :md="4">
+          <a-col :xs="24" :sm="12" :md="8" :lg="5">
             <a-form-item label="起点CI">
               <a-select
                 v-model:value="searchCiId"
@@ -47,7 +47,7 @@
               </a-select>
             </a-form-item>
           </a-col>
-          <a-col :xs="24" :sm="12" :md="4">
+          <a-col :xs="24" :sm="12" :md="8" :lg="4">
             <a-form-item label="深度">
               <a-select v-model:value="relationDepth" style="width: 100%">
                 <a-select-option :value="1">1层</a-select-option>
@@ -57,7 +57,7 @@
               </a-select>
             </a-form-item>
           </a-col>
-          <a-col :xs="24" :sm="12" :md="4">
+          <a-col :xs="24" :sm="12" :md="8" :lg="5">
             <a-form-item label="布局">
               <a-select v-model:value="layout" placeholder="布局算法" style="width: 100%">
                 <a-select-option value="force">力导向</a-select-option>
@@ -67,7 +67,9 @@
               </a-select>
             </a-form-item>
           </a-col>
-          <a-col :xs="24" :sm="24" :md="8">
+        </a-row>
+        <a-row :gutter="[12, 12]" class="topology-action-row">
+          <a-col :span="24">
             <a-form-item class="search-buttons">
               <a-space wrap>
                 <a-button type="primary" @click="handleSearch">
@@ -719,6 +721,32 @@ onUnmounted(() => {
 
 .search-form {
   width: 100%;
+}
+
+.search-form :deep(.ant-form-item) {
+  margin-bottom: 0;
+  width: 100%;
+}
+
+.topology-filter-row {
+  width: 100%;
+}
+
+.topology-action-row {
+  width: 100%;
+  margin-top: 8px;
+}
+
+.search-buttons {
+  display: flex;
+  justify-content: flex-end;
+  width: 100%;
+}
+
+@media (max-width: 992px) {
+  .search-buttons {
+    justify-content: flex-start;
+  }
 }
 
 .nodes-card {

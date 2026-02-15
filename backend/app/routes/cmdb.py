@@ -5,6 +5,7 @@ from app.models.cmdb_model import CmdbModel, ModelType
 from app.models.model_region import ModelRegion
 from app.models.model_field import ModelField
 from app.models.ci_instance import CiInstance
+from app.models.cmdb_dict import CmdbDictType, CmdbDictItem
 from app.utils.auth import token_required, admin_required
 from app.utils.decorators import log_operation
 from app import db
@@ -97,12 +98,63 @@ def _validate_key_field_codes(form_config, key_field_codes):
     return None
 
 
+def _parse_bool_query(value, default=None):
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    normalized = str(value).strip().lower()
+    if normalized in {'1', 'true', 'yes', 'y'}:
+        return True
+    if normalized in {'0', 'false', 'no', 'n'}:
+        return False
+    return default
+
+
+def _build_dict_item_tree(items):
+    item_map = {}
+    roots = []
+
+    for item in items:
+        item_data = item.to_dict()
+        item_data['children'] = []
+        item_map[item.id] = item_data
+
+    for item in items:
+        current = item_map[item.id]
+        if item.parent_id and item.parent_id in item_map:
+            item_map[item.parent_id]['children'].append(current)
+        else:
+            roots.append(current)
+
+    def sort_tree(nodes):
+        nodes.sort(key=lambda node: (node.get('sort_order', 0), node.get('id', 0)))
+        for node in nodes:
+            sort_tree(node['children'])
+
+    sort_tree(roots)
+    return roots
+
+
+def _is_descendant_item(target_item, parent_id):
+    if not parent_id:
+        return False
+
+    current = CmdbDictItem.query.get(parent_id)
+    while current:
+        if current.id == target_item.id:
+            return True
+        if not current.parent_id:
+            return False
+        current = CmdbDictItem.query.get(current.parent_id)
+    return False
+
+
 # ==================== 模型目录管理 ====================
 
 @cmdb_bp.route('/categories', methods=['GET'])
 @token_required
 @admin_required
-@log_operation(operation_type='VIEW', operation_object='model_category')
 def get_categories():
     """获取模型目录树"""
     root_categories = ModelCategory.query.filter_by(parent_id=None).order_by(ModelCategory.sort_order).all()
@@ -345,7 +397,6 @@ def get_models_tree():
 @cmdb_bp.route('/models', methods=['GET'])
 @token_required
 @admin_required
-@log_operation(operation_type='VIEW', operation_object='cmdb_model')
 def get_models():
     """获取模型列表"""
     category_id = request.args.get('category_id', type=int)
@@ -861,4 +912,281 @@ def sort_fields():
     return jsonify({
         'code': 200,
         'message': '排序更新成功'
+    })
+
+
+# ==================== 字典管理 ====================
+
+@cmdb_bp.route('/dict/types', methods=['GET'])
+@token_required
+def get_dict_types():
+    """获取字典类型列表"""
+    keyword = request.args.get('keyword', '').strip()
+    enabled = _parse_bool_query(request.args.get('enabled'), None)
+
+    query = CmdbDictType.query
+    if keyword:
+        query = query.filter(
+            db.or_(
+                CmdbDictType.name.contains(keyword),
+                CmdbDictType.code.contains(keyword)
+            )
+        )
+    if enabled is not None:
+        query = query.filter_by(enabled=enabled)
+
+    items = query.order_by(CmdbDictType.sort_order.asc(), CmdbDictType.id.asc()).all()
+    return jsonify({
+        'code': 200,
+        'message': 'success',
+        'data': items and [item.to_dict() for item in items] or []
+    })
+
+
+@cmdb_bp.route('/dict/types', methods=['POST'])
+@token_required
+@admin_required
+@log_operation(operation_type='CREATE', operation_object='cmdb_dict_type')
+def create_dict_type():
+    """创建字典类型"""
+    data = request.get_json() or {}
+    code = str(data.get('code', '')).strip()
+    name = str(data.get('name', '')).strip()
+
+    if not code or not name:
+        return jsonify({'code': 400, 'message': '编码和名称不能为空'}), 400
+
+    if CmdbDictType.query.filter_by(code=code).first():
+        return jsonify({'code': 400, 'message': '字典编码已存在'}), 400
+
+    item = CmdbDictType(
+        code=code,
+        name=name,
+        description=data.get('description'),
+        enabled=bool(data.get('enabled', True)),
+        sort_order=int(data.get('sort_order', 0)),
+        created_by=request.current_user.id
+    )
+    item.save()
+
+    return jsonify({
+        'code': 200,
+        'message': '创建成功',
+        'data': item.to_dict()
+    })
+
+
+@cmdb_bp.route('/dict/types/<int:type_id>', methods=['PUT'])
+@token_required
+@admin_required
+@log_operation(operation_type='UPDATE', operation_object='cmdb_dict_type')
+def update_dict_type(type_id):
+    """更新字典类型"""
+    dict_type = CmdbDictType.query.get_or_404(type_id)
+    data = request.get_json() or {}
+
+    if 'code' in data:
+        code = str(data.get('code', '')).strip()
+        if not code:
+            return jsonify({'code': 400, 'message': '编码不能为空'}), 400
+        if code != dict_type.code and CmdbDictType.query.filter_by(code=code).first():
+            return jsonify({'code': 400, 'message': '字典编码已存在'}), 400
+        dict_type.code = code
+
+    if 'name' in data:
+        name = str(data.get('name', '')).strip()
+        if not name:
+            return jsonify({'code': 400, 'message': '名称不能为空'}), 400
+        dict_type.name = name
+
+    if 'description' in data:
+        dict_type.description = data.get('description')
+    if 'enabled' in data:
+        dict_type.enabled = bool(data.get('enabled'))
+    if 'sort_order' in data:
+        dict_type.sort_order = int(data.get('sort_order', 0))
+
+    dict_type.save()
+    return jsonify({
+        'code': 200,
+        'message': '更新成功',
+        'data': dict_type.to_dict()
+    })
+
+
+@cmdb_bp.route('/dict/types/<int:type_id>', methods=['DELETE'])
+@token_required
+@admin_required
+@log_operation(operation_type='DELETE', operation_object='cmdb_dict_type')
+def delete_dict_type(type_id):
+    """删除字典类型"""
+    dict_type = CmdbDictType.query.get_or_404(type_id)
+    dict_type.delete()
+    return jsonify({
+        'code': 200,
+        'message': '删除成功'
+    })
+
+
+@cmdb_bp.route('/dict/types/<int:type_id>/items', methods=['GET'])
+@token_required
+def get_dict_items(type_id):
+    """按字典类型获取字典项树"""
+    dict_type = CmdbDictType.query.get_or_404(type_id)
+    enabled = _parse_bool_query(request.args.get('enabled'), None)
+
+    query = CmdbDictItem.query.filter_by(type_id=dict_type.id)
+    if enabled is not None:
+        query = query.filter_by(enabled=enabled)
+    items = query.order_by(CmdbDictItem.sort_order.asc(), CmdbDictItem.id.asc()).all()
+
+    return jsonify({
+        'code': 200,
+        'message': 'success',
+        'data': {
+            'type': dict_type.to_dict(),
+            'items': _build_dict_item_tree(items)
+        }
+    })
+
+
+@cmdb_bp.route('/dict/items/by-type-code/<string:type_code>', methods=['GET'])
+@token_required
+def get_dict_items_by_type_code(type_code):
+    """按字典编码获取字典项树"""
+    dict_type = CmdbDictType.query.filter_by(code=type_code).first()
+    if not dict_type:
+        return jsonify({'code': 404, 'message': '字典类型不存在'}), 404
+
+    enabled = _parse_bool_query(request.args.get('enabled'), True)
+    query = CmdbDictItem.query.filter_by(type_id=dict_type.id)
+    if enabled is not None:
+        query = query.filter_by(enabled=enabled)
+    items = query.order_by(CmdbDictItem.sort_order.asc(), CmdbDictItem.id.asc()).all()
+
+    return jsonify({
+        'code': 200,
+        'message': 'success',
+        'data': {
+            'type': dict_type.to_dict(),
+            'items': _build_dict_item_tree(items)
+        }
+    })
+
+
+@cmdb_bp.route('/dict/types/<int:type_id>/items', methods=['POST'])
+@token_required
+@admin_required
+@log_operation(operation_type='CREATE', operation_object='cmdb_dict_item')
+def create_dict_item(type_id):
+    """创建字典项"""
+    dict_type = CmdbDictType.query.get_or_404(type_id)
+    data = request.get_json() or {}
+
+    code = str(data.get('code', '')).strip()
+    label = str(data.get('label', '')).strip()
+    parent_id = data.get('parent_id')
+    if parent_id in ('', None):
+        parent_id = None
+
+    if not code or not label:
+        return jsonify({'code': 400, 'message': '编码和显示名不能为空'}), 400
+
+    if parent_id:
+        parent_item = CmdbDictItem.query.get(parent_id)
+        if not parent_item or parent_item.type_id != dict_type.id:
+            return jsonify({'code': 400, 'message': '父级字典项不存在'}), 400
+
+    existed = CmdbDictItem.query.filter_by(
+        type_id=dict_type.id,
+        parent_id=parent_id,
+        code=code
+    ).first()
+    if existed:
+        return jsonify({'code': 400, 'message': '同级字典编码已存在'}), 400
+
+    item = CmdbDictItem(
+        type_id=dict_type.id,
+        parent_id=parent_id,
+        code=code,
+        label=label,
+        enabled=bool(data.get('enabled', True)),
+        sort_order=int(data.get('sort_order', 0)),
+        created_by=request.current_user.id
+    )
+    item.save()
+
+    return jsonify({
+        'code': 200,
+        'message': '创建成功',
+        'data': item.to_dict()
+    })
+
+
+@cmdb_bp.route('/dict/items/<int:item_id>', methods=['PUT'])
+@token_required
+@admin_required
+@log_operation(operation_type='UPDATE', operation_object='cmdb_dict_item')
+def update_dict_item(item_id):
+    """更新字典项"""
+    item = CmdbDictItem.query.get_or_404(item_id)
+    data = request.get_json() or {}
+
+    target_parent_id = item.parent_id
+    if 'parent_id' in data:
+        value = data.get('parent_id')
+        target_parent_id = None if value in ('', None) else int(value)
+        if target_parent_id:
+            parent_item = CmdbDictItem.query.get(target_parent_id)
+            if not parent_item or parent_item.type_id != item.type_id:
+                return jsonify({'code': 400, 'message': '父级字典项不存在'}), 400
+            if _is_descendant_item(item, target_parent_id):
+                return jsonify({'code': 400, 'message': '不能将节点移动到自己的子节点下'}), 400
+
+    target_code = item.code
+    if 'code' in data:
+        target_code = str(data.get('code', '')).strip()
+        if not target_code:
+            return jsonify({'code': 400, 'message': '编码不能为空'}), 400
+
+    existed = CmdbDictItem.query.filter_by(
+        type_id=item.type_id,
+        parent_id=target_parent_id,
+        code=target_code
+    ).first()
+    if existed and existed.id != item.id:
+        return jsonify({'code': 400, 'message': '同级字典编码已存在'}), 400
+
+    item.parent_id = target_parent_id
+    item.code = target_code
+
+    if 'label' in data:
+        label = str(data.get('label', '')).strip()
+        if not label:
+            return jsonify({'code': 400, 'message': '显示名不能为空'}), 400
+        item.label = label
+    if 'enabled' in data:
+        item.enabled = bool(data.get('enabled'))
+    if 'sort_order' in data:
+        item.sort_order = int(data.get('sort_order', 0))
+
+    item.save()
+    return jsonify({
+        'code': 200,
+        'message': '更新成功',
+        'data': item.to_dict()
+    })
+
+
+@cmdb_bp.route('/dict/items/<int:item_id>', methods=['DELETE'])
+@token_required
+@admin_required
+@log_operation(operation_type='DELETE', operation_object='cmdb_dict_item')
+def delete_dict_item(item_id):
+    """删除字典项（包含子项）"""
+    item = CmdbDictItem.query.get_or_404(item_id)
+    item.delete()
+    return jsonify({
+        'code': 200,
+        'message': '删除成功'
     })

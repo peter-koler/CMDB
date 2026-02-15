@@ -36,6 +36,7 @@ export default {
     topology: 'Topology View',
     config: 'Config Management',
     model: 'Model Management',
+    dictionary: 'Dictionary Management',
     relationType: 'Relation Type',
     relationTrigger: 'Relation Trigger',
     system: 'System Management',

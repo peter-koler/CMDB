@@ -45,6 +45,12 @@ const routes = [
             name: 'RelationTrigger',
             component: () => import('@/views/config/relation-trigger/index.vue'),
             meta: { title: '关系触发器', icon: 'ThunderboltOutlined', permission: 'relation:view' }
+          },
+          {
+            path: 'dictionary',
+            name: 'Dictionary',
+            component: () => import('@/views/config/dictionary/index.vue'),
+            meta: { title: '字典管理', icon: 'BookOutlined', permission: 'model:view' }
           }
         ]
       },

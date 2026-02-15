@@ -36,68 +36,77 @@
       <!-- 右侧CI列表 -->
       <a-col :xs="24" :sm="16" :md="18" :lg="19" class="content-col">
         <a-card :bordered="false" class="search-card" :title="currentModelName ? currentModelName + ' - CI列表' : 'CI列表'">
-          <a-space wrap>
-            <a-input-search
-              v-model:value="searchKeyword"
-              placeholder="搜索CI编码"
-              style="width: 200px"
-              @search="handleSearch"
-            />
-            <a-select
-              v-model:value="searchDept"
-              placeholder="选择部门"
-              style="width: 150px"
-              allowClear
-            >
-              <a-select-option v-for="dept in departmentOptions" :key="dept.id" :value="dept.id">
-                {{ dept.name }}
-              </a-select-option>
-            </a-select>
-            <template v-if="currentModelId && modelFields.length > 0">
+          <div class="ci-toolbar">
+            <div class="ci-toolbar-filters">
+              <a-input-search
+                v-model:value="searchKeyword"
+                placeholder="搜索CI编码"
+                class="toolbar-control toolbar-control-keyword"
+                @search="handleSearch"
+              />
               <a-select
-                v-model:value="attrFilterField"
-                placeholder="选择属性筛选"
-                style="width: 150px"
+                v-model:value="searchDept"
+                placeholder="选择部门"
+                class="toolbar-control"
                 allowClear
-                @change="handleAttrFieldChange"
               >
-                <a-select-option v-for="field in modelFields" :key="field.code" :value="field.code">
-                  {{ field.name }}
+                <a-select-option v-for="dept in departmentOptions" :key="dept.id" :value="dept.id">
+                  {{ dept.name }}
                 </a-select-option>
               </a-select>
-              <a-input
-                v-if="attrFilterField"
-                v-model:value="attrFilterValue"
-                placeholder="输入属性值"
-                style="width: 150px"
-                @pressEnter="handleSearch"
+              <template v-if="currentModelId && modelFields.length > 0">
+                <a-select
+                  v-model:value="attrFilterField"
+                  placeholder="选择属性筛选"
+                  class="toolbar-control"
+                  allowClear
+                  @change="handleAttrFieldChange"
+                >
+                  <a-select-option v-for="field in modelFields" :key="field.code" :value="field.code">
+                    {{ field.name }}
+                  </a-select-option>
+                </a-select>
+                <a-input
+                  v-if="attrFilterField"
+                  v-model:value="attrFilterValue"
+                  placeholder="输入属性值"
+                  class="toolbar-control"
+                  @pressEnter="handleSearch"
+                />
+              </template>
+              <a-range-picker
+                v-model:value="dateRange"
+                class="toolbar-control toolbar-control-date"
+                @change="handleSearch"
               />
-            </template>
-            <a-range-picker v-model:value="dateRange" @change="handleSearch" />
-            <a-button type="primary" @click="handleSearch">
-              <SearchOutlined />
-              搜索
-            </a-button>
-            <a-button @click="handleReset">重置</a-button>
-          </a-space>
-          <a-space wrap style="margin-left: auto">
-            <a-button type="primary" @click="handleAdd" v-if="currentModelId">
-              <PlusOutlined />
-              新增CI
-            </a-button>
-            <a-button @click="handleExport" v-if="currentModelId && instances.length > 0">
-              <ExportOutlined />
-              导出
-            </a-button>
-            <a-button @click="handleImport" v-if="currentModelId">
-              <ImportOutlined />
-              导入
-            </a-button>
-            <a-button @click="showColumnSetting" v-if="currentModelId && modelFields.length > 0">
-              <SettingOutlined />
-              列设置
-            </a-button>
-          </a-space>
+            </div>
+
+            <div class="ci-toolbar-actions">
+              <a-space wrap class="toolbar-action-all">
+                <a-button type="primary" @click="handleSearch">
+                  <SearchOutlined />
+                  搜索
+                </a-button>
+                <a-button @click="handleReset">重置</a-button>
+                <a-button type="primary" @click="handleAdd" v-if="currentModelId">
+                  <PlusOutlined />
+                  新增CI
+                </a-button>
+                <a-button @click="handleExport" v-if="currentModelId && instances.length > 0">
+                  <ExportOutlined />
+                  导出
+                </a-button>
+                <a-button @click="handleImport" v-if="currentModelId">
+                  <ImportOutlined />
+                  导入
+                </a-button>
+                <a-button @click="showColumnSetting" v-if="currentModelId && modelFields.length > 0">
+                  <SettingOutlined />
+                  列设置
+                </a-button>
+              </a-space>
+            </div>
+          </div>
         </a-card>
 
         <!-- 表格视图 -->
@@ -175,7 +184,7 @@
           @dragover.prevent
           @drop="drop($event, col)"
         >
-          <a-checkbox v-model:checked="col.visible">{{ col.title }}</a-checkbox>
+          <a-checkbox v-model:checked="col.visible">{{ col.settingTitle || col.title }}</a-checkbox>
           <DragOutlined class="drag-icon" />
         </div>
       </div>
@@ -213,7 +222,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, computed, watch } from 'vue'
+import { ref, reactive, onMounted, computed, watch, h } from 'vue'
 import { useRoute } from 'vue-router'
 import { message } from 'ant-design-vue'
 import {
@@ -251,6 +260,7 @@ const searchDept = ref<number | null>(null)
 const dateRange = ref<[dayjs.Dayjs, dayjs.Dayjs] | null>(null)
 const departmentOptions = ref<any[]>([])
 const modelFields = ref<any[]>([])
+const keyFieldCodes = ref<Set<string>>(new Set())
 const attrFilterField = ref<string | null>(null)
 const attrFilterValue = ref<string>('')
 
@@ -353,6 +363,7 @@ const fetchModels = async () => {
         if (firstNode.is_model) {
           currentModelId.value = firstNode.model_id
           currentModelName.value = firstNode.title
+          await fetchModelFields(firstNode.model_id)
           fetchInstances()
         } else if (firstNode.is_all) {
           // "全部"节点，加载所有CI
@@ -515,13 +526,40 @@ const fetchModelFields = async (modelId: number) => {
         })
       }
       modelFields.value = fields
+
+      // 关键属性优先使用模型配置；兼容历史数据（字段里可能有 isKey 标记）
+      const configuredKeyCodes = Array.isArray(res?.data?.key_field_codes)
+        ? res.data.key_field_codes
+        : (Array.isArray(res?.data?.config?.key_field_codes) ? res.data.config.key_field_codes : [])
+      let normalizedKeyCodes = configuredKeyCodes
+        .map((code: any) => String(code).trim())
+        .filter(Boolean)
+
+      if (normalizedKeyCodes.length === 0) {
+        normalizedKeyCodes = fields
+          .filter((field: any) => Boolean(
+            field.is_key ||
+            field.isKey ||
+            field.isKeyField ||
+            field.key_field ||
+            field.keyField ||
+            field.isKeyAttribute
+          ))
+          .map((field: any) => String(field.code).trim())
+          .filter(Boolean)
+      }
+      keyFieldCodes.value = new Set(normalizedKeyCodes)
       updateColumns()
     } else {
       modelFields.value = []
+      keyFieldCodes.value = new Set()
+      updateColumns()
     }
   } catch (error) {
     console.error(error)
     modelFields.value = []
+    keyFieldCodes.value = new Set()
+    updateColumns()
   }
 }
 
@@ -531,8 +569,15 @@ const updateColumns = () => {
   ]
   
   modelFields.value.forEach((field: any) => {
+    const isKeyField = keyFieldCodes.value.has(String(field.code))
     newColumns.push({
-      title: field.name,
+      title: isKeyField
+        ? h('span', { class: 'key-attr-title' }, [
+            h('span', { class: 'key-attr-star' }, '*'),
+            h('span', field.name)
+          ])
+        : field.name,
+      settingTitle: field.name,
       key: `attr_${field.code}`,
       width: 150,
       visible: true,
@@ -552,6 +597,7 @@ const updateColumns = () => {
 }
 
 const resetColumns = () => {
+  keyFieldCodes.value = new Set()
   availableColumns.value = [
     { title: 'CI编码', dataIndex: 'code', key: 'code', width: 160, visible: true },
     { title: '操作', key: 'action', width: 180, fixed: 'right', visible: true }
@@ -772,15 +818,80 @@ const formatDate = (date: string) => {
 }
 
 .search-card {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
+  width: 100%;
 }
 
 .search-card :deep(.ant-card-body) {
   padding: 16px 24px;
+}
+
+.ci-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ci-toolbar-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.ci-toolbar-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  width: 100%;
+}
+
+.toolbar-action-all {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  width: 100%;
+}
+
+.toolbar-control {
+  width: 160px;
+}
+
+.toolbar-control-keyword {
+  width: 220px;
+}
+
+.toolbar-control-date {
+  width: 260px;
+}
+
+@media (max-width: 992px) {
+  .ci-toolbar-actions {
+    justify-content: flex-start;
+  }
+
+  .toolbar-action-all {
+    justify-content: flex-start;
+  }
+
+  .toolbar-control-date {
+    width: 220px;
+  }
+}
+
+@media (max-width: 576px) {
+  .search-card :deep(.ant-card-body) {
+    padding: 12px;
+  }
+
+  .ci-toolbar-filters {
+    min-width: 100%;
+  }
+
+  .toolbar-control,
+  .toolbar-control-keyword,
+  .toolbar-control-date {
+    width: 100%;
+  }
 }
 
 .table-card {
@@ -891,6 +1002,17 @@ const formatDate = (date: string) => {
 
 .category-name {
   font-weight: 500;
+}
+
+:deep(.key-attr-title) {
+  display: inline-flex;
+  align-items: center;
+}
+
+:deep(.key-attr-star) {
+  color: #f5222d;
+  margin-right: 2px;
+  font-weight: 600;
 }
 
 :deep(.ant-tree-treenode) {

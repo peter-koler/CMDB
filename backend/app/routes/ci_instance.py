@@ -21,7 +21,8 @@ from io import StringIO
 ci_bp = Blueprint("ci", __name__, url_prefix="/api/v1/cmdb/instances")
 
 # 文件上传配置
-UPLOAD_FOLDER = "uploads"
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads")
 ALLOWED_EXTENSIONS = {
     "png",
     "jpg",
@@ -653,13 +654,22 @@ def upload_file():
 @ci_bp.route("/files/<path:filepath>", methods=["GET"])
 def download_file(filepath):
     """下载文件"""
-    directory = os.path.join(UPLOAD_FOLDER, os.path.dirname(filepath))
-    filename = os.path.basename(filepath)
-
-    if not os.path.exists(os.path.join(directory, filename)):
+    normalized_filepath = (filepath or "").replace("\\", "/").strip("/")
+    if not normalized_filepath:
         return jsonify({"code": 404, "message": "文件不存在"}), 404
 
-    return send_from_directory(directory, filename)
+    filename = os.path.basename(normalized_filepath)
+    rel_dir = os.path.dirname(normalized_filepath)
+
+    # 兼容历史部署：优先 backend/uploads，再兜底当前工作目录 uploads
+    candidate_roots = [UPLOAD_FOLDER, os.path.abspath("uploads")]
+    for root in candidate_roots:
+        directory = os.path.join(root, rel_dir)
+        fullpath = os.path.join(directory, filename)
+        if os.path.exists(fullpath):
+            return send_from_directory(directory, filename)
+
+    return jsonify({"code": 404, "message": "文件不存在"}), 404
 
 
 # ==================== 编码预生成 ====================

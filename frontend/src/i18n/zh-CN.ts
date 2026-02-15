@@ -36,6 +36,7 @@ export default {
     topology: '拓扑视图',
     config: '配置管理',
     model: '模型管理',
+    dictionary: '字典管理',
     relationType: '关系类型',
     relationTrigger: '关系触发器',
     system: '系统管理',

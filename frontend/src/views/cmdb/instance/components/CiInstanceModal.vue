@@ -34,9 +34,16 @@
       </div>
       <div v-else>
         <a-divider orientation="left">属性信息</a-divider>
-        <a-row :gutter="16">
-          <a-col v-for="field in modelFields" :key="field.id" :span="field.span || 12">
-            <a-form-item :label="field.name" :required="field.required">
+        <div class="field-groups">
+          <div
+            v-for="section in groupedFieldSections"
+            :key="section.key"
+            class="field-group-card"
+          >
+            <div class="field-group-title">{{ section.label }}</div>
+            <a-row :gutter="16">
+              <a-col v-for="field in section.fields" :key="field.id" :span="field.span || 12">
+                <a-form-item :label="field.name" :required="field.required">
               <!-- 文本输入 -->
               <a-input
                 v-if="field.field_type === 'text'"
@@ -103,6 +110,18 @@
                   {{ opt.label }}
                 </a-select-option>
               </a-select>
+
+              <!-- 人员 -->
+              <a-select
+                v-else-if="field.field_type === 'user'"
+                v-model:value="formState.attribute_values[field.code]"
+                :placeholder="field.placeholder || `请选择${field.name}`"
+                :mode="field.mode === 'multiple' ? 'multiple' : undefined"
+                :options="getUserOptions(field)"
+                allowClear
+                show-search
+                option-filter-prop="label"
+              />
               
               <!-- 级联选择 -->
               <a-cascader
@@ -179,9 +198,11 @@
                   <div style="margin-top: 8px">上传</div>
                 </div>
               </a-upload>
-            </a-form-item>
-          </a-col>
-        </a-row>
+                </a-form-item>
+              </a-col>
+            </a-row>
+          </div>
+        </div>
       </div>
     </a-form>
   </a-modal>
@@ -193,10 +214,11 @@ import { message } from 'ant-design-vue'
 import { PlusOutlined, UploadOutlined } from '@ant-design/icons-vue'
 import dayjs from 'dayjs'
 import { createInstance, updateInstance, generateCICode } from '@/api/ci'
-import { getModelDetail } from '@/api/cmdb'
+import { getDictItemsByTypeCode, getModelDetail } from '@/api/cmdb'
 import { getDepartments } from '@/api/department'
 import { getInstances } from '@/api/ci'
 import { uploadFile } from '@/api/ci'
+import { getUsers } from '@/api/user'
 
 interface Props {
   visible: boolean
@@ -230,6 +252,34 @@ const formRules = {
 const modelFields = ref<any[]>([])
 const departmentTree = ref<any[]>([])
 const referenceOptions = ref<Record<number, any[]>>({})
+const dictOptionsMap = ref<Record<string, { label: string; value: string }[]>>({})
+const systemUserOptions = ref<{ label: string; value: number }[]>([])
+const groupedFieldSections = computed(() => {
+  const groups = new Map<string, { key: string; label: string; order: number; fields: any[] }>()
+  groups.set('__base__', {
+    key: '__base__',
+    label: '基础属性',
+    order: -1,
+    fields: []
+  })
+
+  modelFields.value.forEach((field: any, index: number) => {
+    const groupKey = field.group_id || '__base__'
+    if (!groups.has(groupKey)) {
+      groups.set(groupKey, {
+        key: groupKey,
+        label: field.group_label || '属性分组',
+        order: field.group_order ?? index,
+        fields: []
+      })
+    }
+    groups.get(groupKey)!.fields.push(field)
+  })
+
+  return Array.from(groups.values())
+    .filter((section) => section.fields.length > 0)
+    .sort((a, b) => a.order - b.order)
+})
 
 watch(() => props.visible, (val) => {
   if (val) {
@@ -251,6 +301,7 @@ watch(() => props.visible, (val) => {
 
 onMounted(() => {
   fetchDepartments()
+  loadSystemUsers()
 })
 
 const initForm = async () => {
@@ -294,6 +345,101 @@ const initForm = async () => {
   }
 }
 
+const flattenDictTree = (nodes: any[]): { label: string; value: string }[] => {
+  const result: { label: string; value: string }[] = []
+  const walk = (items: any[], parentLabel = '') => {
+    items.forEach((item) => {
+      const currentLabel = parentLabel ? `${parentLabel} / ${item.label}` : item.label
+      result.push({
+        label: currentLabel,
+        value: item.code
+      })
+      if (Array.isArray(item.children) && item.children.length > 0) {
+        walk(item.children, currentLabel)
+      }
+    })
+  }
+  walk(nodes || [])
+  return result
+}
+
+const ensureDictionaryOptionsLoaded = async (dictCode?: string) => {
+  if (!dictCode || dictOptionsMap.value[dictCode]) return
+  try {
+    const res = await getDictItemsByTypeCode(dictCode, { enabled: true })
+    if (res.code === 200) {
+      dictOptionsMap.value[dictCode] = flattenDictTree(res.data?.items || [])
+    }
+  } catch (error) {
+    console.error(error)
+    dictOptionsMap.value[dictCode] = []
+  }
+}
+
+const loadSystemUsers = async () => {
+  try {
+    const res = await getUsers({ page: 1, per_page: 1000 })
+    if (res.code === 200) {
+      const items = res.data?.items || []
+      systemUserOptions.value = items.map((item: any) => ({
+        label: item.username,
+        value: item.id
+      }))
+    }
+  } catch (error) {
+    console.error(error)
+  }
+}
+
+const normalizeOptions = (options: any): { label: string; value: any }[] => {
+  if (!Array.isArray(options)) return []
+  return options
+    .map((item: any) => ({
+      label: item?.label ?? item?.name ?? item?.value,
+      value: item?.value ?? item?.code ?? item?.id
+    }))
+    .filter((item) => item.label !== undefined && item.value !== undefined)
+}
+
+const extractFieldsFromFormConfig = (formConfig: any[]): any[] => {
+  const fields: any[] = []
+  const walk = (items: any[], groupMeta?: { id: string; label: string; order: number }) => {
+    items.forEach((item: any, index: number) => {
+      if (item?.controlType === 'group' && Array.isArray(item.children)) {
+        walk(item.children, {
+          id: item.id || `group_${index}`,
+          label: item.props?.label || '属性分组',
+          order: index
+        })
+        return
+      }
+      if (!item?.props?.code) return
+      fields.push({
+        id: item.id || `field_${index}_${item.props.code}`,
+        code: item.props.code,
+        name: item.props.label || item.props.code,
+        field_type: mapControlTypeToFieldType(item.controlType),
+        control_type: item.controlType,
+        required: item.props.required || false,
+        default_value: item.props.defaultValue,
+        placeholder: item.props.placeholder || '',
+        span: item.props.span || 12,
+        sort_order: index,
+        mode: item.props.mode || 'multiple',
+        option_type: item.props.optionType || 'custom',
+        dictionary_code: item.props.dictionaryCode || '',
+        options: normalizeOptions(item.props.options),
+        user_ids: Array.isArray(item.props.userIds) ? item.props.userIds : [],
+        group_id: groupMeta?.id || '__base__',
+        group_label: groupMeta?.label || '基础属性',
+        group_order: groupMeta?.order ?? -1
+      })
+    })
+  }
+  walk(formConfig || [])
+  return fields
+}
+
 const fetchModelDetail = async () => {
   if (!props.modelId) return
   
@@ -315,20 +461,13 @@ const fetchModelDetail = async () => {
       }
       
       if (formConfig.length > 0) {
-        // 从 form_config 解析字段
-        const fields = formConfig.map((item: any, index: number) => ({
-          id: item.id || `field_${index}`,
-          code: item.props?.code || item.id,
-          name: item.props?.label || item.props?.code || '',
-          field_type: mapControlTypeToFieldType(item.controlType),
-          required: item.props?.required || false,
-          default_value: item.props?.defaultValue || '',
-          placeholder: item.props?.placeholder || '',
-          span: item.props?.span || 12,
-          sort_order: index
-        }))
-        
-        modelFields.value = fields
+        modelFields.value = extractFieldsFromFormConfig(formConfig)
+        for (const field of modelFields.value) {
+          if (field.option_type === 'dictionary' && field.dictionary_code) {
+            await ensureDictionaryOptionsLoaded(field.dictionary_code)
+            field.options = dictOptionsMap.value[field.dictionary_code] || []
+          }
+        }
       } else {
         // 使用传统的 regions/fields
         modelFields.value = res.data.fields || []
@@ -378,11 +517,22 @@ const fetchDepartments = async () => {
 }
 
 const getFieldOptions = (field: any) => {
+  if (Array.isArray(field.options)) {
+    return field.options
+  }
   try {
     return JSON.parse(field.options || '[]')
   } catch {
     return []
   }
+}
+
+const getUserOptions = (field: any) => {
+  const options = getFieldOptions(field)
+  if (options.length > 0) return options
+  const selectedIds = Array.isArray(field.user_ids) ? field.user_ids : []
+  if (!selectedIds.length) return systemUserOptions.value
+  return systemUserOptions.value.filter((item) => selectedIds.includes(item.value))
 }
 
 const loadCascadeData = async (selectedOptions: any[], field: any) => {
@@ -492,5 +642,25 @@ const handleCancel = () => {
 <style scoped>
 :deep(.ant-divider-horizontal.ant-divider-with-text) {
   margin: 16px 0;
+}
+
+.field-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.field-group-card {
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  padding: 12px;
+  background: #fff;
+}
+
+.field-group-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1f1f1f;
+  margin-bottom: 8px;
 }
 </style>

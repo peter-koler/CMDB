@@ -68,10 +68,14 @@
             :key="section.key"
             class="attributes-section-simple"
           >
-            <div v-if="section.title && attributeSections.length > 1" class="attributes-section-title">
-              {{ section.title }}
+            <div v-if="section.title" class="attributes-section-title" @click="toggleSectionCollapsed(section.key)">
+              <span class="section-title-main">
+                <CaretRightOutlined v-if="isSectionCollapsed(section.key)" />
+                <CaretDownOutlined v-else />
+                {{ section.title }}
+              </span>
             </div>
-            <a-row :gutter="[12, 12]">
+            <a-row v-show="!isSectionCollapsed(section.key)" :gutter="[12, 12]">
               <a-col
                 v-for="field in section.fields"
                 :key="field.code"
@@ -80,6 +84,7 @@
               >
                 <div class="attribute-line">
                   <span class="attribute-line-label">
+                    <span v-if="isKeyField(field.code)" class="key-field-star">*</span>
                     {{ field.name }}<span v-if="field.required" style="color:#f5222d;">*</span>：
                   </span>
                   <div class="attribute-line-value-box">
@@ -87,22 +92,29 @@
                       {{ getFieldValue(field.code) ? '是' : '否' }}
                     </template>
                     <template v-else-if="field.field_type === 'image'">
-                      <a-image
-                        v-if="getFieldValue(field.code)"
-                        :src="getFieldValue(field.code)"
-                        :width="96"
-                      />
+                      <div v-if="getImageEntries(getFieldValue(field.code)).length" class="image-thumb-list">
+                        <img
+                          v-for="img in getImageEntries(getFieldValue(field.code))"
+                          :key="img.url"
+                          :src="img.url"
+                          :alt="img.name"
+                          class="image-thumb"
+                          @click="openImageInNewWindow(img.url)"
+                        />
+                      </div>
                       <span v-else class="empty-value">-</span>
                     </template>
                     <template v-else-if="field.field_type === 'file'">
-                      <a-button
-                        v-if="getFieldValue(field.code)"
-                        type="link"
-                        size="small"
-                        @click="downloadFile(getFieldValue(field.code))"
-                      >
-                        下载文件
-                      </a-button>
+                      <div v-if="getFileEntries(getFieldValue(field.code)).length" class="file-entry-list">
+                        <a
+                          v-for="file in getFileEntries(getFieldValue(field.code))"
+                          :key="file.url"
+                          class="file-entry-link"
+                          @click.prevent="downloadFile(file)"
+                        >
+                          {{ file.name }}（{{ getDisplayFileSize(file) }}）
+                        </a>
+                      </div>
                       <span v-else class="empty-value">-</span>
                     </template>
                     <template v-else>
@@ -306,6 +318,8 @@ import { getInstanceDetail, getCiHistory, deleteInstance, getInstances, getInsta
 import { getInstanceRelations, createRelation, deleteRelation as deleteRelationApi, getRelationTypes } from '@/api/cmdb-relation'
 import {
   PlusOutlined,
+  CaretRightOutlined,
+  CaretDownOutlined,
   ZoomInOutlined,
   ZoomOutOutlined,
   FullscreenOutlined,
@@ -336,6 +350,7 @@ const activeTab = ref('basic')
 const ciData = ref<any>(null)
 const modelFields = ref<any[]>([])
 const attributeSections = ref<any[]>([])
+const sectionCollapsedMap = ref<Record<string, boolean>>({})
 const historyList = ref<any[]>([])
 const loading = ref(false)
 const historyLoading = ref(false)
@@ -364,6 +379,7 @@ const relationsCount = reactive({
   out_relations: 0,
   in_relations: 0
 })
+const fileSizeCache = ref<Record<string, number | null>>({})
 
 // 拓扑图相关
 const graphContainer = ref<HTMLElement>()
@@ -761,8 +777,111 @@ const attributeValues = computed(() => {
   }
 })
 
+const keyFieldCodeSet = computed(() => {
+  const codes = ciData.value?.model?.key_field_codes
+  if (!Array.isArray(codes)) return new Set<string>()
+  return new Set(codes.map((code: any) => String(code)))
+})
+
+const isKeyField = (code: string) => {
+  return keyFieldCodeSet.value.has(String(code))
+}
+
+const isSectionCollapsed = (sectionKey: string) => {
+  return Boolean(sectionCollapsedMap.value[sectionKey])
+}
+
+const toggleSectionCollapsed = (sectionKey: string) => {
+  sectionCollapsedMap.value = {
+    ...sectionCollapsedMap.value,
+    [sectionKey]: !sectionCollapsedMap.value[sectionKey]
+  }
+}
+
 const getFieldValue = (code: string) => {
   return attributeValues.value?.[code]
+}
+
+const safeJsonParse = (value: any) => {
+  if (typeof value !== 'string') return value
+  try {
+    return JSON.parse(value)
+  } catch {
+    return value
+  }
+}
+
+const normalizeAssetEntry = (entry: any) => {
+  if (!entry) return null
+  if (typeof entry === 'string') {
+    const clean = entry.trim()
+    if (!clean) return null
+    const filename = clean.split('/').pop() || '附件'
+    return { url: clean, name: filename, size: null as number | null }
+  }
+  if (typeof entry === 'object') {
+    const url = String(entry.url || entry.path || entry.href || '').trim()
+    if (!url) return null
+    const name = entry.filename || entry.name || (url.split('/').pop() || '附件')
+    const rawSize = entry.size ?? entry.file_size ?? null
+    const size = typeof rawSize === 'number'
+      ? rawSize
+      : (rawSize ? Number(rawSize) || null : null)
+    return { url, name, size }
+  }
+  return null
+}
+
+const getAssetEntries = (rawValue: any) => {
+  const parsed = safeJsonParse(rawValue)
+  const list = Array.isArray(parsed) ? parsed : [parsed]
+  return list
+    .map((entry: any) => normalizeAssetEntry(entry))
+    .filter(Boolean) as Array<{ url: string; name: string; size: number | null }>
+}
+
+const getImageEntries = (rawValue: any) => {
+  return getAssetEntries(rawValue)
+}
+
+const ensureFileSize = async (url: string) => {
+  if (!url || Object.prototype.hasOwnProperty.call(fileSizeCache.value, url)) return
+  fileSizeCache.value[url] = null
+  try {
+    const resp = await fetch(url, { method: 'HEAD' })
+    const sizeHeader = resp.headers.get('content-length')
+    if (sizeHeader) {
+      const size = Number(sizeHeader)
+      fileSizeCache.value[url] = Number.isFinite(size) ? size : null
+    }
+  } catch {
+    fileSizeCache.value[url] = null
+  }
+}
+
+const getFileEntries = (rawValue: any) => {
+  const entries = getAssetEntries(rawValue)
+  entries.forEach((entry) => {
+    if (entry.size === null) {
+      ensureFileSize(entry.url)
+    } else {
+      fileSizeCache.value[entry.url] = entry.size
+    }
+  })
+  return entries
+}
+
+const formatFileSize = (size: number | null | undefined) => {
+  if (size === null || size === undefined || Number.isNaN(size)) return '-'
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
+  if (size < 1024 * 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} MB`
+  return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`
+}
+
+const getDisplayFileSize = (file: { url: string; size: number | null }) => {
+  const size = file.size ?? fileSizeCache.value[file.url]
+  return formatFileSize(size)
 }
 
 const getFieldCol = (field: any) => {
@@ -839,6 +958,7 @@ const buildAttributeSchema = (formConfig: any) => {
         sections.push({
           key: `group_${index}`,
           title: item?.props?.label || `属性分组 ${index + 1}`,
+          collapsed: !!item?.props?.collapsed,
           fields: groupFields
         })
       }
@@ -855,6 +975,7 @@ const buildAttributeSchema = (formConfig: any) => {
     sections.unshift({
       key: 'default_fields',
       title: '基础属性',
+      collapsed: false,
       fields: defaultSectionFields
     })
   }
@@ -909,6 +1030,7 @@ watch(() => props.visible, (val) => {
   if (val) {
     currentInstanceId.value = props.instanceId || null
     activeTab.value = 'basic'
+    sectionCollapsedMap.value = {}
     historyPagination.value = { current: 1, pageSize: 10, total: 0 }
     if (getActiveInstanceId()) {
       fetchDetail()
@@ -932,6 +1054,10 @@ const fetchDetail = async () => {
         const schema = buildAttributeSchema(formConfig)
         modelFields.value = schema.fields
         attributeSections.value = schema.sections
+        sectionCollapsedMap.value = schema.sections.reduce((acc: Record<string, boolean>, section: any) => {
+          acc[section.key] = !!section.collapsed
+          return acc
+        }, {})
       } else {
         const fields = (res.data.model?.fields || []).map((field: any) => ({
           id: field.id || field.code,
@@ -949,6 +1075,7 @@ const fetchDetail = async () => {
         attributeSections.value = fields.length
           ? [{ key: 'default_fields', title: '基础属性', fields }]
           : []
+        sectionCollapsedMap.value = { default_fields: false }
       }
     }
   } catch (error) {
@@ -1077,8 +1204,21 @@ const mapControlTypeToFieldType = (controlType: string): string => {
   return typeMap[controlType] || 'text'
 }
 
-const downloadFile = (url: string) => {
+const openImageInNewWindow = (url: string) => {
+  if (!url) return
   window.open(url, '_blank')
+}
+
+const downloadFile = (file: { url: string; name: string }) => {
+  if (!file?.url) return
+  const link = document.createElement('a')
+  link.href = file.url
+  link.download = file.name || 'download'
+  link.target = '_blank'
+  link.rel = 'noopener'
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
 }
 
 const truncate = (str: string, maxLen: number) => {
@@ -1247,6 +1387,14 @@ onMounted(() => {
   font-weight: 600;
   color: #1f1f1f;
   margin-bottom: 10px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.section-title-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .attribute-line {
@@ -1262,6 +1410,12 @@ onMounted(() => {
   font-size: 13px;
   font-weight: 600;
   color: #262626;
+}
+
+.key-field-star {
+  color: #f5222d;
+  margin-right: 2px;
+  font-weight: 700;
 }
 
 .attribute-line-value-box {
@@ -1288,6 +1442,43 @@ onMounted(() => {
 
 .empty-value {
   color: #999;
+}
+
+.image-thumb-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  min-height: 34px;
+}
+
+.image-thumb {
+  width: 56px;
+  height: 56px;
+  border-radius: 6px;
+  border: 1px solid #d9e9ff;
+  object-fit: cover;
+  cursor: pointer;
+  background: #fff;
+}
+
+.file-entry-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 34px;
+  justify-content: center;
+}
+
+.file-entry-link {
+  color: #1677ff;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.file-entry-link:hover {
+  color: #4096ff;
+  text-decoration: underline;
 }
 
 .ci-graph-container {

@@ -110,7 +110,7 @@
                 {{ record.category_name }}
               </template>
               <template v-else-if="column.key === 'type'">
-                {{ record.model_type_name || '-' }}
+                {{ getModelTypeDisplay(record) }}
               </template>
               <template v-else-if="column.key === 'key_fields'">
                 <a-tag v-if="record.key_field_codes?.length">
@@ -200,10 +200,10 @@
             style="width: 100%"
           />
         </a-form-item>
-        <a-form-item label="模型类型" name="model_type_id">
-          <a-select v-model:value="modelForm.model_type_id" placeholder="请选择模型类型" allowClear>
-            <a-select-option v-for="type in modelTypes" :key="type.id" :value="type.id">
-              {{ type.name }}
+        <a-form-item label="模型类型" name="model_type_code">
+          <a-select v-model:value="modelForm.model_type_code" placeholder="请选择模型类型" allowClear>
+            <a-select-option v-for="type in modelTypeDictOptions" :key="type.value" :value="type.value">
+              {{ type.label }}
             </a-select-option>
           </a-select>
         </a-form-item>
@@ -298,6 +298,7 @@ import {
   updateCategory,
   deleteCategory,
   getModelTypes,
+  getDictItemsByTypeCode,
   getModels,
   getModelDetail,
   createModel,
@@ -332,6 +333,13 @@ const categoryTreeForSelect = computed(() => {
 
 // 模型类型
 const modelTypes = ref<any[]>([])
+const modelTypeDictOptions = ref<{ label: string; value: string }[]>([])
+const modelTypeDictLabelMap = computed(() => {
+  return modelTypeDictOptions.value.reduce((acc: Record<string, string>, item) => {
+    acc[item.value] = item.label
+    return acc
+  }, {})
+})
 
 // 模型列表
 const loading = ref(false)
@@ -426,6 +434,7 @@ const modelForm = reactive({
   code: '',
   category_id: null as number | null,
   model_type_id: null as number | null,
+  model_type_code: '',
   icon: 'AppstoreOutlined',
   icon_url: '',
   key_field_codes: [] as string[],
@@ -452,6 +461,7 @@ const currentModel = ref<any>(null)
 onMounted(() => {
   fetchCategories()
   fetchModelTypes()
+  fetchModelTypeDict()
   fetchModels()
 })
 
@@ -490,6 +500,25 @@ const extractFieldOptionsFromFormConfig = (formConfig: any): { label: string; va
   return result
 }
 
+const getModelTypeCodeFromRecord = (record: any): string => {
+  if (!record) return ''
+  if (record.model_type_code) return String(record.model_type_code)
+  const config = typeof record.config === 'string'
+    ? (() => {
+      try { return JSON.parse(record.config) } catch { return {} }
+    })()
+    : (record.config || {})
+  return config?.model_type_code ? String(config.model_type_code) : ''
+}
+
+const getModelTypeDisplay = (record: any): string => {
+  const dictCode = getModelTypeCodeFromRecord(record)
+  if (dictCode && modelTypeDictLabelMap.value[dictCode]) {
+    return modelTypeDictLabelMap.value[dictCode]
+  }
+  return record.model_type_name || '-'
+}
+
 // 获取目录树
 const fetchCategories = async () => {
   try {
@@ -523,6 +552,33 @@ const fetchModelTypes = async () => {
     }
   } catch (error) {
     console.error(error)
+  }
+}
+
+const flattenDictItems = (items: any[], parentLabel = ''): { label: string; value: string }[] => {
+  const result: { label: string; value: string }[] = []
+  ;(items || []).forEach((item: any) => {
+    const currentLabel = parentLabel ? `${parentLabel} / ${item.label}` : item.label
+    result.push({
+      label: currentLabel,
+      value: String(item.code)
+    })
+    if (Array.isArray(item.children) && item.children.length > 0) {
+      result.push(...flattenDictItems(item.children, currentLabel))
+    }
+  })
+  return result
+}
+
+const fetchModelTypeDict = async () => {
+  try {
+    const res = await getDictItemsByTypeCode('mode_type', { enabled: true })
+    if (res.code === 200) {
+      modelTypeDictOptions.value = flattenDictItems(res.data?.items || [])
+    }
+  } catch (error) {
+    console.error(error)
+    modelTypeDictOptions.value = []
   }
 }
 
@@ -678,6 +734,7 @@ const showModelModal = async (model?: any) => {
     keyFieldOptions.value = extractFieldOptionsFromFormConfig(detail.form_config)
     Object.assign(modelForm, {
       ...detail,
+      model_type_code: detail.model_type_code || detail.config?.model_type_code || '',
       icon: detail.icon || 'AppstoreOutlined',
       icon_url: detail.icon_url || detail.config?.icon_url || '',
       key_field_codes: detail.key_field_codes || detail.config?.key_field_codes || []
@@ -691,6 +748,7 @@ const showModelModal = async (model?: any) => {
       code: '',
       category_id: currentCategoryId.value,
       model_type_id: null,
+      model_type_code: '',
       icon: 'AppstoreOutlined',
       icon_url: '',
       key_field_codes: [],
@@ -710,8 +768,18 @@ const handleModelSubmit = async () => {
       return
     }
     modelLoading.value = true
+    const currentConfig = typeof (modelForm as any).config === 'string'
+      ? (() => {
+        try { return JSON.parse((modelForm as any).config) } catch { return {} }
+      })()
+      : ((modelForm as any).config || {})
     const payload = {
       ...modelForm,
+      model_type_id: null,
+      config: {
+        ...currentConfig,
+        model_type_code: modelForm.model_type_code || ''
+      },
       icon_url: iconSelectionMode.value === 'custom' ? modelForm.icon_url : '',
       key_field_codes: modelForm.key_field_codes.slice(0, 3)
     }

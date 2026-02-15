@@ -64,6 +64,10 @@
             <template #icon><ThunderboltOutlined /></template>
             <span>{{ t('menu.relationTrigger') }}</span>
           </a-menu-item>
+          <a-menu-item key="dictionary" @click="navigateTo('/config/dictionary')">
+            <template #icon><BookOutlined /></template>
+            <span>{{ t('menu.dictionary') }}</span>
+          </a-menu-item>
         </a-sub-menu>
         
         <a-sub-menu key="system">
@@ -192,6 +196,7 @@ import {
   AppstoreOutlined,
   DashboardOutlined,
   DatabaseOutlined,
+  BookOutlined,
   NodeIndexOutlined,
   ThunderboltOutlined,
   ShareAltOutlined,
@@ -220,6 +225,7 @@ const menuMap: Record<string, { parent: string; title: string }> = {
   '/config/model': { parent: t('menu.config'), title: t('menu.model') },
   '/config/relation-type': { parent: t('menu.config'), title: t('menu.relationType') },
   '/config/relation-trigger': { parent: t('menu.config'), title: t('menu.relationTrigger') },
+  '/config/dictionary': { parent: t('menu.config'), title: t('menu.dictionary') },
   '/system/user': { parent: t('menu.system'), title: t('menu.user') },
   '/system/department': { parent: t('menu.system'), title: t('menu.department') },
   '/system/role': { parent: t('menu.system'), title: t('menu.role') },
@@ -267,6 +273,9 @@ const updateSelectedKeys = () => {
     openKeys.value = ['config']
   } else if (path.includes('/config/relation-trigger')) {
     selectedKeys.value = ['relation-trigger']
+    openKeys.value = ['config']
+  } else if (path.includes('/config/dictionary')) {
+    selectedKeys.value = ['dictionary']
     openKeys.value = ['config']
   } else if (path.includes('/system/user')) {
     selectedKeys.value = ['user']
