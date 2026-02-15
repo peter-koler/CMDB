@@ -121,6 +121,14 @@ export const generateCICode = () => {
   })
 }
 
+// 获取CI关联关系数量
+export const getInstanceRelationsCount = (id: number) => {
+  return request({
+    url: `/cmdb/instances/${id}/relations-count`,
+    method: 'GET'
+  })
+}
+
 // 批量导出
 export const exportInstances = (data: any) => {
   return request({

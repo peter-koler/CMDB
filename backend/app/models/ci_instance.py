@@ -55,11 +55,18 @@ class CiInstance(db.Model):
         """详情展示用的字典，包含完整的模型信息"""
         data = self.to_dict()
         if self.model:
+            model_config = {}
+            try:
+                model_config = json.loads(self.model.config) if self.model.config else {}
+            except Exception:
+                model_config = {}
             data['model'] = {
                 'id': self.model.id,
                 'name': self.model.name,
                 'code': self.model.code,
                 'icon': self.model.icon,
+                'icon_url': model_config.get('icon_url'),
+                'key_field_codes': model_config.get('key_field_codes', []),
                 'form_config': self.model.form_config,
                 'fields': [{'id': f.id, 'code': f.code, 'name': f.name, 'field_type': f.field_type} 
                           for f in self.model.fields] if self.model.fields else []

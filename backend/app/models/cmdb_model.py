@@ -22,17 +22,38 @@ class CmdbModel(db.Model):
     regions = db.relationship('ModelRegion', backref='model', lazy='dynamic', cascade='all, delete-orphan')
     fields = db.relationship('ModelField', backref='model', lazy='dynamic', cascade='all, delete-orphan',
                              foreign_keys='ModelField.model_id')
+
+    def get_config(self):
+        try:
+            return json.loads(self.config) if self.config else {}
+        except Exception:
+            return {}
+
+    def set_config(self, config_data):
+        self.config = json.dumps(config_data or {}, ensure_ascii=False)
+
+    @property
+    def icon_url(self):
+        return self.get_config().get('icon_url')
+
+    @property
+    def key_field_codes(self):
+        value = self.get_config().get('key_field_codes', [])
+        return value if isinstance(value, list) else []
     
     def to_dict(self):
+        config_data = self.get_config()
         return {
             'id': self.id,
             'name': self.name,
             'code': self.code,
             'icon': self.icon,
+            'icon_url': config_data.get('icon_url'),
+            'key_field_codes': self.key_field_codes,
             'category_id': self.category_id,
             'model_type_id': self.model_type_id,
             'description': self.description,
-            'config': json.loads(self.config) if self.config else {},
+            'config': config_data,
             'form_config': json.loads(self.form_config) if self.form_config else [],
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,

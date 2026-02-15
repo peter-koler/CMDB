@@ -44,7 +44,7 @@
         row-key="id"
       >
         <template #bodyCell="{ column, record }">
-          <template v-else-if="column.key === 'is_active'">
+          <template v-if="column.key === 'is_active'">
             <a-tag :color="record.is_active ? 'green' : 'red'">
               {{ record.is_active ? '启用' : '禁用' }}
             </a-tag>

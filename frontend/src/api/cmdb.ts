@@ -108,6 +108,19 @@ export function deleteModel(id: number) {
   })
 }
 
+export function uploadModelIcon(file: File) {
+  const formData = new FormData()
+  formData.append('file', file)
+  return request({
+    url: '/cmdb/models/icon-upload',
+    method: 'post',
+    data: formData,
+    headers: {
+      'Content-Type': 'multipart/form-data'
+    }
+  })
+}
+
 // 模型区域
 export function createRegion(modelId: number, data: any) {
   return request({

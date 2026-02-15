@@ -99,13 +99,24 @@
           >
             <template #bodyCell="{ column, record }">
               <template v-if="column.key === 'icon'">
-                <component :is="record.icon || 'AppstoreOutlined'" />
+                <img
+                  v-if="record.icon_url"
+                  :src="record.icon_url"
+                  style="width: 20px; height: 20px; object-fit: contain;"
+                />
+                <component v-else :is="iconComponentMap[record.icon] || AppstoreOutlined" />
               </template>
               <template v-else-if="column.key === 'category'">
                 {{ record.category_name }}
               </template>
               <template v-else-if="column.key === 'type'">
                 {{ record.model_type_name || '-' }}
+              </template>
+              <template v-else-if="column.key === 'key_fields'">
+                <a-tag v-if="record.key_field_codes?.length">
+                  {{ record.key_field_codes.join(', ') }}
+                </a-tag>
+                <span v-else>-</span>
               </template>
               <template v-else-if="column.key === 'action'">
                 <a-space wrap>
@@ -197,7 +208,56 @@
           </a-select>
         </a-form-item>
         <a-form-item label="模型图标" name="icon">
-          <a-input v-model:value="modelForm.icon" placeholder="请输入图标名称，如：AppstoreOutlined" />
+          <a-space direction="vertical" style="width: 100%">
+            <div class="icon-picker">
+              <button
+                v-for="icon in builtinIconOptions"
+                :key="icon"
+                type="button"
+                class="icon-picker-item"
+                :class="{ 'icon-picker-item-selected': iconSelectionMode === 'builtin' && modelForm.icon === icon }"
+                @click="selectBuiltinIcon(icon)"
+              >
+                <component :is="iconComponentMap[icon] || AppstoreOutlined" />
+              </button>
+              <button
+                v-if="hasUploadedIcon"
+                type="button"
+                class="icon-picker-item"
+                :class="{ 'icon-picker-item-selected': iconSelectionMode === 'custom' }"
+                @click="iconSelectionMode = 'custom'"
+              >
+                <img :src="modelForm.icon_url" class="icon-picker-image" />
+              </button>
+            </div>
+            <a-upload
+              :show-upload-list="false"
+              :before-upload="beforeUploadModelIcon"
+              accept=".png,.svg"
+            >
+              <a-button :loading="iconUploading">
+                上传自定义图标（png/svg，<=2MB）
+              </a-button>
+            </a-upload>
+            <a-space align="center">
+              <span style="color: #999;">当前生效图标：</span>
+              <img v-if="iconSelectionMode === 'custom' && hasUploadedIcon" :src="modelForm.icon_url" style="width: 20px; height: 20px; object-fit: contain;" />
+              <component v-else :is="iconComponentMap[modelForm.icon] || AppstoreOutlined" />
+            </a-space>
+          </a-space>
+        </a-form-item>
+        <a-form-item label="关键属性" name="key_field_codes">
+          <a-select
+            v-model:value="modelForm.key_field_codes"
+            mode="multiple"
+            :max-tag-count="3"
+            placeholder="请选择关键属性（最多3个）"
+            :options="keyFieldOptions"
+            :disabled="keyFieldOptions.length === 0"
+          />
+          <div style="color: #999; margin-top: 4px;">
+            {{ keyFieldOptions.length === 0 ? '当前模型暂无可用字段，请先在模型设计中配置文本/数字/枚举/日期类字段。' : '按选择顺序展示，空值将自动跳过。' }}
+          </div>
         </a-form-item>
         <a-form-item label="模型描述" name="description">
           <a-textarea v-model:value="modelForm.description" :rows="3" placeholder="请输入模型描述" />
@@ -218,6 +278,16 @@
 import { ref, reactive, onMounted, h, computed } from 'vue'
 import { message } from 'ant-design-vue'
 import {
+  ApiOutlined,
+  AppstoreOutlined,
+  CloudServerOutlined,
+  ClusterOutlined,
+  ContainerOutlined,
+  DatabaseOutlined,
+  DeploymentUnitOutlined,
+  GlobalOutlined,
+  HddOutlined,
+  LaptopOutlined,
   PlusOutlined,
   ReloadOutlined,
   SearchOutlined
@@ -229,10 +299,12 @@ import {
   deleteCategory,
   getModelTypes,
   getModels,
+  getModelDetail,
   createModel,
   updateModel,
   deleteModel,
-  exportModel
+  exportModel,
+  uploadModelIcon
 } from '@/api/cmdb'
 import ModelDesigner from './components/ModelDesigner.vue'
 
@@ -283,6 +355,7 @@ const columns = [
   { title: '模型编码', dataIndex: 'code', key: 'code' },
   { title: '所属目录', key: 'category' },
   { title: '模型类型', key: 'type' },
+  { title: '关键属性', key: 'key_fields', width: 220 },
   { title: '描述', dataIndex: 'description', key: 'description', ellipsis: true },
   { title: '操作', key: 'action', width: 250 }
 ]
@@ -316,8 +389,37 @@ const categoryRules = {
 // 模型编辑
 const modelModalVisible = ref(false)
 const modelLoading = ref(false)
+const iconUploading = ref(false)
+const iconSelectionMode = ref<'builtin' | 'custom'>('builtin')
 const isEditModel = ref(false)
 const modelFormRef = ref()
+const builtinIconOptions = [
+  'AppstoreOutlined',
+  'DatabaseOutlined',
+  'CloudServerOutlined',
+  'ClusterOutlined',
+  'HddOutlined',
+  'ApiOutlined',
+  'DeploymentUnitOutlined',
+  'ContainerOutlined',
+  'LaptopOutlined',
+  'GlobalOutlined'
+]
+const iconComponentMap: Record<string, any> = {
+  AppstoreOutlined,
+  DatabaseOutlined,
+  CloudServerOutlined,
+  ClusterOutlined,
+  HddOutlined,
+  ApiOutlined,
+  DeploymentUnitOutlined,
+  ContainerOutlined,
+  LaptopOutlined,
+  GlobalOutlined
+}
+const KEY_FIELD_ALLOWED_CONTROL_TYPES = ['text', 'textarea', 'number', 'date', 'datetime', 'select', 'radio']
+const keyFieldOptions = ref<{ label: string; value: string }[]>([])
+
 const modelForm = reactive({
   id: null as number | null,
   name: '',
@@ -325,6 +427,8 @@ const modelForm = reactive({
   category_id: null as number | null,
   model_type_id: null as number | null,
   icon: 'AppstoreOutlined',
+  icon_url: '',
+  key_field_codes: [] as string[],
   description: ''
 })
 
@@ -332,6 +436,12 @@ const modelRules = {
   name: [{ required: true, message: '请输入模型名称' }],
   code: [{ required: true, message: '请输入模型编码' }],
   category_id: [{ required: true, message: '请选择所属目录' }]
+}
+const hasUploadedIcon = computed(() => !!modelForm.icon_url)
+
+const selectBuiltinIcon = (icon: string) => {
+  modelForm.icon = icon
+  iconSelectionMode.value = 'builtin'
 }
 
 // 设计器
@@ -344,6 +454,41 @@ onMounted(() => {
   fetchModelTypes()
   fetchModels()
 })
+
+const extractFieldOptionsFromFormConfig = (formConfig: any): { label: string; value: string }[] => {
+  let config = formConfig
+  if (!config) return []
+  if (typeof config === 'string') {
+    try {
+      config = JSON.parse(config)
+    } catch {
+      return []
+    }
+  }
+  if (!Array.isArray(config)) return []
+
+  const result: { label: string; value: string }[] = []
+  const seen = new Set<string>()
+
+  const pushField = (item: any) => {
+    const controlType = item?.controlType
+    const code = item?.props?.code
+    const label = item?.props?.label || code
+    if (!code || !KEY_FIELD_ALLOWED_CONTROL_TYPES.includes(controlType)) return
+    if (seen.has(code)) return
+    seen.add(code)
+    result.push({ label, value: code })
+  }
+
+  config.forEach((item: any) => {
+    pushField(item)
+    if (Array.isArray(item?.children)) {
+      item.children.forEach((child: any) => pushField(child))
+    }
+  })
+
+  return result
+}
 
 // 获取目录树
 const fetchCategories = async () => {
@@ -404,7 +549,7 @@ const fetchModels = async () => {
 }
 
 // 目录选择
-const onCategorySelect = (selectedKeys: any, info: any) => {
+const onCategorySelect = (selectedKeys: any) => {
   selectedCategoryKeys.value = selectedKeys
   currentCategoryId.value = selectedKeys[0] || null
   pagination.current = 1
@@ -517,11 +662,29 @@ const handleTableChange = (pag: any) => {
 }
 
 // 显示模型弹窗
-const showModelModal = (model?: any) => {
+const showModelModal = async (model?: any) => {
   isEditModel.value = !!model
   if (model) {
-    Object.assign(modelForm, model)
+    let detail = model
+    try {
+      const res = await getModelDetail(model.id)
+      if (res.code === 200) {
+        detail = res.data
+      }
+    } catch (error) {
+      console.error(error)
+    }
+
+    keyFieldOptions.value = extractFieldOptionsFromFormConfig(detail.form_config)
+    Object.assign(modelForm, {
+      ...detail,
+      icon: detail.icon || 'AppstoreOutlined',
+      icon_url: detail.icon_url || detail.config?.icon_url || '',
+      key_field_codes: detail.key_field_codes || detail.config?.key_field_codes || []
+    })
+    iconSelectionMode.value = modelForm.icon_url ? 'custom' : 'builtin'
   } else {
+    keyFieldOptions.value = []
     Object.assign(modelForm, {
       id: null,
       name: '',
@@ -529,8 +692,11 @@ const showModelModal = (model?: any) => {
       category_id: currentCategoryId.value,
       model_type_id: null,
       icon: 'AppstoreOutlined',
+      icon_url: '',
+      key_field_codes: [],
       description: ''
     })
+    iconSelectionMode.value = 'builtin'
   }
   modelModalVisible.value = true
 }
@@ -539,13 +705,22 @@ const showModelModal = (model?: any) => {
 const handleModelSubmit = async () => {
   try {
     await modelFormRef.value.validate()
+    if (modelForm.key_field_codes.length > 3) {
+      message.warning('关键属性最多只能选择 3 个')
+      return
+    }
     modelLoading.value = true
-    
+    const payload = {
+      ...modelForm,
+      icon_url: iconSelectionMode.value === 'custom' ? modelForm.icon_url : '',
+      key_field_codes: modelForm.key_field_codes.slice(0, 3)
+    }
+
     if (isEditModel.value) {
-      await updateModel(modelForm.id!, modelForm)
+      await updateModel(modelForm.id!, payload)
       message.success('更新成功')
     } else {
-      await createModel(modelForm)
+      await createModel(payload)
       message.success('创建成功')
     }
     
@@ -558,6 +733,34 @@ const handleModelSubmit = async () => {
   } finally {
     modelLoading.value = false
   }
+}
+
+const beforeUploadModelIcon = async (file: File) => {
+  const isAllowedType = ['image/png', 'image/svg+xml'].includes(file.type)
+  if (!isAllowedType) {
+    message.error('仅支持 PNG 或 SVG 格式')
+    return false
+  }
+  const isLt2M = file.size / 1024 / 1024 <= 2
+  if (!isLt2M) {
+    message.error('图标大小不能超过 2MB')
+    return false
+  }
+
+  iconUploading.value = true
+  try {
+    const res = await uploadModelIcon(file)
+    if (res.code === 200) {
+      modelForm.icon_url = res.data.url
+      iconSelectionMode.value = 'custom'
+      message.success('图标上传成功')
+    }
+  } catch (error: any) {
+    message.error(error.response?.data?.message || '图标上传失败')
+  } finally {
+    iconUploading.value = false
+  }
+  return false
 }
 
 // 删除模型
@@ -600,6 +803,8 @@ const handleDesignerSave = async (data: any) => {
       name: data.name,
       code: data.code,
       icon: data.icon,
+      icon_url: data.icon_url ?? currentModel.value?.icon_url ?? '',
+      key_field_codes: data.key_field_codes ?? currentModel.value?.key_field_codes ?? [],
       category_id: data.category_id,
       model_type_id: data.model_type_id,
       description: data.description,
@@ -675,5 +880,43 @@ const handleDesignerSave = async (data: any) => {
 
 .table-card :deep(.ant-card-body) {
   padding: 24px;
+}
+
+.icon-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(44px, 1fr));
+  gap: 8px;
+}
+
+.icon-picker-item {
+  width: 44px;
+  height: 44px;
+  border: 1px solid #d9d9d9;
+  border-radius: 8px;
+  background: #fff;
+  color: #595959;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  transition: all 0.2s ease;
+}
+
+.icon-picker-image {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+}
+
+.icon-picker-item:hover {
+  border-color: #40a9ff;
+  color: #1677ff;
+}
+
+.icon-picker-item-selected {
+  border-color: #1677ff;
+  background: #e6f4ff;
+  color: #1677ff;
 }
 </style>

@@ -214,6 +214,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted, computed, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { message } from 'ant-design-vue'
 import {
   SearchOutlined,
@@ -233,6 +234,7 @@ import { getDepartments } from '@/api/department'
 import CiInstanceModal from './components/CiInstanceModal.vue'
 import CiDetailDrawer from './components/CiDetailDrawer.vue'
 import dayjs from 'dayjs'
+const route = useRoute()
 
 // 模型树（带分类和CI数量）
 const modelTree = ref<any[]>([])
@@ -283,13 +285,65 @@ onMounted(() => {
   fetchDepartments()
 })
 
+watch(
+  () => route.query,
+  () => {
+    if (modelTree.value.length > 0) {
+      applyRouteSelection()
+    }
+  }
+)
+
+const findModelNodeByModelId = (nodes: any[], modelId: number): any | null => {
+  for (const node of nodes) {
+    if (node.is_model && Number(node.model_id) === Number(modelId)) {
+      return node
+    }
+    if (node.children?.length) {
+      const found = findModelNodeByModelId(node.children, modelId)
+      if (found) return found
+    }
+  }
+  return null
+}
+
+const applyRouteSelection = async () => {
+  const routeModelId = Number(route.query.modelId)
+  const routeCiId = Number(route.query.ciId)
+
+  if (routeModelId) {
+    const targetNode = findModelNodeByModelId(modelTree.value, routeModelId)
+    if (targetNode) {
+      selectedModelKeys.value = [targetNode.id]
+      currentModelId.value = targetNode.model_id
+      currentModelName.value = targetNode.title
+      await fetchModelFields(targetNode.model_id)
+      pagination.current = 1
+      await fetchInstances()
+    }
+  }
+
+  if (routeCiId) {
+    currentInstanceId.value = routeCiId
+    detailDrawerVisible.value = true
+  }
+}
+
 const fetchModels = async () => {
   try {
     const res = await getModelsTree()
     if (res.code === 200) {
       modelTree.value = res.data
       filteredModelTree.value = res.data
-      
+
+      // 路由带模型/CI时按路由优先
+      const routeModelId = Number(route.query.modelId)
+      const routeCiId = Number(route.query.ciId)
+      if ((routeModelId || routeCiId) && modelTree.value.length > 0) {
+        await applyRouteSelection()
+        return
+      }
+
       // 默认选中"全部"或第一个模型
       if (modelTree.value.length > 0) {
         const firstNode = modelTree.value[0]

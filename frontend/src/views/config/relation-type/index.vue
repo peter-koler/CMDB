@@ -59,6 +59,15 @@
               {{ record.allow_self_loop ? '允许' : '禁止' }}
             </a-tag>
           </template>
+          <template v-else-if="column.key === 'style'">
+            <a-space size="small">
+              <span
+                style="display: inline-block; width: 14px; height: 14px; border-radius: 2px; border: 1px solid #d9d9d9;"
+                :style="{ backgroundColor: record.style?.color || '#1890ff' }"
+              />
+              <span>{{ record.style?.lineType === 'dashed' ? '虚线' : '实线' }}</span>
+            </a-space>
+          </template>
           <template v-else-if="column.key === 'action'">
             <a-space wrap>
               <a-button type="link" size="small" @click="showModal(record)">
@@ -159,6 +168,37 @@
         <a-form-item label="描述">
           <a-textarea v-model:value="form.description" :rows="3" placeholder="请输入描述" />
         </a-form-item>
+        <a-divider orientation="left">拓扑样式</a-divider>
+        <a-row :gutter="16">
+          <a-col :span="12">
+            <a-form-item label="连线颜色">
+              <a-input v-model:value="form.style.color" type="color" />
+            </a-form-item>
+          </a-col>
+          <a-col :span="12">
+            <a-form-item label="线宽">
+              <a-input-number v-model:value="form.style.lineWidth" :min="1" :max="10" style="width: 100%" />
+            </a-form-item>
+          </a-col>
+        </a-row>
+        <a-row :gutter="16">
+          <a-col :span="12">
+            <a-form-item label="线型">
+              <a-select v-model:value="form.style.lineType" placeholder="请选择线型">
+                <a-select-option value="solid">实线</a-select-option>
+                <a-select-option value="dashed">虚线</a-select-option>
+              </a-select>
+            </a-form-item>
+          </a-col>
+          <a-col :span="12">
+            <a-form-item label="箭头样式">
+              <a-select v-model:value="form.style.arrow" placeholder="请选择箭头样式">
+                <a-select-option value="default">默认</a-select-option>
+                <a-select-option value="none">无箭头</a-select-option>
+              </a-select>
+            </a-form-item>
+          </a-col>
+        </a-row>
       </a-form>
     </a-modal>
   </div>
@@ -195,6 +235,7 @@ const columns = [
   { title: '方向', dataIndex: 'direction', key: 'direction', width: 100 },
   { title: '基数限制', dataIndex: 'cardinality', key: 'cardinality', width: 100 },
   { title: '自环', dataIndex: 'allow_self_loop', key: 'allow_self_loop', width: 100 },
+  { title: '样式', key: 'style', width: 120 },
   { title: '描述', dataIndex: 'description', key: 'description', ellipsis: true },
   { title: '操作', key: 'action', width: 150, fixed: 'right' as const }
 ]
@@ -210,7 +251,13 @@ const form = reactive({
   source_model_ids: [] as number[],
   target_model_ids: [] as number[],
   allow_self_loop: false,
-  description: ''
+  description: '',
+  style: {
+    color: '#1890ff',
+    lineWidth: 2,
+    lineType: 'solid',
+    arrow: 'default'
+  }
 })
 
 const rules = {
@@ -271,7 +318,13 @@ const showModal = (record?: any) => {
       source_model_ids: record.source_model_ids || [],
       target_model_ids: record.target_model_ids || [],
       allow_self_loop: record.allow_self_loop,
-      description: record.description || ''
+      description: record.description || '',
+      style: {
+        color: record.style?.color || '#1890ff',
+        lineWidth: record.style?.lineWidth || 2,
+        lineType: record.style?.lineType || 'solid',
+        arrow: record.style?.arrow || 'default'
+      }
     })
   } else {
     Object.assign(form, {
@@ -285,7 +338,13 @@ const showModal = (record?: any) => {
       source_model_ids: [],
       target_model_ids: [],
       allow_self_loop: false,
-      description: ''
+      description: '',
+      style: {
+        color: '#1890ff',
+        lineWidth: 2,
+        lineType: 'solid',
+        arrow: 'default'
+      }
     })
   }
   modalVisible.value = true

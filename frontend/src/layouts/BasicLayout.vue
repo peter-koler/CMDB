@@ -44,7 +44,7 @@
             <span>{{ t('menu.history') }}</span>
           </a-menu-item>
           <a-menu-item key="topology" @click="navigateTo('/cmdb/topology')">
-            <template #icon><BranchOutlined /></template>
+            <template #icon><ShareAltOutlined /></template>
             <span>{{ t('menu.topology') }}</span>
           </a-menu-item>
         </a-sub-menu>
@@ -194,7 +194,7 @@ import {
   DatabaseOutlined,
   NodeIndexOutlined,
   ThunderboltOutlined,
-  BranchOutlined,
+  ShareAltOutlined,
   HddOutlined,
   CloudServerOutlined
 } from '@ant-design/icons-vue'

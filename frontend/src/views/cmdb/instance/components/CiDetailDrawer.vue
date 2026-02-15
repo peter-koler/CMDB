@@ -9,16 +9,27 @@
     <template #extra>
       <a-space>
         <a-button type="primary" @click="handleEdit">编辑</a-button>
-        <a-popconfirm
-          title="确定要删除此CI吗？"
-          ok-text="确定"
-          cancel-text="取消"
-          @confirm="handleDelete"
-        >
-          <a-button danger>删除</a-button>
-        </a-popconfirm>
+        <a-button danger @click="checkAndDelete">删除</a-button>
       </a-space>
     </template>
+
+    <!-- 删除确认弹窗 -->
+    <a-modal
+      v-model:open="deleteModalVisible"
+      title="确认删除"
+      @ok="confirmDelete"
+      :confirm-loading="deleteLoading"
+    >
+      <a-alert
+        v-if="relationsCount.total > 0"
+        type="warning"
+        :message="`该CI存在 ${relationsCount.total} 个关联关系`"
+        :description="`其中 ${relationsCount.out_relations} 个出边关系（依赖其他CI），${relationsCount.in_relations} 个入边关系（被其他CI依赖）。删除CI将同时删除这些关系，是否继续？`"
+        show-icon
+        style="margin-bottom: 16px"
+      />
+      <p v-else>确定要删除此CI吗？删除后无法恢复。</p>
+    </a-modal>
 
     <a-tabs v-model:activeKey="activeTab">
       <a-tab-pane key="basic" tab="基本信息">
@@ -48,59 +59,60 @@
       </a-tab-pane>
 
       <a-tab-pane key="attributes" tab="属性信息">
-        <div v-if="modelFields.length === 0" style="padding: 20px; text-align: center; color: #999;">
+        <div v-if="modelFields.length === 0" class="attributes-empty">
           暂无属性信息
         </div>
-        <div v-else class="attributes-form">
-          <a-row :gutter="[16, 16]">
-            <a-col
-              v-for="field in modelFields"
-              :key="field.code"
-              :span="field.span || 12"
-            >
-              <div class="field-item">
-                <span class="field-label">{{ field.name }}：</span>
-                <span class="field-value">
-                  <template v-if="field.field_type === 'boolean'">
-                    <a-tag :color="attributeValues[field.code] ? 'green' : 'red'">
-                      {{ attributeValues[field.code] ? '是' : '否' }}
-                    </a-tag>
-                  </template>
-                  <template v-else-if="field.field_type === 'image'">
-                    <a-image
-                      v-if="attributeValues[field.code]"
-                      :src="attributeValues[field.code]"
-                      :width="100"
-                    />
-                    <span v-else class="empty-value">-</span>
-                  </template>
-                  <template v-else-if="field.field_type === 'file'">
-                    <a-button
-                      v-if="attributeValues[field.code]"
-                      type="link"
-                      size="small"
-                      @click="downloadFile(attributeValues[field.code])"
-                    >
-                      下载文件
-                    </a-button>
-                    <span v-else class="empty-value">-</span>
-                  </template>
-                  <template v-else-if="field.field_type === 'date'">
-                    {{ attributeValues[field.code] ? formatDate(attributeValues[field.code]) : '-' }}
-                  </template>
-                  <template v-else-if="field.field_type === 'datetime'">
-                    {{ attributeValues[field.code] ? formatDateTime(attributeValues[field.code]) : '-' }}
-                  </template>
-                  <template v-else-if="field.field_type === 'number'">
-                    {{ attributeValues[field.code] ?? '-' }}
-                  </template>
-                  <template v-else>
-                    {{ attributeValues[field.code] || '-' }}
-                  </template>
-                </span>
-              </div>
-            </a-col>
-          </a-row>
+        <div v-else class="attributes-layout">
+          <div
+            v-for="section in attributeSections"
+            :key="section.key"
+            class="attributes-section-simple"
+          >
+            <div v-if="section.title && attributeSections.length > 1" class="attributes-section-title">
+              {{ section.title }}
+            </div>
+            <a-row :gutter="[12, 12]">
+              <a-col
+                v-for="field in section.fields"
+                :key="field.code"
+                :xs="24"
+                :sm="getFieldCol(field)"
+              >
+                <div class="attribute-line">
+                  <span class="attribute-line-label">
+                    {{ field.name }}<span v-if="field.required" style="color:#f5222d;">*</span>：
+                  </span>
+                  <div class="attribute-line-value-box">
+                    <template v-if="field.field_type === 'boolean'">
+                      {{ getFieldValue(field.code) ? '是' : '否' }}
+                    </template>
+                    <template v-else-if="field.field_type === 'image'">
+                      <a-image
+                        v-if="getFieldValue(field.code)"
+                        :src="getFieldValue(field.code)"
+                        :width="96"
+                      />
+                      <span v-else class="empty-value">-</span>
+                    </template>
+                    <template v-else-if="field.field_type === 'file'">
+                      <a-button
+                        v-if="getFieldValue(field.code)"
+                        type="link"
+                        size="small"
+                        @click="downloadFile(getFieldValue(field.code))"
+                      >
+                        下载文件
+                      </a-button>
+                      <span v-else class="empty-value">-</span>
+                    </template>
+                    <template v-else>
+                      {{ formatFieldDisplay(field, getFieldValue(field.code)) }}
+                    </template>
+                  </div>
+                </div>
+              </a-col>
+            </a-row>
+          </div>
         </div>
       </a-tab-pane>
 
@@ -162,58 +174,94 @@
 
         <a-tabs v-model:activeKey="relationViewTab">
           <a-tab-pane key="list" tab="关系列表">
-            <a-row :gutter="16">
-              <a-col :span="12">
-                <a-card title="依赖的" :bordered="false">
-                  <a-table
-                    :columns="outRelationColumns"
-                    :data-source="outRelations"
-                    :loading="relationsLoading"
-                    :pagination="false"
-                    row-key="id"
-                    size="small"
+            <a-table
+              :columns="relationColumns"
+              :data-source="relationList"
+              :loading="relationsLoading"
+              :pagination="false"
+              row-key="row_key"
+              size="small"
+            >
+              <template #bodyCell="{ column, record }">
+                <template v-if="column.key === 'direction'">
+                  <a-tag :color="record.direction === 'out' ? 'blue' : 'geekblue'">
+                    {{ record.direction === 'out' ? '依赖' : '被依赖' }}
+                  </a-tag>
+                </template>
+                <template v-else-if="column.key === 'peer_ci_name'">
+                  {{ record.peer_display || record.peer_ci_name || '-' }}
+                </template>
+                <template v-else-if="column.key === 'source_type'">
+                  <a-tag :color="getSourceTypeColor(record.source_type)">
+                    {{ getSourceTypeText(record.source_type) }}
+                  </a-tag>
+                </template>
+                <template v-else-if="column.key === 'created_at'">
+                  {{ formatDateTime(record.created_at) }}
+                </template>
+                <template v-else-if="column.key === 'action'">
+                  <a-popconfirm
+                    title="确定删除该关系吗？"
+                    @confirm="deleteRelation(record.id)"
                   >
-                    <template #bodyCell="{ column, record }">
-                      <template v-if="column.key === 'action'">
-                        <a-popconfirm
-                          title="确定删除该关系吗？"
-                          @confirm="deleteRelation(record.id)"
-                        >
-                          <a-button type="link" size="small" danger>
-                            删除
-                          </a-button>
-                        </a-popconfirm>
-                      </template>
-                    </template>
-                  </a-table>
-                </a-card>
-              </a-col>
-              <a-col :span="12">
-                <a-card title="被依赖的" :bordered="false">
-                  <a-table
-                    :columns="inRelationColumns"
-                    :data-source="inRelations"
-                    :loading="relationsLoading"
-                    :pagination="false"
-                    row-key="id"
-                    size="small"
-                  >
-                    <template #bodyCell="{ column, record }">
-                      <template v-if="column.key === 'action'">
-                        <a-popconfirm
-                          title="确定删除该关系吗？"
-                          @confirm="deleteRelation(record.id)"
-                        >
-                          <a-button type="link" size="small" danger>
-                            删除
-                          </a-button>
-                        </a-popconfirm>
-                      </template>
-                    </template>
-                  </a-table>
-                </a-card>
-              </a-col>
-            </a-row>
+                    <a-button type="link" size="small" danger>
+                      删除
+                    </a-button>
+                  </a-popconfirm>
+                </template>
+              </template>
+            </a-table>
+          </a-tab-pane>
+          <a-tab-pane key="topology" tab="拓扑图">
+            <a-card :bordered="false">
+              <template #extra>
+                <a-space>
+                  <a-button size="small" @click="zoomIn">
+                    <ZoomInOutlined /> 放大
+                  </a-button>
+                  <a-button size="small" @click="zoomOut">
+                    <ZoomOutOutlined /> 缩小
+                  </a-button>
+                  <a-button size="small" @click="fitView">
+                    <FullscreenOutlined /> 自适应
+                  </a-button>
+                </a-space>
+              </template>
+              <div ref="graphContainer" class="ci-graph-container"></div>
+              <div v-if="selectedTopologyNode" class="topology-node-panel">
+                <a-descriptions title="节点信息" :column="1" size="small" bordered>
+                  <a-descriptions-item label="模型图标">
+                    <img
+                      v-if="selectedTopologyNode.model_icon_url"
+                      :src="selectedTopologyNode.model_icon_url"
+                      style="width: 18px; height: 18px; object-fit: contain;"
+                    />
+                    <component v-else :is="selectedTopologyNode.model_icon || 'AppstoreOutlined'" />
+                  </a-descriptions-item>
+                  <a-descriptions-item label="CI名称">
+                    {{ selectedTopologyNode.name || '-' }}
+                  </a-descriptions-item>
+                  <a-descriptions-item label="CI编码">
+                    {{ selectedTopologyNode.code || '-' }}
+                  </a-descriptions-item>
+                  <a-descriptions-item label="模型">
+                    {{ selectedTopologyNode.model_name || '-' }}
+                  </a-descriptions-item>
+                  <a-descriptions-item label="关键属性值">
+                    {{
+                      Array.isArray(selectedTopologyNode.display_subtitles) && selectedTopologyNode.display_subtitles.length
+                        ? selectedTopologyNode.display_subtitles.join(' | ')
+                        : selectedTopologyNode.code || '-'
+                    }}
+                  </a-descriptions-item>
+                </a-descriptions>
+                <div class="topology-node-actions">
+                  <a-button type="primary" size="small" @click="openTopologyNodeDetail">
+                    查看详情
+                  </a-button>
+                </div>
+              </div>
+            </a-card>
           </a-tab-pane>
         </a-tabs>
       </a-tab-pane>
@@ -252,11 +300,27 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, computed, onMounted, reactive, nextTick } from 'vue'
+import { ref, watch, computed, onMounted, reactive, nextTick, onUnmounted, createApp, h } from 'vue'
 import { message } from 'ant-design-vue'
-import { getInstanceDetail, getCiHistory, deleteInstance, getInstances } from '@/api/ci'
+import { getInstanceDetail, getCiHistory, deleteInstance, getInstances, getInstanceRelationsCount } from '@/api/ci'
 import { getInstanceRelations, createRelation, deleteRelation as deleteRelationApi, getRelationTypes } from '@/api/cmdb-relation'
-import { PlusOutlined } from '@ant-design/icons-vue'
+import {
+  PlusOutlined,
+  ZoomInOutlined,
+  ZoomOutOutlined,
+  FullscreenOutlined,
+  ApiOutlined,
+  AppstoreOutlined,
+  CloudServerOutlined,
+  ClusterOutlined,
+  ContainerOutlined,
+  DatabaseOutlined,
+  DeploymentUnitOutlined,
+  GlobalOutlined,
+  HddOutlined,
+  LaptopOutlined
+} from '@ant-design/icons-vue'
+import { Graph } from '@antv/g6'
 import dayjs from 'dayjs'
 
 interface Props {
@@ -266,10 +330,12 @@ interface Props {
 
 const props = defineProps<Props>()
 const emit = defineEmits(['update:visible', 'edit', 'deleted'])
+const currentInstanceId = ref<number | null>(null)
 
 const activeTab = ref('basic')
 const ciData = ref<any>(null)
 const modelFields = ref<any[]>([])
+const attributeSections = ref<any[]>([])
 const historyList = ref<any[]>([])
 const loading = ref(false)
 const historyLoading = ref(false)
@@ -290,21 +356,386 @@ const addRelationForm = reactive({
   target_ci_id: null as number | null
 })
 
-const outRelationColumns = [
-  { title: '关系类型', dataIndex: 'relation_type_name', key: 'relation_type_name' },
-  { title: '目标CI', dataIndex: 'target_ci_name', key: 'target_ci_name' },
-  { title: '编码', dataIndex: 'target_ci_code', key: 'target_ci_code', width: 120 },
-  { title: '模型', dataIndex: 'target_ci_model_name', key: 'target_ci_model_name', width: 100 },
-  { title: '来源', dataIndex: 'source_type', key: 'source_type', width: 80 },
-  { title: '操作', key: 'action', width: 80 }
-]
+// 删除确认弹窗相关
+const deleteModalVisible = ref(false)
+const deleteLoading = ref(false)
+const relationsCount = reactive({
+  total: 0,
+  out_relations: 0,
+  in_relations: 0
+})
 
-const inRelationColumns = [
-  { title: '关系类型', dataIndex: 'relation_type_name', key: 'relation_type_name' },
-  { title: '源CI', dataIndex: 'source_ci_name', key: 'source_ci_name' },
-  { title: '编码', dataIndex: 'source_ci_code', key: 'source_ci_code', width: 120 },
-  { title: '模型', dataIndex: 'source_ci_model_name', key: 'source_ci_model_name', width: 100 },
-  { title: '来源', dataIndex: 'source_type', key: 'source_type', width: 80 },
+// 拓扑图相关
+const graphContainer = ref<HTMLElement>()
+let graph: any = null
+const graphNodes = ref<any[]>([])
+const graphEdges = ref<any[]>([])
+const selectedTopologyNode = ref<any>(null)
+const getActiveInstanceId = () => currentInstanceId.value ?? props.instanceId
+
+const iconComponentMap: Record<string, any> = {
+  AppstoreOutlined,
+  DatabaseOutlined,
+  CloudServerOutlined,
+  ClusterOutlined,
+  HddOutlined,
+  ApiOutlined,
+  DeploymentUnitOutlined,
+  ContainerOutlined,
+  LaptopOutlined,
+  GlobalOutlined
+}
+
+const builtinIconDataUrlCache: Record<string, string> = {}
+
+const getAntdIconSvgMarkup = (iconName?: string) => {
+  const iconComponent = iconComponentMap[iconName || ''] || AppstoreOutlined
+  const container = document.createElement('div')
+  const app = createApp({
+    render() {
+      return h(iconComponent, {
+        style: {
+          fontSize: '24px',
+          color: '#1677ff'
+        }
+      })
+    }
+  })
+  app.mount(container)
+  const svg = container.querySelector('svg') as SVGElement | null
+  if (!svg) {
+    app.unmount()
+    return ''
+  }
+  svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+  svg.setAttribute('width', '24')
+  svg.setAttribute('height', '24')
+  svg.setAttribute('viewBox', svg.getAttribute('viewBox') || '64 64 896 896')
+  svg.setAttribute('fill', 'currentColor')
+  svg.style.color = '#1677ff'
+  svg.style.display = 'block'
+  const content = svg.outerHTML
+  app.unmount()
+  return content
+}
+
+const toSvgBase64DataUrl = (svg: string) => {
+  const utf8 = unescape(encodeURIComponent(svg))
+  const base64 = window.btoa(utf8)
+  return `data:image/svg+xml;base64,${base64}`
+}
+
+const getBuiltinIconDataUrl = (iconName?: string) => {
+  const cacheKey = iconName || 'AppstoreOutlined'
+  if (builtinIconDataUrlCache[cacheKey]) {
+    return builtinIconDataUrlCache[cacheKey]
+  }
+  const svg = getAntdIconSvgMarkup(cacheKey)
+  const dataUrl = svg ? toSvgBase64DataUrl(svg) : ''
+  builtinIconDataUrlCache[cacheKey] = dataUrl
+  return dataUrl
+}
+
+const getNodeIconSrc = (node: any) => {
+  if (node.model_icon_url) return node.model_icon_url
+  return getBuiltinIconDataUrl(node.model_icon)
+}
+
+const getNodeDisplayText = (node: any) => {
+  if (Array.isArray(node.display_subtitles) && node.display_subtitles.length > 0) {
+    return node.display_subtitles.filter(Boolean).join(' | ')
+  }
+  return node.display_title || node.name || '-'
+}
+
+const applyGraphData = (data: { nodes: any[]; edges: any[] }) => {
+  if (!graph) return
+  if (typeof graph.changeData === 'function') {
+    graph.changeData(data)
+    return
+  }
+  if (typeof graph.setData === 'function') {
+    graph.setData(data)
+    if (typeof graph.render === 'function') {
+      graph.render()
+    } else if (typeof graph.draw === 'function') {
+      graph.draw()
+    }
+  }
+}
+
+const initGraph = () => {
+  if (!graphContainer.value) return
+
+  graph = new Graph({
+    container: graphContainer.value,
+    width: graphContainer.value.clientWidth,
+    height: 400,
+    behaviors: ['drag-canvas', 'zoom-canvas', 'drag-element'],
+    defaultNode: {
+      size: 36,
+      style: {
+        lineWidth: 0
+      },
+      labelCfg: {
+        style: {
+          fill: '#1f1f1f',
+          fontSize: 12
+        },
+        position: 'bottom'
+      }
+    },
+    defaultEdge: {
+      type: 'cubic-horizontal',
+      style: {
+        stroke: '#91d5ff',
+        lineWidth: 2,
+        endArrow: true
+      }
+    },
+    layout: {
+      type: 'force',
+      preventOverlap: true,
+      nodeSpacing: 50,
+      linkDistance: 150
+    }
+  } as any)
+
+  graph.on('node:click', (evt: any) => {
+    const node = evt?.item || evt?.target
+    if (node) {
+      const model = typeof node.getModel === 'function' ? node.getModel() : node
+      const targetNode = graphNodes.value.find(
+        (item: any) => String(item.id) === String(model.id)
+      ) || null
+      selectedTopologyNode.value = targetNode
+      if (targetNode?.id) {
+        openTopologyNodeDetail(targetNode.id)
+      }
+    }
+  })
+
+  graph.on('canvas:click', () => {
+    selectedTopologyNode.value = null
+  })
+
+  renderGraph()
+}
+
+const renderGraph = () => {
+  if (!graph) return
+
+  const nodes = graphNodes.value.map((node) => ({
+    id: String(node.id),
+    type: 'image',
+    draggable: true,
+    model_id: node.model_id,
+    style: {
+      img: getNodeIconSrc(node),
+      src: getNodeIconSrc(node),
+      size: node.is_center ? 40 : 36,
+      lineWidth: 0,
+      labelText: getNodeDisplayText(node),
+      labelPlacement: 'bottom',
+      labelFill: '#1f1f1f',
+      labelFontSize: 12
+    },
+    label: getNodeDisplayText(node)
+  }))
+
+  const edges = graphEdges.value.map((edge, index) => ({
+    id: String(edge.id || index),
+    source: String(edge.source),
+    target: String(edge.target),
+    style: {
+      stroke: edge.direction === 'bidirectional' ? '#52c41a' : '#91d5ff',
+      lineDash: edge.source_type === 'reference' ? [5, 5] : undefined,
+      endArrow: edge.direction === 'directed',
+      labelText: edge.relation_type_name || ''
+    },
+    label: edge.relation_type_name || ''
+  }))
+
+  applyGraphData({
+    nodes,
+    edges
+  })
+}
+
+const zoomIn = () => {
+  if (graph) {
+    const currentZoom = typeof graph.getZoom === 'function' ? graph.getZoom() : 1
+    if (typeof graph.zoomTo === 'function') {
+      graph.zoomTo(currentZoom * 1.2)
+    } else if (typeof graph.zoomBy === 'function') {
+      graph.zoomBy(1.2)
+    }
+  }
+}
+
+const zoomOut = () => {
+  if (graph) {
+    const currentZoom = typeof graph.getZoom === 'function' ? graph.getZoom() : 1
+    if (typeof graph.zoomTo === 'function') {
+      graph.zoomTo(currentZoom * 0.8)
+    } else if (typeof graph.zoomBy === 'function') {
+      graph.zoomBy(0.8)
+    }
+  }
+}
+
+const fitView = () => {
+  if (graph) {
+    if (typeof graph.fitView === 'function') {
+      graph.fitView()
+    } else if (typeof graph.fitCenter === 'function') {
+      graph.fitCenter()
+    }
+  }
+}
+
+const buildTopologyGraphData = () => {
+  if (!getActiveInstanceId() || !ciData.value) return
+  const nodes: any[] = []
+  const edges: any[] = []
+  const nodeIds = new Set<number>()
+
+  nodes.push({
+    id: ciData.value.id,
+    name: ciData.value.name,
+    code: ciData.value.code,
+    model_id: ciData.value.model_id,
+    model_icon: ciData.value.model?.icon || 'AppstoreOutlined',
+    model_icon_url: ciData.value.model?.icon_url || '',
+    display_title: ciData.value.name || '',
+    display_subtitles: [],
+    model_name: ciData.value.model?.name || '',
+    is_center: true
+  })
+  nodeIds.add(ciData.value.id)
+
+  outRelations.value.forEach((rel: any) => {
+    if (!nodeIds.has(rel.target_ci_id)) {
+      nodes.push({
+        id: rel.target_ci_id,
+        name: rel.target_ci_name,
+        code: rel.target_ci_code,
+        model_id: rel.target_ci_model_id,
+        model_icon: rel.target_model_icon || 'AppstoreOutlined',
+        model_icon_url: rel.target_model_icon_url || '',
+        display_title: rel.target_display_title || rel.target_ci_name,
+        display_subtitles: rel.target_display_subtitles || [],
+        model_name: rel.target_ci_model_name,
+        is_center: false
+      })
+      nodeIds.add(rel.target_ci_id)
+    }
+    edges.push({
+      id: `out_${rel.id}`,
+      source: ciData.value?.id,
+      target: rel.target_ci_id,
+      relation_type_name: rel.relation_type_name,
+      source_type: rel.source_type,
+      direction: 'directed'
+    })
+  })
+
+  inRelations.value.forEach((rel: any) => {
+    if (!nodeIds.has(rel.source_ci_id)) {
+      nodes.push({
+        id: rel.source_ci_id,
+        name: rel.source_ci_name,
+        code: rel.source_ci_code,
+        model_id: rel.source_ci_model_id,
+        model_icon: rel.source_model_icon || 'AppstoreOutlined',
+        model_icon_url: rel.source_model_icon_url || '',
+        display_title: rel.source_display_title || rel.source_ci_name,
+        display_subtitles: rel.source_display_subtitles || [],
+        model_name: rel.source_ci_model_name,
+        is_center: false
+      })
+      nodeIds.add(rel.source_ci_id)
+    }
+    edges.push({
+      id: `in_${rel.id}`,
+      source: rel.source_ci_id,
+      target: ciData.value?.id,
+      relation_type_name: rel.relation_type_name,
+      source_type: rel.source_type,
+      direction: 'directed'
+    })
+  })
+
+  graphNodes.value = nodes
+  graphEdges.value = edges
+  selectedTopologyNode.value = nodes.find((item: any) => item.is_center) || null
+}
+
+watch(() => relationViewTab.value, (val) => {
+  if (val === 'topology' && getActiveInstanceId()) {
+    nextTick(() => {
+      if (!graph) {
+        initGraph()
+      }
+      buildTopologyGraphData()
+      renderGraph()
+    })
+  } else {
+    selectedTopologyNode.value = null
+  }
+})
+
+watch([outRelations, inRelations], () => {
+  if (relationViewTab.value !== 'topology') return
+  buildTopologyGraphData()
+  nextTick(() => renderGraph())
+})
+
+onUnmounted(() => {
+  if (graph) {
+    graph.destroy()
+    graph = null
+  }
+})
+
+const relationList = computed(() => {
+  const outList = outRelations.value.map((rel: any) => ({
+    ...rel,
+    row_key: `out_${rel.id}`,
+    direction: 'out',
+    peer_ci_id: rel.target_ci_id,
+    peer_ci_name: rel.target_ci_name,
+    peer_ci_code: rel.target_ci_code,
+    peer_ci_model_name: rel.target_ci_model_name,
+    peer_display: Array.isArray(rel.target_display_subtitles) && rel.target_display_subtitles.length
+      ? rel.target_display_subtitles.join(' | ')
+      : rel.target_display_title || rel.target_ci_name
+  }))
+  const inList = inRelations.value.map((rel: any) => ({
+    ...rel,
+    row_key: `in_${rel.id}`,
+    direction: 'in',
+    peer_ci_id: rel.source_ci_id,
+    peer_ci_name: rel.source_ci_name,
+    peer_ci_code: rel.source_ci_code,
+    peer_ci_model_name: rel.source_ci_model_name,
+    peer_display: Array.isArray(rel.source_display_subtitles) && rel.source_display_subtitles.length
+      ? rel.source_display_subtitles.join(' | ')
+      : rel.source_display_title || rel.source_ci_name
+  }))
+  return [...outList, ...inList].sort((a: any, b: any) => {
+    return String(b.created_at || '').localeCompare(String(a.created_at || ''))
+  })
+})
+
+const relationColumns = [
+  { title: '方向', key: 'direction', width: 90 },
+  { title: '关系类型', dataIndex: 'relation_type_name', key: 'relation_type_name', width: 140 },
+  { title: '关联CI', dataIndex: 'peer_ci_name', key: 'peer_ci_name' },
+  { title: 'CI编码', dataIndex: 'peer_ci_code', key: 'peer_ci_code', width: 140 },
+  { title: '模型', dataIndex: 'peer_ci_model_name', key: 'peer_ci_model_name', width: 120 },
+  { title: '来源', dataIndex: 'source_type', key: 'source_type', width: 90 },
+  { title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 170 },
   { title: '操作', key: 'action', width: 80 }
 ]
 
@@ -324,13 +755,150 @@ const historyColumns = [
 
 const attributeValues = computed(() => {
   try {
-    return ciData.value?.attribute_values || {}
+    return ciData.value?.attributes || ciData.value?.attribute_values || {}
   } catch {
     return {}
   }
 })
 
+const getFieldValue = (code: string) => {
+  return attributeValues.value?.[code]
+}
+
+const getFieldCol = (field: any) => {
+  const span = Number(field?.span) || 12
+  if ([24, 12, 8, 6].includes(span)) return span
+  if (span >= 18) return 24
+  if (span >= 10) return 12
+  if (span >= 7) return 8
+  return 6
+}
+
+const isValuePresent = (value: any): boolean => {
+  if (value === null || value === undefined) return false
+  if (typeof value === 'string') return value.trim() !== ''
+  if (Array.isArray(value)) return value.length > 0
+  if (typeof value === 'object') return Object.keys(value).length > 0
+  return true
+}
+
+const parseMaybeJson = (value: any) => {
+  let parsed = value
+  if (typeof parsed === 'string') {
+    try {
+      parsed = JSON.parse(parsed)
+    } catch {
+      return value
+    }
+  }
+  if (typeof parsed === 'string') {
+    try {
+      parsed = JSON.parse(parsed)
+    } catch {
+      return parsed
+    }
+  }
+  return parsed
+}
+
+const buildFormField = (item: any, indexKey: string) => {
+  const props = item?.props || {}
+  const code = props.code || item?.id || ''
+  if (!code || item?.controlType === 'table' || item?.controlType === 'group') return null
+  return {
+    id: item.id || `field_${indexKey}`,
+    code,
+    name: props.label || code,
+    control_type: item.controlType || 'text',
+    field_type: mapControlTypeToFieldType(item.controlType),
+    span: Number(props.span) || 12,
+    required: !!props.required,
+    helpText: props.helpText || '',
+    description: props.description || '',
+    options: Array.isArray(props.options) ? props.options : []
+  }
+}
+
+const buildAttributeSchema = (formConfig: any) => {
+  const parsed = parseMaybeJson(formConfig)
+  if (!Array.isArray(parsed)) {
+    return { fields: [], sections: [] }
+  }
+
+  const fields: any[] = []
+  const sections: any[] = []
+  const defaultSectionFields: any[] = []
+
+  parsed.forEach((item: any, index: number) => {
+    if (item?.controlType === 'group' && Array.isArray(item.children)) {
+      const groupFields = item.children
+        .map((child: any, childIndex: number) => buildFormField(child, `${index}_${childIndex}`))
+        .filter(Boolean)
+      if (groupFields.length > 0) {
+        fields.push(...groupFields)
+        sections.push({
+          key: `group_${index}`,
+          title: item?.props?.label || `属性分组 ${index + 1}`,
+          fields: groupFields
+        })
+      }
+      return
+    }
+    const field = buildFormField(item, String(index))
+    if (field) {
+      fields.push(field)
+      defaultSectionFields.push(field)
+    }
+  })
+
+  if (defaultSectionFields.length > 0) {
+    sections.unshift({
+      key: 'default_fields',
+      title: '基础属性',
+      fields: defaultSectionFields
+    })
+  }
+
+  return { fields, sections }
+}
+
+const formatFieldDisplay = (field: any, rawValue: any) => {
+  if (!isValuePresent(rawValue)) return '-'
+
+  if (field.field_type === 'date') return formatDate(rawValue)
+  if (field.field_type === 'datetime') return formatDateTime(rawValue)
+  if (field.field_type === 'numberRange') {
+    if (typeof rawValue === 'string') return rawValue
+    if (typeof rawValue === 'object' && rawValue !== null) {
+      const min = rawValue.min ?? rawValue.start ?? ''
+      const max = rawValue.max ?? rawValue.end ?? ''
+      return `${min} - ${max}`.trim()
+    }
+  }
+
+  if (field.field_type === 'select' || field.field_type === 'multiselect') {
+    const options = Array.isArray(field.options) ? field.options : []
+    const optionMap = new Map(options.map((opt: any) => [String(opt.value), opt.label || opt.value]))
+    if (Array.isArray(rawValue)) {
+      return rawValue.map((v) => optionMap.get(String(v)) || v).join('，')
+    }
+    return optionMap.get(String(rawValue)) || String(rawValue)
+  }
+
+  if (Array.isArray(rawValue)) return rawValue.join('，')
+  if (typeof rawValue === 'object') {
+    try {
+      return JSON.stringify(rawValue)
+    } catch {
+      return String(rawValue)
+    }
+  }
+
+  return String(rawValue)
+}
+
 watch(() => props.instanceId, async (val) => {
+  currentInstanceId.value = val || null
   if (val && props.visible) {
     await fetchDetail()
     await fetchHistory()
@@ -339,46 +907,48 @@ watch(() => props.instanceId, async (val) => {
 
 watch(() => props.visible, (val) => {
   if (val) {
+    currentInstanceId.value = props.instanceId || null
     activeTab.value = 'basic'
     historyPagination.value = { current: 1, pageSize: 10, total: 0 }
+    if (getActiveInstanceId()) {
+      fetchDetail()
+      fetchHistory()
+    }
   }
 })
 
 const fetchDetail = async () => {
-  if (!props.instanceId) return
+  const instanceId = getActiveInstanceId()
+  if (!instanceId) return
 
   loading.value = true
   try {
-    const res = await getInstanceDetail(props.instanceId)
+    const res = await getInstanceDetail(instanceId)
     
     if (res.code === 200) {
       ciData.value = res.data
       const formConfig = res.data.model?.form_config
       if (formConfig) {
-        try {
-          let parsed = formConfig
-          if (typeof parsed === 'string') {
-            parsed = JSON.parse(parsed)
-          }
-          if (typeof parsed === 'string') {
-            parsed = JSON.parse(parsed)
-          }
-          
-          modelFields.value = parsed.map((item: any, index: number) => ({
-            id: item.id || `field_${index}`,
-            code: item.props?.code || item.id,
-            name: item.props?.label || item.props?.code || '',
-            field_type: mapControlTypeToFieldType(item.controlType),
-            span: item.props?.span || 12,
-            placeholder: item.props?.placeholder || '',
-            required: item.props?.required || false
-          }))
-        } catch (e) {
-          console.error('解析form_config失败:', e)
-          modelFields.value = []
-        }
+        const schema = buildAttributeSchema(formConfig)
+        modelFields.value = schema.fields
+        attributeSections.value = schema.sections
       } else {
-        modelFields.value = res.data.model?.fields || []
+        const fields = (res.data.model?.fields || []).map((field: any) => ({
+          id: field.id || field.code,
+          code: field.code,
+          name: field.name || field.code,
+          field_type: field.field_type || 'text',
+          control_type: field.field_type || 'text',
+          span: 12,
+          required: false,
+          helpText: '',
+          description: '',
+          options: []
+        }))
+        modelFields.value = fields
+        attributeSections.value = fields.length
+          ? [{ key: 'default_fields', title: '基础属性', fields }]
+          : []
       }
     }
   } catch (error) {
@@ -389,11 +959,12 @@ const fetchDetail = async () => {
 }
 
 const fetchHistory = async () => {
-  if (!props.instanceId) return
+  const instanceId = getActiveInstanceId()
+  if (!instanceId) return
 
   historyLoading.value = true
   try {
-    const res = await getCiHistory(props.instanceId)
+    const res = await getCiHistory(instanceId)
     if (res.code === 200) {
       historyList.value = res.data || []
       historyPagination.value.total = historyList.value.length
@@ -419,18 +990,42 @@ const handleEdit = () => {
   handleClose()
 }
 
-const handleDelete = async () => {
-  if (!props.instanceId) return
+// 检查关系并显示删除确认弹窗
+const checkAndDelete = async () => {
+  const instanceId = getActiveInstanceId()
+  if (!instanceId) return
   
   try {
-    const res = await deleteInstance(props.instanceId)
+    const res = await getInstanceRelationsCount(instanceId)
+    if (res.code === 200) {
+      relationsCount.total = res.data.total
+      relationsCount.out_relations = res.data.out_relations
+      relationsCount.in_relations = res.data.in_relations
+      deleteModalVisible.value = true
+    }
+  } catch (error: any) {
+    message.error(error.response?.data?.message || '检查关系失败')
+  }
+}
+
+// 确认删除
+const confirmDelete = async () => {
+  const instanceId = getActiveInstanceId()
+  if (!instanceId) return
+  
+  deleteLoading.value = true
+  try {
+    const res = await deleteInstance(instanceId)
     if (res.code === 200) {
       message.success('删除成功')
+      deleteModalVisible.value = false
       emit('deleted')
       handleClose()
     }
   } catch (error: any) {
     message.error(error.response?.data?.message || '删除失败')
+  } finally {
+    deleteLoading.value = false
   }
 }
 
@@ -476,7 +1071,8 @@ const mapControlTypeToFieldType = (controlType: string): string => {
     'user': 'user',
     'reference': 'reference',
     'image': 'image',
-    'file': 'file'
+    'file': 'file',
+    'numberRange': 'numberRange'
   }
   return typeMap[controlType] || 'text'
 }
@@ -491,19 +1087,20 @@ const truncate = (str: string, maxLen: number) => {
 }
 
 watch(activeTab, (val) => {
-  if (val === 'history' && props.instanceId) {
+  if (val === 'history' && getActiveInstanceId()) {
     fetchHistory()
   }
-  if (val === 'relations' && props.instanceId) {
+  if (val === 'relations' && getActiveInstanceId()) {
     fetchRelations()
   }
 })
 
 const fetchRelations = async () => {
-  if (!props.instanceId) return
+  const instanceId = getActiveInstanceId()
+  if (!instanceId) return
   relationsLoading.value = true
   try {
-    const res = await getInstanceRelations(props.instanceId, { depth: relationDepth.value })
+    const res = await getInstanceRelations(instanceId, { depth: relationDepth.value })
     if (res.code === 200) {
       outRelations.value = res.data.out_relations || []
       inRelations.value = res.data.in_relations || []
@@ -527,10 +1124,11 @@ const fetchRelationTypes = async () => {
 }
 
 const fetchCandidateCis = async () => {
+  const instanceId = getActiveInstanceId()
   try {
     const res = await getInstances({ per_page: 1000 })
     if (res.code === 200) {
-      candidateCis.value = res.data.items.filter((ci: any) => ci.id !== props.instanceId)
+      candidateCis.value = res.data.items.filter((ci: any) => ci.id !== instanceId)
     }
   } catch (error) {
     console.error(error)
@@ -546,15 +1144,17 @@ const showAddRelationModal = () => {
 }
 
 const handleAddRelation = async () => {
+  const instanceId = getActiveInstanceId()
   if (!addRelationForm.relation_type_id || !addRelationForm.target_ci_id) {
     message.warning('请填写完整信息')
     return
   }
+  if (!instanceId) return
 
   addRelationLoading.value = true
   try {
     const res = await createRelation({
-      source_ci_id: props.instanceId,
+      source_ci_id: instanceId,
       target_ci_id: addRelationForm.target_ci_id,
       relation_type_id: addRelationForm.relation_type_id
     })
@@ -568,6 +1168,25 @@ const handleAddRelation = async () => {
   } finally {
     addRelationLoading.value = false
   }
+}
+
+// 获取关系来源类型的颜色和文本
+const getSourceTypeColor = (type: string) => {
+  const colorMap: Record<string, string> = {
+    'manual': 'blue',
+    'reference': 'green',
+    'rule': 'orange'
+  }
+  return colorMap[type] || 'default'
+}
+
+const getSourceTypeText = (type: string) => {
+  const textMap: Record<string, string> = {
+    'manual': '手动',
+    'reference': '引用',
+    'rule': '规则'
+  }
+  return textMap[type] || type
 }
 
 const deleteRelation = async (id: number) => {
@@ -586,36 +1205,105 @@ const filterCiOption = (input: string, option: any) => {
   return option.label.toLowerCase().indexOf(input.toLowerCase()) >= 0
 }
 
+const openTopologyNodeDetail = async (instanceId?: number) => {
+  const targetId = Number(instanceId || selectedTopologyNode.value?.id)
+  if (!targetId) return
+  if (targetId === getActiveInstanceId()) return
+
+  currentInstanceId.value = targetId
+  activeTab.value = 'basic'
+  relationViewTab.value = 'list'
+  await fetchDetail()
+  await fetchHistory()
+}
+
 onMounted(() => {
   fetchRelationTypes()
 })
 </script>
 
 <style scoped>
-.attributes-form {
-  padding: 8px 0;
+.attributes-empty {
+  padding: 24px;
+  text-align: center;
+  color: #999;
 }
 
-.field-item {
-  background: #fafafa;
-  border-radius: 4px;
-  padding: 12px 16px;
-  height: 100%;
-  border: 1px solid #e8e8e8;
+.attributes-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
-.field-label {
-  font-weight: 500;
-  color: #333;
-  font-size: 14px;
+.attributes-section-simple {
+  border: 1px solid #eef3fb;
+  border-radius: 8px;
+  padding: 10px;
+  background: #fff;
 }
 
-.field-value {
-  color: #666;
-  font-size: 14px;
+.attributes-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1f1f1f;
+  margin-bottom: 10px;
+}
+
+.attribute-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-height: 34px;
+}
+
+.attribute-line-label {
+  flex-shrink: 0;
+  line-height: 34px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #262626;
+}
+
+.attribute-line-value-box {
+  flex: 1;
+  min-height: 34px;
+  line-height: 34px;
+  padding: 0 10px;
+  border-radius: 6px;
+  background: #eaf4ff;
+  border: 1px solid #cfe3ff;
+  font-size: 13px;
+  color: #1d4e89;
+  word-break: break-word;
+}
+
+.attribute-line-value-box :deep(.ant-image) {
+  line-height: normal;
+  vertical-align: middle;
+}
+
+.attribute-line-value-box :deep(.ant-btn-link) {
+  padding-inline: 0;
 }
 
 .empty-value {
   color: #999;
+}
+
+.ci-graph-container {
+  width: 100%;
+  height: 400px;
+  border: 1px solid #e8e8e8;
+  border-radius: 4px;
+  background: #fafafa;
+}
+
+.topology-node-panel {
+  margin-top: 12px;
+}
+
+.topology-node-actions {
+  margin-top: 8px;
+  text-align: right;
 }
 </style>

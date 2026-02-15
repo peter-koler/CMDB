@@ -1,15 +1,100 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, send_from_directory
 from datetime import datetime
 from app.models.model_category import ModelCategory
 from app.models.cmdb_model import CmdbModel, ModelType
 from app.models.model_region import ModelRegion
 from app.models.model_field import ModelField
+from app.models.ci_instance import CiInstance
 from app.utils.auth import token_required, admin_required
 from app.utils.decorators import log_operation
 from app import db
 import json
+import os
+from werkzeug.utils import secure_filename
 
 cmdb_bp = Blueprint('cmdb', __name__, url_prefix='/api/v1/cmdb')
+MODEL_ICON_UPLOAD_FOLDER = 'model_icons'
+MODEL_ICON_ALLOWED_EXTENSIONS = {'png', 'svg'}
+MODEL_ICON_MAX_SIZE = 2 * 1024 * 1024
+KEY_FIELD_ALLOWED_CONTROL_TYPES = {'text', 'textarea', 'number', 'date', 'datetime', 'select', 'radio'}
+
+
+def _extract_form_fields(form_config):
+    fields = {}
+    config_data = form_config or []
+
+    if isinstance(config_data, str):
+        try:
+            config_data = json.loads(config_data)
+        except Exception:
+            return fields
+
+    if not isinstance(config_data, list):
+        return fields
+
+    for item in config_data:
+        if not isinstance(item, dict):
+            continue
+        control_type = item.get('controlType')
+        props = item.get('props') if isinstance(item.get('props'), dict) else {}
+        code = props.get('code')
+        if code:
+            fields[code] = control_type
+
+        children = item.get('children')
+        if isinstance(children, list):
+            for child in children:
+                if not isinstance(child, dict):
+                    continue
+                child_control_type = child.get('controlType')
+                child_props = child.get('props') if isinstance(child.get('props'), dict) else {}
+                child_code = child_props.get('code')
+                if child_code:
+                    fields[child_code] = child_control_type
+
+    return fields
+
+
+def _normalize_key_field_codes(codes):
+    if codes is None:
+        return None
+    if not isinstance(codes, list):
+        return []
+    normalized = []
+    seen = set()
+    for code in codes:
+        if code is None:
+            continue
+        value = str(code).strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        normalized.append(value)
+    return normalized
+
+
+def _validate_key_field_codes(form_config, key_field_codes):
+    if key_field_codes is None:
+        return None
+
+    if len(key_field_codes) > 3:
+        return '关键属性最多允许 3 个'
+
+    if len(key_field_codes) == 0:
+        return None
+
+    field_map = _extract_form_fields(form_config)
+    if not field_map:
+        return '当前模型未配置可用字段，无法设置关键属性'
+
+    for code in key_field_codes:
+        if code not in field_map:
+            return f'关键属性字段不存在: {code}'
+        control_type = field_map.get(code)
+        if control_type not in KEY_FIELD_ALLOWED_CONTROL_TYPES:
+            return f'字段类型不支持作为关键属性: {code}'
+
+    return None
 
 
 # ==================== 模型目录管理 ====================
@@ -195,8 +280,7 @@ def delete_model_type(id):
 @token_required
 def get_models_tree():
     """获取模型树（包含CI数量）"""
-    from app.models.ci_instance import CiInstance
-    
+
     # 获取所有分类
     categories = ModelCategory.query.filter_by(parent_id=None).order_by(ModelCategory.sort_order).all()
     
@@ -211,6 +295,7 @@ def get_models_tree():
         for model in models:
             # 获取该模型的CI数量
             ci_count = CiInstance.query.filter_by(model_id=model.id).count()
+            config_data = model.get_config() if hasattr(model, 'get_config') else {}
             children.append({
                 'id': f"model-{model.id}",
                 'model_id': model.id,
@@ -219,7 +304,9 @@ def get_models_tree():
                 'code': model.code,
                 'ci_count': ci_count,
                 'is_model': True,
-                'icon': model.icon or 'AppstoreOutlined'
+                'icon': model.icon or 'AppstoreOutlined',
+                'icon_url': config_data.get('icon_url') if isinstance(config_data, dict) else None,
+                'key_field_codes': config_data.get('key_field_codes', []) if isinstance(config_data, dict) else [],
             })
         
         # 添加子分类
@@ -262,6 +349,7 @@ def get_models_tree():
 def get_models():
     """获取模型列表"""
     category_id = request.args.get('category_id', type=int)
+    model_type_id = request.args.get('model_type_id', type=int)
     keyword = request.args.get('keyword', '')
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 20, type=int)
@@ -270,6 +358,9 @@ def get_models():
     
     if category_id:
         query = query.filter_by(category_id=category_id)
+
+    if model_type_id:
+        query = query.filter_by(model_type_id=model_type_id)
     
     if keyword:
         query = query.filter(
@@ -323,6 +414,17 @@ def create_model():
     
     if CmdbModel.query.filter_by(code=data['code']).first():
         return jsonify({'code': 400, 'message': '模型编码已存在'}), 400
+
+    key_field_codes = _normalize_key_field_codes(data.get('key_field_codes'))
+    validate_error = _validate_key_field_codes(data.get('form_config', []), key_field_codes)
+    if validate_error:
+        return jsonify({'code': 400, 'message': validate_error}), 400
+
+    config_data = data.get('config', {})
+    if not isinstance(config_data, dict):
+        config_data = {}
+    config_data['icon_url'] = data.get('icon_url')
+    config_data['key_field_codes'] = key_field_codes if key_field_codes is not None else []
     
     model = CmdbModel(
         name=data['name'],
@@ -331,7 +433,8 @@ def create_model():
         category_id=data['category_id'],
         model_type_id=data.get('model_type_id'),
         description=data.get('description'),
-        config=json.dumps(data.get('config', {})),
+        config=json.dumps(config_data, ensure_ascii=False),
+        form_config=json.dumps(data.get('form_config', []), ensure_ascii=False),
         created_by=request.current_user.id
     )
     model.save()
@@ -357,17 +460,34 @@ def update_model(id):
             return jsonify({'code': 400, 'message': '模型编码已存在'}), 400
         model.code = data['code']
     
+    form_config_for_validate = data.get('form_config')
+    if form_config_for_validate is None:
+        form_config_for_validate = model.form_config
+
+    key_field_codes = _normalize_key_field_codes(data.get('key_field_codes'))
+    if key_field_codes is None:
+        key_field_codes = model.key_field_codes
+
+    validate_error = _validate_key_field_codes(form_config_for_validate, key_field_codes)
+    if validate_error:
+        return jsonify({'code': 400, 'message': validate_error}), 400
+
     model.name = data.get('name', model.name)
     model.icon = data.get('icon', model.icon)
     model.category_id = data.get('category_id', model.category_id)
     model.model_type_id = data.get('model_type_id', model.model_type_id)
     model.description = data.get('description', model.description)
-    
-    if 'config' in data:
-        model.config = json.dumps(data['config'])
-    
+
+    config_data = model.get_config()
+    if 'config' in data and isinstance(data.get('config'), dict):
+        config_data.update(data['config'])
+    if 'icon_url' in data:
+        config_data['icon_url'] = data.get('icon_url')
+    config_data['key_field_codes'] = key_field_codes
+    model.config = json.dumps(config_data, ensure_ascii=False)
+
     if 'form_config' in data:
-        model.form_config = json.dumps(data['form_config'])
+        model.form_config = json.dumps(data['form_config'], ensure_ascii=False)
     
     model.save()
     
@@ -397,6 +517,60 @@ def delete_model(id):
         'code': 200,
         'message': '删除成功'
     })
+
+
+@cmdb_bp.route('/models/icon-upload', methods=['POST'])
+@token_required
+@admin_required
+@log_operation(operation_type='UPLOAD', operation_object='cmdb_model_icon')
+def upload_model_icon():
+    """上传模型图标"""
+    if 'file' not in request.files:
+        return jsonify({'code': 400, 'message': '没有选择文件'}), 400
+
+    file = request.files['file']
+    if not file or not file.filename:
+        return jsonify({'code': 400, 'message': '没有选择文件'}), 400
+
+    filename = secure_filename(file.filename)
+    ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
+    if ext not in MODEL_ICON_ALLOWED_EXTENSIONS:
+        return jsonify({'code': 400, 'message': '仅支持 png/svg 格式'}), 400
+
+    file.stream.seek(0, os.SEEK_END)
+    size = file.stream.tell()
+    file.stream.seek(0)
+    if size > MODEL_ICON_MAX_SIZE:
+        return jsonify({'code': 400, 'message': '图标大小不能超过 2MB'}), 400
+
+    today = datetime.now().strftime('%Y%m%d')
+    upload_dir = os.path.join(MODEL_ICON_UPLOAD_FOLDER, today)
+    os.makedirs(upload_dir, exist_ok=True)
+
+    unique_name = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{filename}"
+    file_path = os.path.join(upload_dir, unique_name)
+    file.save(file_path)
+
+    return jsonify({
+        'code': 200,
+        'message': '上传成功',
+        'data': {
+            'filename': unique_name,
+            'path': f'{today}/{unique_name}',
+            'url': f'/api/v1/cmdb/models/icon-files/{today}/{unique_name}',
+        }
+    })
+
+
+@cmdb_bp.route('/models/icon-files/<path:filepath>', methods=['GET'])
+def get_model_icon_file(filepath):
+    """获取模型图标文件"""
+    directory = os.path.join(MODEL_ICON_UPLOAD_FOLDER, os.path.dirname(filepath))
+    filename = os.path.basename(filepath)
+    full_path = os.path.join(directory, filename)
+    if not os.path.exists(full_path):
+        return jsonify({'code': 404, 'message': '文件不存在'}), 404
+    return send_from_directory(directory, filename)
 
 
 # ==================== 模型区域管理 ====================
@@ -603,6 +777,17 @@ def import_model():
     if CmdbModel.query.filter_by(code=model_data['code']).first():
         return jsonify({'code': 400, 'message': '模型编码已存在'}), 400
     
+    key_field_codes = _normalize_key_field_codes(model_data.get('key_field_codes'))
+    validate_error = _validate_key_field_codes(model_data.get('form_config', []), key_field_codes)
+    if validate_error:
+        return jsonify({'code': 400, 'message': validate_error}), 400
+
+    config_data = model_data.get('config', {})
+    if not isinstance(config_data, dict):
+        config_data = {}
+    config_data['icon_url'] = model_data.get('icon_url')
+    config_data['key_field_codes'] = key_field_codes if key_field_codes is not None else []
+
     # 创建模型
     model = CmdbModel(
         name=model_data['name'],
@@ -610,7 +795,8 @@ def import_model():
         icon=model_data.get('icon', 'AppstoreOutlined'),
         category_id=model_data.get('category_id'),
         description=model_data.get('description'),
-        config=json.dumps(model_data.get('config', {})),
+        config=json.dumps(config_data, ensure_ascii=False),
+        form_config=json.dumps(model_data.get('form_config', []), ensure_ascii=False),
         created_by=request.current_user.id
     )
     model.save()

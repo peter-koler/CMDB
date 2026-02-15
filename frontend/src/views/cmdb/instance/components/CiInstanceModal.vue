@@ -1,7 +1,7 @@
 <template>
   <a-modal
     v-model:open="visible"
-    :title="isEdit ? '编辑CI' : '新增CI'"
+    :title="isEdit ? '编辑CI' : (isCopy ? '复制CI' : '新增CI')"
     @ok="handleOk"
     @cancel="handleCancel"
     :confirm-loading="loading"
@@ -213,7 +213,8 @@ const visible = computed({
 })
 
 const loading = ref(false)
-const isEdit = computed(() => !!props.instance)
+const isEdit = computed(() => !!props.instance && props.instance.id !== null && props.instance.id !== undefined)
+const isCopy = computed(() => !!props.instance && (props.instance.id === null || props.instance.id === undefined))
 const formRef = ref()
 const formState = reactive({
   id: null as number | null,
@@ -253,11 +254,26 @@ onMounted(() => {
 })
 
 const initForm = async () => {
-  if (props.instance) {
+  if (isEdit.value) {
     formState.id = props.instance.id
     formState.code = props.instance.code
     formState.department_id = props.instance.department_id
     formState.attribute_values = { ...props.instance.attributes, ...props.instance.attribute_values }
+  } else if (isCopy.value) {
+    formState.id = null
+    formState.code = props.instance.code || ''
+    formState.department_id = props.instance.department_id ?? null
+    formState.attribute_values = { ...props.instance.attributes, ...props.instance.attribute_values }
+    if (!formState.code) {
+      try {
+        const res = await generateCICode()
+        if (res.code === 200) {
+          formState.code = res.data.code
+        }
+      } catch (error) {
+        console.error(error)
+      }
+    }
   } else {
     formState.id = null
     formState.department_id = null
