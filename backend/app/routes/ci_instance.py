@@ -801,7 +801,22 @@ def import_instances():
         .order_by(ModelField.sort_order)
         .all()
     )
-    field_codes = [f.code for f in fields]
+
+    def normalize_header(value):
+        return (value or "").strip().lstrip("*").strip()
+
+    # 支持字段编码和字段名称两种表头，方便用户直接按模板中文名填写
+    field_alias_to_code = {}
+    required_field_codes = set()
+    field_by_code = {}
+    for field in fields:
+        field_by_code[field.code] = field
+        if field.is_required:
+            required_field_codes.add(field.code)
+        for alias in [field.code, field.name, f"*{field.name}"]:
+            key = normalize_header(alias)
+            if key:
+                field_alias_to_code[key] = field.code
 
     try:
         stream = io.StringIO(file.stream.read().decode("UTF-8"), newline=None)
@@ -813,13 +828,14 @@ def import_instances():
         field_indices = {}
 
         for i, col in enumerate(header):
-            col = col.strip()
-            if col == "CI名称":
+            normalized_col = normalize_header(col)
+            if normalized_col == "CI名称":
                 name_idx = i
-            elif col == "CI编码":
+            elif normalized_col == "CI编码":
                 code_idx = i
-            elif col in field_codes:
-                field_indices[col] = i
+            elif normalized_col in field_alias_to_code:
+                field_code = field_alias_to_code[normalized_col]
+                field_indices[field_code] = i
 
         success_count = 0
         error_messages = []
@@ -840,7 +856,7 @@ def import_instances():
                 for field_code, idx in field_indices.items():
                     if idx < len(row):
                         value = row[idx].strip()
-                        field = next((f for f in fields if f.code == field_code), None)
+                        field = field_by_code.get(field_code)
                         if field and field.field_type == "number" and value:
                             try:
                                 value = int(value)
@@ -850,6 +866,17 @@ def import_instances():
                                 except:
                                     pass
                         attr_values[field_code] = value
+
+                # 校验模型必填属性
+                missing_required = []
+                for required_code in required_field_codes:
+                    val = attr_values.get(required_code)
+                    if val is None or str(val).strip() == "":
+                        required_name = field_by_code.get(required_code).name if field_by_code.get(required_code) else required_code
+                        missing_required.append(required_name)
+                if missing_required:
+                    error_messages.append(f"第{row_idx}行: 必填属性不能为空({','.join(missing_required)})")
+                    continue
 
                 instance = CiInstance(
                     code=code,
@@ -890,3 +917,61 @@ def import_instances():
     except Exception as e:
         db.session.rollback()
         return jsonify({"code": 400, "message": f"导入失败: {str(e)}"}), 400
+
+
+@ci_bp.route("/import-template", methods=["GET"])
+@jwt_required()
+def download_import_template():
+    """按模型生成 CI 导入模板（CSV，可直接用 Excel 打开）"""
+    model_id = request.args.get("model_id", type=int)
+    if not model_id:
+        return jsonify({"code": 400, "message": "请指定模型ID"}), 400
+
+    model = CmdbModel.query.get(model_id)
+    if not model:
+        return jsonify({"code": 400, "message": "模型不存在"}), 400
+
+    fields = (
+        ModelField.query.filter_by(model_id=model_id, is_active=True)
+        .order_by(ModelField.is_required.desc(), ModelField.sort_order.asc())
+        .all()
+    )
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    headers = ["CI名称", "CI编码"]
+    for field in fields:
+        header = f"*{field.name}" if field.is_required else field.name
+        headers.append(header)
+    writer.writerow(headers)
+
+    # 给 1 条示例行，帮助用户理解填充格式
+    sample_row = ["示例CI名称", "可留空(系统自动生成)"]
+    for field in fields:
+        if field.field_type == "number":
+            sample_row.append("0")
+        elif field.field_type in ("select", "radio", "dropdown"):
+            sample_row.append("选项值")
+        elif field.field_type in ("multiselect", "checkbox"):
+            sample_row.append("值1,值2")
+        elif field.field_type in ("date", "datetime"):
+            sample_row.append("2026-02-15")
+        else:
+            sample_row.append("")
+    writer.writerow(sample_row)
+
+    output.seek(0)
+    filename = f"{model.name}_CI导入模板_{datetime.now().strftime('%Y%m%d%H%M%S')}.csv"
+
+    return jsonify(
+        {
+            "code": 200,
+            "message": "success",
+            "data": {
+                "filename": filename,
+                # BOM 处理，避免 Excel 打开中文乱码
+                "content": "\ufeff" + output.getvalue(),
+            },
+        }
+    )

@@ -200,11 +200,16 @@
     >
       <a-alert
         message="导入说明"
-        description="请上传CSV格式文件，第一行为表头，包含所有必填属性字段。系统将自动验证数据并导入。"
+        description="请先下载当前模型导入模板（Excel可直接打开CSV），按模板填写后上传。系统将自动校验CI名称与模型必填属性。"
         type="info"
         show-icon
         style="margin-bottom: 16px"
       />
+      <div class="import-template-action">
+        <a-button :loading="templateLoading" @click="handleDownloadTemplate">
+          下载当前模型导入模板
+        </a-button>
+      </div>
       <a-upload-dragger
         v-model:fileList="importFileList"
         :before-upload="beforeUpload"
@@ -229,15 +234,13 @@ import {
   SearchOutlined,
   PlusOutlined,
   SettingOutlined,
-  TableOutlined,
-  AppstoreOutlined,
   DragOutlined,
   FolderOutlined,
   ExportOutlined,
   ImportOutlined,
   InboxOutlined
 } from '@ant-design/icons-vue'
-import { getInstances, deleteInstance, batchDeleteInstances, generateCICode, exportInstances, importInstances } from '@/api/ci'
+import { getInstances, deleteInstance, batchDeleteInstances, generateCICode, exportInstances, importInstances, getImportTemplate } from '@/api/ci'
 import { getModelsTree, getModelDetail } from '@/api/cmdb'
 import { getDepartments } from '@/api/department'
 import CiInstanceModal from './components/CiInstanceModal.vue'
@@ -732,6 +735,8 @@ const handleExport = async () => {
 const importModalVisible = ref(false)
 const importing = ref(false)
 const importFileList = ref<any[]>([])
+const templateLoading = ref(false)
+const importTemplate = ref<{ filename: string; content: string } | null>(null)
 
 const beforeUpload = (file: File) => {
   importFileList.value = [file]
@@ -741,6 +746,52 @@ const beforeUpload = (file: File) => {
 const handleImport = () => {
   importFileList.value = []
   importModalVisible.value = true
+  if (currentModelId.value) {
+    prepareImportTemplate(currentModelId.value)
+  }
+}
+
+const prepareImportTemplate = async (modelId: number) => {
+  try {
+    templateLoading.value = true
+    const res = await getImportTemplate(modelId)
+    if (res.code === 200 && res.data) {
+      importTemplate.value = {
+        filename: res.data.filename || `${currentModelName.value || 'CI'}_导入模板.csv`,
+        content: res.data.content || ''
+      }
+    } else {
+      importTemplate.value = null
+    }
+  } catch (error) {
+    importTemplate.value = null
+  } finally {
+    templateLoading.value = false
+  }
+}
+
+const handleDownloadTemplate = async () => {
+  if (!currentModelId.value) {
+    message.warning('请先选择模型')
+    return
+  }
+
+  if (!importTemplate.value || !importTemplate.value.content) {
+    await prepareImportTemplate(currentModelId.value)
+  }
+
+  if (!importTemplate.value || !importTemplate.value.content) {
+    message.error('模板生成失败，请稍后重试')
+    return
+  }
+
+  const blob = new Blob([importTemplate.value.content], { type: 'text/csv;charset=utf-8;' })
+  const link = document.createElement('a')
+  link.href = URL.createObjectURL(blob)
+  link.download = importTemplate.value.filename || `${currentModelName.value}_CI导入模板.csv`
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
 }
 
 const handleImportOk = async () => {
@@ -766,11 +817,11 @@ const handleColumnOk = () => {
   columnModalVisible.value = false
 }
 
-const dragStart = (e: DragEvent, col: any) => {
+const dragStart = (_e: DragEvent, col: any) => {
   dragItem = col
 }
 
-const drop = (e: DragEvent, col: any) => {
+const drop = (_e: DragEvent, col: any) => {
   if (!dragItem || dragItem === col) return
   
   const fromIndex = availableColumns.value.indexOf(dragItem)
@@ -782,10 +833,6 @@ const drop = (e: DragEvent, col: any) => {
   dragItem = null
 }
 
-const formatDate = (date: string) => {
-  if (!date) return '-'
-  return dayjs(date).format('YYYY-MM-DD HH:mm')
-}
 </script>
 
 <style scoped>
@@ -976,6 +1023,12 @@ const formatDate = (date: string) => {
 .drag-icon {
   color: #999;
   cursor: move;
+}
+
+.import-template-action {
+  margin-bottom: 12px;
+  display: flex;
+  justify-content: flex-start;
 }
 
 .model-node {

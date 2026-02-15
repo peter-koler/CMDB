@@ -57,3 +57,15 @@ dist-ssr/
 
 # Misc
 .DS_Store
+
+# Uploads
+backend/uploads/
+
+# Tools
+tools/
+
+# Images in docs (optional, can be kept if needed)
+# docs/images/
+
+# Word documents
+*.docx

@@ -153,3 +153,12 @@ export const importInstances = (file: File, modelId: number) => {
     }
   })
 }
+
+// 下载导入模板（CSV，可用 Excel 打开）
+export const getImportTemplate = (modelId: number) => {
+  return request({
+    url: '/cmdb/instances/import-template',
+    method: 'GET',
+    params: { model_id: modelId }
+  })
+}
