@@ -12,9 +12,10 @@
     >
       <div class="logo">
         <div class="logo-icon">
-          <AppstoreOutlined />
+          <img v-if="siteLogo" :src="siteLogo" alt="logo" class="logo-img" />
+          <AppstoreOutlined v-else />
         </div>
-        <span v-if="!collapsed" class="logo-text">{{ t('login.title') }}</span>
+        <span v-if="!collapsed" class="logo-text">{{ siteName }}</span>
       </div>
       <a-menu
         v-model:selectedKeys="selectedKeys"
@@ -103,15 +104,6 @@
             <MenuFoldOutlined v-if="!collapsed" />
             <MenuUnfoldOutlined v-else />
           </span>
-          <a-breadcrumb class="breadcrumb" separator="/">
-            <a-breadcrumb-item>
-              <HomeOutlined />
-            </a-breadcrumb-item>
-            <a-breadcrumb-item v-if="currentMenu.parent">{{ currentMenu.parent }}</a-breadcrumb-item>
-            <a-breadcrumb-item v-if="currentMenu.title">
-              <span>{{ currentMenu.title }}</span>
-            </a-breadcrumb-item>
-          </a-breadcrumb>
         </div>
         <div class="header-right">
           <a-space :size="8">
@@ -176,6 +168,8 @@ import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useUserStore } from '@/stores/user'
 import { useAppStore } from '@/stores/app'
+import { getConfigs } from '@/api/config'
+import { getBaseURL } from '@/utils/request'
 import {
   SettingOutlined,
   UserOutlined,
@@ -191,7 +185,6 @@ import {
   GlobalOutlined,
   BulbOutlined,
   BulbFilled,
-  HomeOutlined,
   DownOutlined,
   AppstoreOutlined,
   DashboardOutlined,
@@ -213,35 +206,31 @@ const appStore = useAppStore()
 const collapsed = ref(false)
 const selectedKeys = ref<string[]>([])
 const openKeys = ref<string[]>([])
+const siteLogo = ref('')
+const siteName = ref('Arco CMDB')
 
 const userInfo = computed(() => userStore.userInfo)
-
-const menuMap: Record<string, { parent: string; title: string }> = {
-  '/dashboard': { parent: '', title: t('menu.dashboard') },
-  '/cmdb/instance': { parent: t('menu.cmdb'), title: t('menu.instance') },
-  '/cmdb/search': { parent: t('menu.cmdb'), title: t('menu.search') },
-  '/cmdb/history': { parent: t('menu.cmdb'), title: t('menu.history') },
-  '/cmdb/topology': { parent: t('menu.cmdb'), title: t('menu.topology') },
-  '/config/model': { parent: t('menu.config'), title: t('menu.model') },
-  '/config/relation-type': { parent: t('menu.config'), title: t('menu.relationType') },
-  '/config/relation-trigger': { parent: t('menu.config'), title: t('menu.relationTrigger') },
-  '/config/dictionary': { parent: t('menu.config'), title: t('menu.dictionary') },
-  '/system/user': { parent: t('menu.system'), title: t('menu.user') },
-  '/system/department': { parent: t('menu.system'), title: t('menu.department') },
-  '/system/role': { parent: t('menu.system'), title: t('menu.role') },
-  '/system/config': { parent: t('menu.system'), title: t('menu.systemConfig') },
-  '/system/log': { parent: t('menu.system'), title: t('menu.log') }
-}
-
-const currentMenu = computed(() => {
-  return menuMap[route.path] || { parent: '', title: '' }
-})
 
 onMounted(async () => {
   if (!userStore.userInfo) {
     await userStore.getUserInfo()
   }
   updateSelectedKeys()
+  
+  // 加载站点配置
+  try {
+    const res = await getConfigs()
+    if (res.code === 200) {
+      if (res.data.site_logo?.value) {
+        siteLogo.value = getBaseURL() + res.data.site_logo.value
+      }
+      if (res.data.site_name?.value) {
+        siteName.value = res.data.site_name.value
+      }
+    }
+  } catch (error) {
+    console.error('加载站点配置失败:', error)
+  }
 })
 
 watch(() => route.path, () => {
@@ -356,6 +345,14 @@ const toggleTheme = () => {
   color: white;
   font-size: 18px;
   flex-shrink: 0;
+  overflow: hidden;
+}
+
+.logo-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  padding: 4px;
 }
 
 .logo-text {
@@ -387,6 +384,10 @@ const toggleTheme = () => {
 
 .sider-menu :deep(.ant-menu-item-selected) {
   background: linear-gradient(90deg, #1890ff 0%, #36cfc9 100%) !important;
+}
+
+.sider-menu::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
 }
 
 .layout-main {
@@ -423,23 +424,6 @@ const toggleTheme = () => {
 
 .trigger:hover {
   color: #1890ff;
-}
-
-.breadcrumb {
-  font-size: 14px;
-}
-
-.breadcrumb :deep(.ant-breadcrumb-link) {
-  display: flex;
-  align-items: center;
-}
-
-.breadcrumb :deep(.ant-breadcrumb-separator) {
-  margin: 0 8px;
-}
-
-.breadcrumb :deep(ol li:last-child .ant-breadcrumb-separator) {
-  display: none;
 }
 
 .header-right {
@@ -512,10 +496,6 @@ const toggleTheme = () => {
   
   .layout-content {
     padding: 16px;
-  }
-  
-  .breadcrumb {
-    display: none;
   }
   
   .user-name {

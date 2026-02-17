@@ -224,6 +224,148 @@
         <p class="ant-upload-hint">支持 .csv 格式文件</p>
       </a-upload-dragger>
     </a-modal>
+
+    <!-- 批量编辑弹窗 -->
+    <a-modal
+      v-model:open="batchEditModalVisible"
+      title="批量编辑CI属性"
+      @ok="handleBatchEditOk"
+      :confirm-loading="batchEditLoading"
+      width="500px"
+    >
+      <a-alert
+        message="只能编辑以下类型的属性"
+        :description="`支持批量编辑的字段类型：${allowedFieldTypesText}`"
+        type="info"
+        show-icon
+        style="margin-bottom: 16px"
+      />
+
+      <div v-if="batchEditLoading" class="batch-edit-loading">
+        <a-spin tip="加载中..." />
+      </div>
+
+      <div v-else-if="batchEditableFields.length === 0" class="batch-edit-empty">
+        <a-empty description="该模型没有支持批量编辑的字段" />
+      </div>
+
+      <div v-else class="batch-edit-form">
+        <!-- 选择要编辑的属性 -->
+        <div class="batch-edit-field">
+          <div class="batch-edit-field-label required">选择属性</div>
+          <div class="batch-edit-field-input">
+            <a-select
+              v-model:value="selectedBatchEditField"
+              placeholder="请选择要编辑的属性"
+              style="width: 100%"
+              @change="onBatchEditFieldChange"
+            >
+              <a-select-option
+                v-for="field in batchEditableFields"
+                :key="field.code"
+                :value="field.code"
+              >
+                {{ field.name }}
+              </a-select-option>
+            </a-select>
+          </div>
+        </div>
+
+        <!-- 属性值编辑区域 -->
+        <div v-if="currentBatchEditField" class="batch-edit-field">
+          <div class="batch-edit-field-label required">
+            {{ currentBatchEditField.name }}
+          </div>
+          <div class="batch-edit-field-input">
+            <!-- 下拉选择/单选 -->
+            <a-select
+              v-if="currentBatchEditField.field_type === 'dropdown' || currentBatchEditField.field_type === 'select'"
+              v-model:value="batchEditValue"
+              :placeholder="`请选择${currentBatchEditField.name}`"
+              allowClear
+              style="width: 100%"
+            >
+              <a-select-option
+                v-for="opt in currentBatchEditField.options"
+                :key="opt.value"
+                :value="opt.value"
+              >
+                {{ opt.label }}
+              </a-select-option>
+            </a-select>
+
+            <!-- 多选 -->
+            <a-select
+              v-else-if="currentBatchEditField.field_type === 'multiselect'"
+              v-model:value="batchEditValue"
+              :placeholder="`请选择${currentBatchEditField.name}`"
+              mode="multiple"
+              allowClear
+              style="width: 100%"
+            >
+              <a-select-option
+                v-for="opt in currentBatchEditField.options"
+                :key="opt.value"
+                :value="opt.value"
+              >
+                {{ opt.label }}
+              </a-select-option>
+            </a-select>
+
+            <!-- 数字 -->
+            <a-input-number
+              v-else-if="currentBatchEditField.field_type === 'number'"
+              v-model:value="batchEditValue"
+              :placeholder="`请输入${currentBatchEditField.name}`"
+              style="width: 100%"
+            />
+
+            <!-- 日期 -->
+            <a-date-picker
+              v-else-if="currentBatchEditField.field_type === 'date'"
+              v-model:value="batchEditValue"
+              :placeholder="`请选择${currentBatchEditField.name}`"
+              value-format="YYYY-MM-DD"
+              style="width: 100%"
+            />
+
+            <!-- 日期时间 -->
+            <a-date-picker
+              v-else-if="currentBatchEditField.field_type === 'datetime'"
+              v-model:value="batchEditValue"
+              :placeholder="`请选择${currentBatchEditField.name}`"
+              show-time
+              value-format="YYYY-MM-DD HH:mm:ss"
+              style="width: 100%"
+            />
+
+            <!-- 时间 -->
+            <a-time-picker
+              v-else-if="currentBatchEditField.field_type === 'time'"
+              v-model:value="batchEditValue"
+              :placeholder="`请选择${currentBatchEditField.name}`"
+              value-format="HH:mm:ss"
+              style="width: 100%"
+            />
+
+            <!-- 多行文本 -->
+            <a-textarea
+              v-else-if="currentBatchEditField.field_type === 'textarea'"
+              v-model:value="batchEditValue"
+              :placeholder="`请输入${currentBatchEditField.name}`"
+              :rows="3"
+            />
+
+            <!-- 单行文本（默认） -->
+            <a-input
+              v-else
+              v-model:value="batchEditValue"
+              :placeholder="`请输入${currentBatchEditField.name}`"
+            />
+          </div>
+        </div>
+      </div>
+    </a-modal>
   </div>
 </template>
 
@@ -241,7 +383,7 @@ import {
   ImportOutlined,
   InboxOutlined
 } from '@ant-design/icons-vue'
-import { getInstances, deleteInstance, batchDeleteInstances, generateCICode, exportInstances, importInstances, getImportTemplate } from '@/api/ci'
+import { getInstances, deleteInstance, batchDeleteInstances, batchUpdateInstances, generateCICode, exportInstances, importInstances, getImportTemplate, getBatchEditFields } from '@/api/ci'
 import { getModelsTree, getModelDetail } from '@/api/cmdb'
 import { getDepartments } from '@/api/department'
 import CiInstanceModal from './components/CiInstanceModal.vue'
@@ -291,6 +433,33 @@ const currentInstance = ref<any>(null)
 const detailDrawerVisible = ref(false)
 const currentInstanceId = ref<number | null>(null)
 const columnModalVisible = ref(false)
+
+// 批量编辑相关
+const batchEditModalVisible = ref(false)
+const batchEditLoading = ref(false)
+const batchEditableFields = ref<any[]>([])
+const selectedBatchEditField = ref<string>('')
+const batchEditValue = ref<any>(null)
+
+// 当前选中的批量编辑字段
+const currentBatchEditField = computed(() => {
+  return batchEditableFields.value.find(f => f.code === selectedBatchEditField.value)
+})
+
+// 允许批量编辑的字段类型
+const allowedFieldTypes = [
+  'text',      // 单行文本
+  'textarea',  // 多行文本
+  'number',    // 数字
+  'date',      // 日期
+  'datetime',  // 日期时间
+  'time',      // 时间控件
+  'dropdown',  // 下拉选择
+  'select',    // 单选
+  'multiselect' // 多选
+]
+
+const allowedFieldTypesText = '单行文本、多行文本、数字、日期、日期时间、时间、下拉选择、单选、多选'
 
 let dragItem: any = null
 
@@ -690,8 +859,77 @@ const handleDelete = async (record: any) => {
   }
 }
 
-const handleBatchEdit = () => {
-  message.info('批量编辑功能开发中')
+const handleBatchEdit = async () => {
+  if (selectedRowKeys.value.length === 0) {
+    message.warning('请先选择要编辑的CI')
+    return
+  }
+  if (!currentModelId.value) {
+    message.warning('请先选择模型')
+    return
+  }
+
+  batchEditModalVisible.value = true
+  batchEditLoading.value = true
+  selectedBatchEditField.value = ''
+  batchEditValue.value = null
+
+  try {
+    const res = await getBatchEditFields(currentModelId.value)
+    if (res.code === 200) {
+      batchEditableFields.value = res.data.fields || []
+    } else {
+      message.error(res.message || '获取可编辑字段失败')
+      batchEditableFields.value = []
+    }
+  } catch (error: any) {
+    message.error(error.response?.data?.message || '获取可编辑字段失败')
+    batchEditableFields.value = []
+  } finally {
+    batchEditLoading.value = false
+  }
+}
+
+const onBatchEditFieldChange = () => {
+  // 切换字段时清空值
+  batchEditValue.value = null
+}
+
+const handleBatchEditOk = async () => {
+  if (selectedRowKeys.value.length === 0) {
+    message.warning('请先选择要编辑的CI')
+    return
+  }
+
+  if (!selectedBatchEditField.value) {
+    message.warning('请选择要编辑的属性')
+    return
+  }
+
+  if (batchEditValue.value === undefined || batchEditValue.value === null || batchEditValue.value === '') {
+    message.warning('请填写属性值')
+    return
+  }
+
+  batchEditLoading.value = true
+  try {
+    const updates = {
+      [selectedBatchEditField.value]: batchEditValue.value
+    }
+    const res = await batchUpdateInstances({
+      ids: selectedRowKeys.value.map(Number),
+      updates,
+      model_id: currentModelId.value
+    })
+    message.success(res.message || '批量更新成功')
+    batchEditModalVisible.value = false
+    selectedRowKeys.value = []
+    fetchInstances()
+  } catch (error: any) {
+    message.error(error.response?.data?.message || '批量更新失败')
+  } finally {
+    batchEditLoading.value = false
+  }
 }
 
 const handleBatchDelete = async () => {
@@ -1097,6 +1335,39 @@ const drop = (_e: DragEvent, col: any) => {
   color: #f5222d;
   margin-right: 2px;
   font-weight: 600;
+}
+
+/* 批量编辑样式 */
+.batch-edit-form {
+  padding: 8px 0;
+}
+
+.batch-edit-field {
+  margin-bottom: 16px;
+}
+
+.batch-edit-field-label {
+  margin-bottom: 8px;
+  font-size: 14px;
+  color: #333;
+}
+
+.batch-edit-field-label.required::before {
+  content: '* ';
+  color: #f5222d;
+}
+
+.batch-edit-field-input {
+  width: 100%;
+}
+
+.batch-edit-loading {
+  padding: 40px 0;
+  text-align: center;
+}
+
+.batch-edit-empty {
+  padding: 40px 0;
 }
 
 :deep(.ant-tree-treenode) {

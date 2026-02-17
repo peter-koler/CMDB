@@ -5,7 +5,10 @@ from app.models.cmdb_model import CmdbModel
 from app.models.model_field import ModelField
 from app.models.model_region import ModelRegion
 from app.models.cmdb_relation import CmdbRelation, RelationTrigger
-from app.services.relation_service import create_relation_with_validation, RelationServiceError
+from app.services.relation_service import (
+    create_relation_with_validation,
+    RelationServiceError,
+)
 from app import db
 from app.routes.auth import log_operation
 from app.utils.code_generator import generate_ci_code_v2
@@ -367,19 +370,222 @@ def _log_ci_history(
     history.save()
 
 
+# 允许批量编辑的字段类型白名单
+ALLOWED_BATCH_EDIT_TYPES = {
+    "text",  # 单行文本
+    "textarea",  # 多行文本
+    "number",  # 数字
+    "date",  # 日期
+    "datetime",  # 日期时间
+    "time",  # 时间控件
+    "dropdown",  # 下拉选择
+    "select",  # 单选
+    "multiselect",  # 多选
+}
+
+
+@ci_bp.route("/batch-edit-fields", methods=["GET"])
+@jwt_required()
+def get_batch_edit_fields():
+    """获取指定模型支持批量编辑的字段列表"""
+    model_id = request.args.get("model_id", type=int)
+
+    if not model_id:
+        return jsonify({"code": 400, "message": "请指定模型ID"}), 400
+
+    model = CmdbModel.query.get(model_id)
+    if not model:
+        return jsonify({"code": 400, "message": "模型不存在"}), 400
+
+    # 获取模型字段和区域信息
+    fields = (
+        ModelField.query.filter_by(model_id=model_id)
+        .order_by(ModelField.sort_order)
+        .all()
+    )
+    regions = ModelRegion.query.filter_by(model_id=model_id).all()
+    region_map = {region.id: region for region in regions}
+
+    # 从 form_config 提取字段（与导出功能保持一致）
+    def extract_form_fields(form_config):
+        if not form_config:
+            return []
+        config_data = form_config
+        # 处理双重编码的 JSON 字符串
+        if isinstance(config_data, str):
+            try:
+                config_data = json.loads(config_data)
+            except Exception:
+                return []
+        # 如果解析后还是字符串，再解析一次
+        if isinstance(config_data, str):
+            try:
+                config_data = json.loads(config_data)
+            except Exception:
+                return []
+        if not isinstance(config_data, list):
+            return []
+        result = []
+        seen = set()
+
+        def add_field(code, name, group_label, group_order, field_order, field_type="text", options=None):
+            if not code or code in seen:
+                return
+            result.append({
+                "code": code,
+                "name": name,
+                "group_label": group_label,
+                "group_order": group_order,
+                "field_order": field_order,
+                "field_type": field_type,
+                "options": options or [],
+            })
+            seen.add(code)
+
+        def walk(items, group_label="基础属性", group_order=-1):
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                control_type = item.get("controlType")
+                props = item.get("props") if isinstance(item.get("props"), dict) else {}
+                code = props.get("code")
+                if control_type == "group":
+                    group_name = props.get("label") or "属性分组"
+                    children = item.get("children")
+                    if isinstance(children, list):
+                        walk(children, group_name, item.get("sortOrder", group_order))
+                    continue
+                if code:
+                    name = props.get("label") or code
+                    # 解析选项
+                    options = []
+                    raw_options = props.get("options", [])
+                    if isinstance(raw_options, list):
+                        for opt in raw_options:
+                            if isinstance(opt, dict):
+                                options.append({
+                                    "label": opt.get("label", ""),
+                                    "value": opt.get("value", "")
+                                })
+                    add_field(code, name, group_label, group_order, props.get("sortOrder", 0), control_type or "text", options)
+                children = item.get("children")
+                if isinstance(children, list):
+                    walk(children, group_label, group_order)
+
+        walk(config_data)
+        return result
+
+    # 构建字段映射
+    field_map = {}
+    for field in fields:
+        group_label = "基础属性"
+        group_order = -1
+        region = region_map.get(field.region_id)
+        if region:
+            group_label = region.name
+            group_order = region.sort_order if region.sort_order is not None else 0
+        field_map[field.code] = {
+            "id": field.id,
+            "code": field.code,
+            "name": field.name,
+            "field_type": field.field_type,
+            "is_required": field.is_required,
+            "options": field.to_dict().get("options", []),
+            "region_id": field.region_id,
+            "group_label": group_label,
+            "group_order": group_order,
+            "field_order": field.sort_order if field.sort_order is not None else 0,
+        }
+
+    # 从 form_config 提取字段并合并
+    form_fields = extract_form_fields(model.form_config)
+    for field in form_fields:
+        if field["code"] not in field_map:
+            field_map[field["code"]] = {
+                "id": None,
+                "code": field["code"],
+                "name": field["name"],
+                "field_type": field["field_type"],
+                "is_required": False,
+                "options": field.get("options", []),
+                "region_id": None,
+                "group_label": field.get("group_label", "基础属性"),
+                "group_order": field.get("group_order", -1),
+                "field_order": field.get("field_order", 0),
+            }
+
+    # 过滤出允许批量编辑的字段
+    editable_fields = []
+    for field in field_map.values():
+        if field["field_type"] in ALLOWED_BATCH_EDIT_TYPES:
+            editable_fields.append(field)
+
+    # 按分组和排序号排序
+    editable_fields.sort(key=lambda x: (x.get("group_order", -1), x.get("field_order", 0)))
+
+    return jsonify(
+        {
+            "code": 200,
+            "message": "success",
+            "data": {
+                "model_id": model_id,
+                "model_name": model.name,
+                "allowed_types": list(ALLOWED_BATCH_EDIT_TYPES),
+                "fields": editable_fields,
+            },
+        }
+    )
+
+
 # ==================== 批量操作 ====================
 
 
 @ci_bp.route("/batch-update", methods=["POST"])
 @jwt_required()
 def batch_update():
-    """批量更新CI属性"""
+    """批量更新CI属性（仅允许特定字段类型）"""
     data = request.get_json()
     ids = data.get("ids", [])
     updates = data.get("updates", {})
+    model_id = data.get("model_id")
 
     if not ids:
         return jsonify({"code": 400, "message": "请选择要更新的CI"}), 400
+
+    if not model_id:
+        return jsonify({"code": 400, "message": "请指定模型ID"}), 400
+
+    if not updates:
+        return jsonify({"code": 400, "message": "请提供要更新的属性"}), 400
+
+    # 获取模型字段定义，校验字段类型
+    model_fields = ModelField.query.filter_by(model_id=model_id).all()
+    field_type_map = {f.code: f.field_type for f in model_fields}
+
+    # 校验所有要更新的字段是否允许批量编辑
+    disallowed_fields = []
+    for field_code in updates.keys():
+        field_type = field_type_map.get(field_code)
+        if not field_type or field_type not in ALLOWED_BATCH_EDIT_TYPES:
+            disallowed_fields.append(
+                {
+                    "field": field_code,
+                    "type": field_type or "unknown",
+                    "reason": "该字段类型不允许批量编辑",
+                }
+            )
+
+    if disallowed_fields:
+        return jsonify(
+            {
+                "code": 400,
+                "message": "包含不允许批量编辑的字段",
+                "data": {
+                    "allowed_types": list(ALLOWED_BATCH_EDIT_TYPES),
+                    "disallowed_fields": disallowed_fields,
+                },
+            }
+        ), 400
 
     identity = get_jwt_identity()
     claims = get_jwt()
@@ -390,19 +596,26 @@ def batch_update():
         if not instance:
             continue
 
+        # 校验CI是否属于指定模型
+        if instance.model_id != model_id:
+            continue
+
         # 权限检查
         if not require_admin() and instance.created_by != int(identity):
             continue
 
         # 更新属性
+        old_values = instance.get_attribute_values()
         attr_values = instance.get_attribute_values()
+
         for key, value in updates.items():
+            old_val = old_values.get(key)
             attr_values[key] = value
             _log_ci_history(
                 instance.id,
                 "UPDATE",
                 key,
-                None,
+                str(old_val) if old_val is not None else None,
                 str(value),
                 int(identity),
                 claims.get("username"),
@@ -410,8 +623,10 @@ def batch_update():
 
         instance.set_attribute_values(attr_values)
         instance.updated_by = int(identity)
-        instance.save()
+        db.session.add(instance)
         updated_count += 1
+
+    db.session.commit()
 
     log_operation(
         int(identity),
@@ -727,6 +942,13 @@ def export_instances():
         if not form_config:
             return []
         config_data = form_config
+        # 处理双重编码的 JSON 字符串
+        if isinstance(config_data, str):
+            try:
+                config_data = json.loads(config_data)
+            except Exception:
+                return []
+        # 如果解析后还是字符串，再解析一次
         if isinstance(config_data, str):
             try:
                 config_data = json.loads(config_data)
@@ -766,7 +988,9 @@ def export_instances():
                     continue
                 if code:
                     name = props.get("label") or code
-                    add_field(code, name, group_label, group_order, props.get("sortOrder", 0))
+                    add_field(
+                        code, name, group_label, group_order, props.get("sortOrder", 0)
+                    )
                 children = item.get("children")
                 if isinstance(children, list):
                     walk(children, group_label, group_order)
@@ -810,7 +1034,9 @@ def export_instances():
             }
             for key in sorted(attr_keys)
         ]
-    field_defs.sort(key=lambda item: (item.get("group_order", -1), item.get("field_order", 0)))
+    field_defs.sort(
+        key=lambda item: (item.get("group_order", -1), item.get("field_order", 0))
+    )
 
     output = io.StringIO()
     headers = ["CI编码", "CI名称", "部门", "创建人", "创建时间"]
@@ -898,12 +1124,7 @@ def import_instances():
         field_by_code[field.code] = field
         if field.is_required:
             required_field_codes.add(field.code)
-        aliases = [
-            field.code, 
-            field.name, 
-            f"*{field.name}", 
-            f"*{field.name}(必填)"
-        ]
+        aliases = [field.code, field.name, f"*{field.name}", f"*{field.name}(必填)"]
         for alias in aliases:
             key = normalize_header(alias)
             if key:
@@ -940,8 +1161,12 @@ def import_instances():
                     name = row[name_idx].strip()
                 else:
                     name = ""
-                
-                code = row[code_idx].strip() if code_idx is not None and code_idx < len(row) else ""
+
+                code = (
+                    row[code_idx].strip()
+                    if code_idx is not None and code_idx < len(row)
+                    else ""
+                )
 
                 if not code:
                     code = generate_ci_code_v2()
@@ -960,10 +1185,14 @@ def import_instances():
                                 except Exception:
                                     pass
                         attr_values[field_code] = value
-                
+
                 if not name:
                     for field in fields:
-                        if field.is_required and field.field_type in ('text', 'string') and field.code in attr_values:
+                        if (
+                            field.is_required
+                            and field.field_type in ("text", "string")
+                            and field.code in attr_values
+                        ):
                             name = str(attr_values[field.code])
                             break
                     if not name:
@@ -974,10 +1203,16 @@ def import_instances():
                 for required_code in required_field_codes:
                     val = attr_values.get(required_code)
                     if val is None or str(val).strip() == "":
-                        required_name = field_by_code.get(required_code).name if field_by_code.get(required_code) else required_code
+                        required_name = (
+                            field_by_code.get(required_code).name
+                            if field_by_code.get(required_code)
+                            else required_code
+                        )
                         missing_required.append(required_name)
                 if missing_required:
-                    error_messages.append(f"第{row_idx}行: 必填属性不能为空({','.join(missing_required)})")
+                    error_messages.append(
+                        f"第{row_idx}行: 必填属性不能为空({','.join(missing_required)})"
+                    )
                     continue
 
                 instance = CiInstance(
@@ -1033,31 +1268,159 @@ def download_import_template():
     if not model:
         return jsonify({"code": 400, "message": "模型不存在"}), 400
 
+    # 获取模型字段和区域信息
     fields = (
         ModelField.query.filter_by(model_id=model_id)
-        .order_by(ModelField.is_required.desc(), ModelField.sort_order.asc())
+        .order_by(ModelField.sort_order)
         .all()
+    )
+    regions = ModelRegion.query.filter_by(model_id=model_id).all()
+    region_map = {region.id: region for region in regions}
+
+    # 从 form_config 提取字段（与导出功能保持一致）
+    def extract_form_fields(form_config):
+        if not form_config:
+            return []
+        config_data = form_config
+        # 处理双重编码的 JSON 字符串
+        if isinstance(config_data, str):
+            try:
+                config_data = json.loads(config_data)
+            except Exception:
+                return []
+        # 如果解析后还是字符串，再解析一次
+        if isinstance(config_data, str):
+            try:
+                config_data = json.loads(config_data)
+            except Exception:
+                return []
+        if not isinstance(config_data, list):
+            return []
+        result = []
+        seen = set()
+
+        def add_field(
+            code, name, group_label, group_order, field_order, field_type="text"
+        ):
+            if not code or code in seen:
+                return
+            result.append(
+                {
+                    "code": code,
+                    "name": name,
+                    "group_label": group_label,
+                    "group_order": group_order,
+                    "field_order": field_order,
+                    "field_type": field_type,
+                }
+            )
+            seen.add(code)
+
+        def walk(items, group_label="基础属性", group_order=-1):
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                control_type = item.get("controlType")
+                props = item.get("props") if isinstance(item.get("props"), dict) else {}
+                code = props.get("code")
+                if control_type == "group":
+                    group_name = props.get("label") or "属性分组"
+                    children = item.get("children")
+                    if isinstance(children, list):
+                        walk(children, group_name, item.get("sortOrder", group_order))
+                    continue
+                if code:
+                    name = props.get("label") or code
+                    add_field(
+                        code,
+                        name,
+                        group_label,
+                        group_order,
+                        props.get("sortOrder", 0),
+                        control_type or "text",
+                    )
+                children = item.get("children")
+                if isinstance(children, list):
+                    walk(children, group_label, group_order)
+
+        walk(config_data)
+        return result
+
+    # 构建字段映射
+    field_map = {}
+    for field in fields:
+        group_label = "基础属性"
+        group_order = -1
+        region = region_map.get(field.region_id)
+        if region:
+            group_label = region.name
+            group_order = region.sort_order if region.sort_order is not None else 0
+        field_map[field.code] = {
+            "code": field.code,
+            "name": field.name,
+            "group_label": group_label,
+            "group_order": group_order,
+            "field_order": field.sort_order if field.sort_order is not None else 0,
+            "field_type": field.field_type,
+            "is_required": field.is_required,
+        }
+
+    # 从 form_config 提取字段并合并
+    form_fields = extract_form_fields(model.form_config)
+    for field in form_fields:
+        if field["code"] not in field_map:
+            field_map[field["code"]] = field
+
+    # 如果没有字段定义，返回空模板
+    if not field_map:
+        return jsonify(
+            {
+                "code": 200,
+                "message": "success",
+                "data": {
+                    "filename": f"{model.name}_CI导入模板_{datetime.now().strftime('%Y%m%d%H%M%S')}.csv",
+                    "content": "\ufeff该模型暂无字段定义\n",
+                },
+            }
+        )
+
+    # 转换为列表并排序
+    field_defs = list(field_map.values())
+    field_defs.sort(
+        key=lambda item: (item.get("group_order", -1), item.get("field_order", 0))
     )
 
     output = io.StringIO()
     writer = csv.writer(output)
 
+    # 生成表头
     headers = []
-    for field in fields:
-        header = f"*{field.name}(必填)" if field.is_required else field.name
+    for field in field_defs:
+        is_required = field.get("is_required", False)
+        name = field.get("name") or field.get("code")
+        group_label = field.get("group_label")
+        if group_label and group_label != "基础属性":
+            display_name = f"{group_label}-{name}"
+        else:
+            display_name = name
+        header = f"*{display_name}(必填)" if is_required else display_name
         headers.append(header)
     writer.writerow(headers)
 
+    # 生成示例行
     sample_row = []
-    for field in fields:
-        if field.field_type == "number":
+    for field in field_defs:
+        field_type = field.get("field_type", "text")
+        if field_type == "number":
             sample_row.append("0")
-        elif field.field_type in ("select", "radio", "dropdown"):
+        elif field_type in ("select", "radio", "dropdown"):
             sample_row.append("选项值")
-        elif field.field_type in ("multiselect", "checkbox"):
+        elif field_type in ("multiselect", "checkbox"):
             sample_row.append("值1,值2")
-        elif field.field_type in ("date", "datetime"):
+        elif field_type in ("date", "datetime"):
             sample_row.append("2026-02-15")
+        elif field_type in ("image", "file"):
+            sample_row.append("(文件)")
         else:
             sample_row.append("示例值")
     writer.writerow(sample_row)
