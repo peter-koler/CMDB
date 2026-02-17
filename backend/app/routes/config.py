@@ -1,7 +1,6 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 from app.models.config import SystemConfig
-from app.models.user import User
 from app.routes.auth import log_operation
 
 config_bp = Blueprint('config', __name__, url_prefix='/api/v1/configs')

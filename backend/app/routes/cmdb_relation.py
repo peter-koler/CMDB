@@ -5,7 +5,6 @@ import csv
 import io
 from app.models.cmdb_relation import RelationType, CmdbRelation, RelationTrigger
 from app.models.ci_instance import CiInstance
-from app.models.cmdb_model import CmdbModel
 from app.models.department import Department
 from app.models.role import UserRole, Role
 from app.services.relation_service import (

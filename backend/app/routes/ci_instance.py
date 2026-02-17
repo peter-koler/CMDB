@@ -1,10 +1,9 @@
 from flask import Blueprint, request, jsonify, send_from_directory
 from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
-from app.models.ci_instance import CiInstance, CiHistory, CodeSequence
+from app.models.ci_instance import CiInstance, CiHistory
 from app.models.cmdb_model import CmdbModel
 from app.models.model_field import ModelField
-from app.models.department import Department
-from app.models.user import User
+from app.models.model_region import ModelRegion
 from app.models.cmdb_relation import CmdbRelation, RelationTrigger
 from app.services.relation_service import create_relation_with_validation, RelationServiceError
 from app import db
@@ -16,7 +15,6 @@ import os
 import json
 import csv
 import io
-from io import StringIO
 
 ci_bp = Blueprint("ci", __name__, url_prefix="/api/v1/cmdb/instances")
 
@@ -718,24 +716,112 @@ def export_instances():
     instances = query.all()
 
     fields = (
-        ModelField.query.filter_by(model_id=model_id, is_active=True)
+        ModelField.query.filter_by(model_id=model_id)
         .order_by(ModelField.sort_order)
         .all()
     )
+    regions = ModelRegion.query.filter_by(model_id=model_id).all()
+    region_map = {region.id: region for region in regions}
+
+    def extract_form_fields(form_config):
+        if not form_config:
+            return []
+        config_data = form_config
+        if isinstance(config_data, str):
+            try:
+                config_data = json.loads(config_data)
+            except Exception:
+                return []
+        if not isinstance(config_data, list):
+            return []
+        result = []
+        seen = set()
+
+        def add_field(code, name, group_label, group_order, field_order):
+            if not code or code in seen:
+                return
+            result.append(
+                {
+                    "code": code,
+                    "name": name,
+                    "group_label": group_label,
+                    "group_order": group_order,
+                    "field_order": field_order,
+                }
+            )
+            seen.add(code)
+
+        def walk(items, group_label="基础属性", group_order=-1):
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                control_type = item.get("controlType")
+                props = item.get("props") if isinstance(item.get("props"), dict) else {}
+                code = props.get("code")
+                if control_type == "group":
+                    group_name = props.get("label") or "属性分组"
+                    children = item.get("children")
+                    if isinstance(children, list):
+                        walk(children, group_name, item.get("sortOrder", group_order))
+                    continue
+                if code:
+                    name = props.get("label") or code
+                    add_field(code, name, group_label, group_order, props.get("sortOrder", 0))
+                children = item.get("children")
+                if isinstance(children, list):
+                    walk(children, group_label, group_order)
+
+        walk(config_data)
+        return result
+
+    field_map = {}
+    for field in fields:
+        group_label = "基础属性"
+        group_order = -1
+        region = region_map.get(field.region_id)
+        if region:
+            group_label = region.name
+            group_order = region.sort_order if region.sort_order is not None else 0
+        field_map[field.code] = {
+            "code": field.code,
+            "name": field.name,
+            "group_label": group_label,
+            "group_order": group_order,
+            "field_order": field.sort_order if field.sort_order is not None else 0,
+        }
+
+    form_fields = extract_form_fields(model.form_config)
+    for field in form_fields:
+        if field["code"] not in field_map:
+            field_map[field["code"]] = field
+
+    field_defs = list(field_map.values())
+    if not field_defs:
+        attr_keys = set()
+        for instance in instances:
+            attr_keys.update(instance.get_attribute_values().keys())
+        field_defs = [
+            {
+                "code": key,
+                "name": key,
+                "group_label": "基础属性",
+                "group_order": -1,
+                "field_order": 0,
+            }
+            for key in sorted(attr_keys)
+        ]
+    field_defs.sort(key=lambda item: (item.get("group_order", -1), item.get("field_order", 0)))
 
     output = io.StringIO()
     headers = ["CI编码", "CI名称", "部门", "创建人", "创建时间"]
-    field_names = [
-        "code",
-        "name",
-        "department_name",
-        "created_by_username",
-        "created_at",
-    ]
 
-    for field in fields:
-        headers.append(field.name)
-        field_names.append(f"attr_{field.code}")
+    for field in field_defs:
+        group_label = field.get("group_label")
+        name = field.get("name") or field.get("code")
+        if group_label:
+            headers.append(f"{group_label}-{name}")
+        else:
+            headers.append(name)
 
     writer = csv.writer(output)
     writer.writerow(headers)
@@ -752,8 +838,8 @@ def export_instances():
             else "",
         ]
 
-        for field in fields:
-            value = attr_values.get(field.code, "")
+        for field in field_defs:
+            value = attr_values.get(field["code"], "")
             if isinstance(value, list):
                 value = ",".join(map(str, value))
             elif isinstance(value, dict):
@@ -797,15 +883,14 @@ def import_instances():
         return jsonify({"code": 400, "message": "模型不存在"}), 400
 
     fields = (
-        ModelField.query.filter_by(model_id=model_id, is_active=True)
+        ModelField.query.filter_by(model_id=model_id)
         .order_by(ModelField.sort_order)
         .all()
     )
 
     def normalize_header(value):
-        return (value or "").strip().lstrip("*").strip()
+        return (value or "").strip().replace("(必填)", "").lstrip("*").strip()
 
-    # 支持字段编码和字段名称两种表头，方便用户直接按模板中文名填写
     field_alias_to_code = {}
     required_field_codes = set()
     field_by_code = {}
@@ -813,7 +898,13 @@ def import_instances():
         field_by_code[field.code] = field
         if field.is_required:
             required_field_codes.add(field.code)
-        for alias in [field.code, field.name, f"*{field.name}"]:
+        aliases = [
+            field.code, 
+            field.name, 
+            f"*{field.name}", 
+            f"*{field.name}(必填)"
+        ]
+        for alias in aliases:
             key = normalize_header(alias)
             if key:
                 field_alias_to_code[key] = field.code
@@ -821,7 +912,10 @@ def import_instances():
     try:
         stream = io.StringIO(file.stream.read().decode("UTF-8"), newline=None)
         reader = csv.reader(stream)
-        header = next(reader)
+        try:
+            header = next(reader)
+        except StopIteration:
+            return jsonify({"code": 400, "message": "文件内容为空"}), 400
 
         name_idx = None
         code_idx = None
@@ -842,12 +936,12 @@ def import_instances():
 
         for row_idx, row in enumerate(reader, start=2):
             try:
-                name = row[name_idx].strip() if name_idx is not None else ""
-                code = row[code_idx].strip() if code_idx is not None else ""
-
-                if not name:
-                    error_messages.append(f"第{row_idx}行: CI名称不能为空")
-                    continue
+                if name_idx is not None and name_idx < len(row):
+                    name = row[name_idx].strip()
+                else:
+                    name = ""
+                
+                code = row[code_idx].strip() if code_idx is not None and code_idx < len(row) else ""
 
                 if not code:
                     code = generate_ci_code_v2()
@@ -860,12 +954,20 @@ def import_instances():
                         if field and field.field_type == "number" and value:
                             try:
                                 value = int(value)
-                            except:
+                            except Exception:
                                 try:
                                     value = float(value)
-                                except:
+                                except Exception:
                                     pass
                         attr_values[field_code] = value
+                
+                if not name:
+                    for field in fields:
+                        if field.is_required and field.field_type in ('text', 'string') and field.code in attr_values:
+                            name = str(attr_values[field.code])
+                            break
+                    if not name:
+                        name = code
 
                 # 校验模型必填属性
                 missing_required = []
@@ -932,7 +1034,7 @@ def download_import_template():
         return jsonify({"code": 400, "message": "模型不存在"}), 400
 
     fields = (
-        ModelField.query.filter_by(model_id=model_id, is_active=True)
+        ModelField.query.filter_by(model_id=model_id)
         .order_by(ModelField.is_required.desc(), ModelField.sort_order.asc())
         .all()
     )
@@ -940,14 +1042,13 @@ def download_import_template():
     output = io.StringIO()
     writer = csv.writer(output)
 
-    headers = ["CI名称", "CI编码"]
+    headers = []
     for field in fields:
-        header = f"*{field.name}" if field.is_required else field.name
+        header = f"*{field.name}(必填)" if field.is_required else field.name
         headers.append(header)
     writer.writerow(headers)
 
-    # 给 1 条示例行，帮助用户理解填充格式
-    sample_row = ["示例CI名称", "可留空(系统自动生成)"]
+    sample_row = []
     for field in fields:
         if field.field_type == "number":
             sample_row.append("0")
@@ -958,7 +1059,7 @@ def download_import_template():
         elif field.field_type in ("date", "datetime"):
             sample_row.append("2026-02-15")
         else:
-            sample_row.append("")
+            sample_row.append("示例值")
     writer.writerow(sample_row)
 
     output.seek(0)
@@ -968,10 +1069,6 @@ def download_import_template():
         {
             "code": 200,
             "message": "success",
-            "data": {
-                "filename": filename,
-                # BOM 处理，避免 Excel 打开中文乱码
-                "content": "\ufeff" + output.getvalue(),
-            },
+            "data": {"filename": filename, "content": "\ufeff" + output.getvalue()},
         }
     )

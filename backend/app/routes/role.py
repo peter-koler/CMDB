@@ -167,7 +167,7 @@ def delete_role(id):
 @jwt_required()
 def get_role_users(role_id):
     """获取角色的用户列表"""
-    role = Role.query.get_or_404(role_id)
+    Role.query.get_or_404(role_id)
     
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 20, type=int)

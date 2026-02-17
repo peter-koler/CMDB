@@ -134,8 +134,7 @@ export const exportInstances = (data: any) => {
   return request({
     url: '/cmdb/instances/export',
     method: 'POST',
-    data,
-    responseType: 'blob'
+    data
   })
 }
 

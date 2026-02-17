@@ -632,7 +632,7 @@ def get_model_icon_file(filepath):
 @log_operation(operation_type='CREATE', operation_object='model_region')
 def create_region(model_id):
     """创建模型区域"""
-    model = CmdbModel.query.get_or_404(model_id)
+    CmdbModel.query.get_or_404(model_id)
     data = request.get_json()
     
     if not data.get('name') or not data.get('code'):
@@ -703,7 +703,7 @@ def delete_region(id):
 @log_operation(operation_type='CREATE', operation_object='model_field')
 def create_field(model_id):
     """创建模型字段"""
-    model = CmdbModel.query.get_or_404(model_id)
+    CmdbModel.query.get_or_404(model_id)
     data = request.get_json()
     
     if not data.get('name') or not data.get('code'):

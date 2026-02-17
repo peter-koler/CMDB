@@ -1,9 +1,7 @@
-from flask import request
 from flask_jwt_extended import get_jwt_identity, get_jwt
 from app.models.user import User
 from app.models.department import Department
 from app.models.role import Role, UserRole
-import json
 
 def get_current_user():
     """获取当前用户"""

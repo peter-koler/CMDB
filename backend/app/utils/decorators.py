@@ -1,7 +1,6 @@
 from functools import wraps
 from flask import request
 from app.models.operation_log import OperationLog
-from datetime import datetime
 
 def log_operation(operation_type, operation_object):
     def decorator(f):

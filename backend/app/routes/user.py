@@ -2,8 +2,6 @@ from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 from app import db
 from app.models.user import User
-from app.models.config import SystemConfig
-from app.models.operation_log import OperationLog
 from app.models.password_history import PasswordHistory
 from app.routes.auth import validate_password, log_operation
 from datetime import datetime

@@ -144,6 +144,7 @@
             <a-space>
               <a-button size="small" @click="handleBatchEdit">批量编辑</a-button>
               <a-button size="small" danger @click="handleBatchDelete">批量删除</a-button>
+              <a-button size="small" @click="handleExportSelected">导出选中</a-button>
               <a-button size="small" @click="selectedRowKeys = []">取消选择</a-button>
             </a-space>
           </div>
@@ -475,6 +476,7 @@ const fetchInstances = async () => {
 }
 
 const onModelSelect = async (keys: any, info: any) => {
+  selectedRowKeys.value = []
   selectedModelKeys.value = keys
   const node = info.node
   
@@ -608,11 +610,13 @@ const resetColumns = () => {
 }
 
 const handleSearch = () => {
+  selectedRowKeys.value = []
   pagination.current = 1
   fetchInstances()
 }
 
 const handleReset = () => {
+  selectedRowKeys.value = []
   searchKeyword.value = ''
   searchDept.value = null
   attrFilterField.value = null
@@ -711,22 +715,68 @@ const showColumnSetting = () => {
 
 const handleExport = async () => {
   try {
+    if (!currentModelId.value) {
+      message.warning('请先选择模型')
+      return
+    }
+
+    const res = await exportInstances({
+      model_id: currentModelId.value,
+      keyword: searchKeyword.value
+    })
+
+    if (res.code !== 200 || !res.data?.content) {
+      message.error(res.message || '导出失败')
+      return
+    }
+
+    const content = `\ufeff${res.data.content}`
+    const filename = res.data.filename || `${currentModelName.value}_CI_${new Date().getTime()}.csv`
+    const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' })
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(blob)
+    link.download = filename
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    message.success('导出成功')
+  } catch (error: any) {
+    message.error(error.response?.data?.message || '导出失败')
+  }
+}
+
+const handleExportSelected = async () => {
+  if (!currentModelId.value) {
+    message.warning('请先选择模型')
+    return
+  }
+  if (selectedRowKeys.value.length === 0) {
+    message.warning('请先选择要导出的CI')
+    return
+  }
+
+  try {
     const res = await exportInstances({
       model_id: currentModelId.value,
       keyword: searchKeyword.value,
-      ids: selectedRowKeys.value.length > 0 ? selectedRowKeys.value : []
+      ids: selectedRowKeys.value
     })
-    
-    if (res.data) {
-      const blob = new Blob([res.data], { type: 'text/csv;charset=utf-8;' })
-      const link = document.createElement('a')
-      link.href = URL.createObjectURL(blob)
-      link.download = `${currentModelName.value}_CI_${new Date().getTime()}.csv`
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-      message.success('导出成功')
+
+    if (res.code !== 200 || !res.data?.content) {
+      message.error(res.message || '导出失败')
+      return
     }
+
+    const content = `\ufeff${res.data.content}`
+    const filename = res.data.filename || `${currentModelName.value}_CI_${new Date().getTime()}.csv`
+    const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' })
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(blob)
+    link.download = filename
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    message.success('导出成功')
   } catch (error: any) {
     message.error(error.response?.data?.message || '导出失败')
   }
@@ -743,55 +793,36 @@ const beforeUpload = (file: File) => {
   return false
 }
 
-const handleImport = () => {
-  importFileList.value = []
-  importModalVisible.value = true
-  if (currentModelId.value) {
-    prepareImportTemplate(currentModelId.value)
-  }
-}
-
-const prepareImportTemplate = async (modelId: number) => {
+const handleDownloadTemplate = async () => {
+  if (!currentModelId.value) return
+  
+  templateLoading.value = true
   try {
-    templateLoading.value = true
-    const res = await getImportTemplate(modelId)
-    if (res.code === 200 && res.data) {
-      importTemplate.value = {
-        filename: res.data.filename || `${currentModelName.value || 'CI'}_导入模板.csv`,
-        content: res.data.content || ''
-      }
-    } else {
-      importTemplate.value = null
+    const res = await getImportTemplate(currentModelId.value)
+    if (res.code === 200) {
+      // 创建 Blob 对象，注意加上 BOM 避免中文乱码
+      const blob = new Blob(['\ufeff' + res.data.content], { type: 'text/csv;charset=utf-8;' })
+      const link = document.createElement('a')
+      link.href = window.URL.createObjectURL(blob)
+      link.download = res.data.filename
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      window.URL.revokeObjectURL(link.href)
+      message.success('模板下载成功')
     }
   } catch (error) {
-    importTemplate.value = null
+    console.error(error)
+    message.error('模板下载失败')
   } finally {
     templateLoading.value = false
   }
 }
 
-const handleDownloadTemplate = async () => {
-  if (!currentModelId.value) {
-    message.warning('请先选择模型')
-    return
-  }
-
-  if (!importTemplate.value || !importTemplate.value.content) {
-    await prepareImportTemplate(currentModelId.value)
-  }
-
-  if (!importTemplate.value || !importTemplate.value.content) {
-    message.error('模板生成失败，请稍后重试')
-    return
-  }
-
-  const blob = new Blob([importTemplate.value.content], { type: 'text/csv;charset=utf-8;' })
-  const link = document.createElement('a')
-  link.href = URL.createObjectURL(blob)
-  link.download = importTemplate.value.filename || `${currentModelName.value}_CI导入模板.csv`
-  document.body.appendChild(link)
-  link.click()
-  document.body.removeChild(link)
+const handleImport = () => {
+  if (!currentModelId.value) return
+  importFileList.value = []
+  importModalVisible.value = true
 }
 
 const handleImportOk = async () => {

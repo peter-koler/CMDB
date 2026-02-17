@@ -26,7 +26,7 @@ class Role(db.Model):
         """获取菜单权限列表"""
         try:
             return json.loads(self.menu_permissions) if self.menu_permissions else []
-        except:
+        except Exception:
             return []
     
     def set_menu_permissions(self, permissions):
@@ -37,7 +37,7 @@ class Role(db.Model):
         """获取数据权限配置"""
         try:
             return json.loads(self.data_permissions) if self.data_permissions else {}
-        except:
+        except Exception:
             return {}
     
     def set_data_permissions(self, permissions):

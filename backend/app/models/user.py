@@ -29,10 +29,6 @@ class User(db.Model):
         if self.role == 'admin':
             return True
         
-        # 检查 UserRole
-        # 避免循环引用，在方法内导入
-        from app.models.role import Role
-        
         for ur in self.role_links:
             if ur.role and ur.role.code == 'admin':
                 return True

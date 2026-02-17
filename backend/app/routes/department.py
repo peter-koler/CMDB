@@ -171,7 +171,7 @@ def delete_department(id):
 @token_required
 def get_department_users(dept_id):
     """获取部门下的用户"""
-    department = Department.query.get_or_404(dept_id)
+    Department.query.get_or_404(dept_id)
     
     # 支持分页
     page = request.args.get('page', 1, type=int)
@@ -200,7 +200,7 @@ def get_department_users(dept_id):
 @log_operation(operation_type='UPDATE', operation_object='department_user')
 def add_department_users(dept_id):
     """批量添加用户到部门"""
-    department = Department.query.get_or_404(dept_id)
+    Department.query.get_or_404(dept_id)
     data = request.get_json()
     
     user_ids = data.get('user_ids', [])
@@ -279,7 +279,7 @@ def update_department_user(dept_id, user_id):
 @token_required
 def get_user_departments(user_id):
     """获取用户的所有部门"""
-    user = User.query.get_or_404(user_id)
+    User.query.get_or_404(user_id)
     
     dept_users = DepartmentUser.query.filter_by(user_id=user_id).all()
     

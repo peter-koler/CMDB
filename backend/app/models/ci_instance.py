@@ -27,7 +27,7 @@ class CiInstance(db.Model):
         """获取属性值字典"""
         try:
             return json.loads(self.attribute_values) if self.attribute_values else {}
-        except:
+        except Exception:
             return {}
     
     def set_attribute_values(self, values):

@@ -3,7 +3,6 @@ from flask_jwt_extended import (
     create_access_token, create_refresh_token, 
     jwt_required, get_jwt_identity, get_jwt
 )
-from app import db
 from app.models.user import User
 from app.models.config import SystemConfig
 from app.models.operation_log import OperationLog
@@ -50,9 +49,6 @@ def log_operation(user_id, username, operation_type, operation_object=None, obje
     log.save()
 
 def check_and_update_lockout(user):
-    max_failures = int(SystemConfig.get_value('max_login_failures', '5'))
-    lock_duration = int(SystemConfig.get_value('lock_duration_hours', '24'))
-    
     if user.locked_until and user.locked_until > datetime.utcnow():
         return False, '账户已被锁定，请稍后再试'
     
