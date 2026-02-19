@@ -161,3 +161,12 @@ export const getImportTemplate = (modelId: number) => {
     params: { model_id: modelId }
   })
 }
+
+// 获取支持批量编辑的字段列表
+export const getBatchEditFields = (modelId: number) => {
+  return request({
+    url: '/cmdb/instances/batch-edit-fields',
+    method: 'GET',
+    params: { model_id: modelId }
+  })
+}

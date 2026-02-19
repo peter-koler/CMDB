@@ -66,6 +66,10 @@ request.interceptors.response.use(
   }
 )
 
+export const getBaseURL = () => {
+  return ''
+}
+
 export default request as {
   <T = any>(config: AxiosRequestConfig): Promise<ApiResponse<T>>
 }

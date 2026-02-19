@@ -121,6 +121,18 @@ const routes = [
             meta: { title: '日志审计', icon: 'FileSearchOutlined', permission: 'log:view' }
           }
         ]
+      },
+      {
+        path: 'notifications',
+        name: 'Notifications',
+        component: () => import('@/views/notifications/index.vue'),
+        meta: { title: '通知中心', icon: 'BellOutlined', permission: 'notification:view' }
+      },
+      {
+        path: 'notifications/send',
+        name: 'SendNotification',
+        component: () => import('@/views/notifications/send.vue'),
+        meta: { title: '发送通知', icon: 'SendOutlined', permission: 'notification:send' }
       }
     ]
   }

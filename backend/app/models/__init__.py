@@ -11,12 +11,37 @@ from app.models.role import Role, UserRole
 from app.models.ci_instance import CiInstance, CiHistory, CodeSequence
 from app.models.cmdb_relation import RelationType, CmdbRelation, RelationTrigger
 from app.models.cmdb_dict import CmdbDictType, CmdbDictItem
+from app.notifications.models import (
+    Notification,
+    NotificationRecipient,
+    NotificationType,
+    NotificationTemplate,
+)
 
 __all__ = [
-    'User', 'SystemConfig', 'OperationLog', 'PasswordHistory',
-    'ModelCategory', 'CmdbModel', 'ModelType', 'ModelRegion', 'ModelField',
-    'Department', 'DepartmentUser', 'Role', 'UserRole',
-    'CiInstance', 'CiHistory', 'CodeSequence',
-    'RelationType', 'CmdbRelation', 'RelationTrigger',
-    'CmdbDictType', 'CmdbDictItem'
+    "User",
+    "SystemConfig",
+    "OperationLog",
+    "PasswordHistory",
+    "ModelCategory",
+    "CmdbModel",
+    "ModelType",
+    "ModelRegion",
+    "ModelField",
+    "Department",
+    "DepartmentUser",
+    "Role",
+    "UserRole",
+    "CiInstance",
+    "CiHistory",
+    "CodeSequence",
+    "RelationType",
+    "CmdbRelation",
+    "RelationTrigger",
+    "CmdbDictType",
+    "CmdbDictItem",
+    "Notification",
+    "NotificationRecipient",
+    "NotificationType",
+    "NotificationTemplate",
 ]

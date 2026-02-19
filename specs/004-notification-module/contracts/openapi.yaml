@@ -1,0 +1,879 @@
+openapi: 3.0.3
+info:
+  title: Notification Module API
+  description: |
+    Internal notification module API for the Arco CMDB platform.
+    Supports sending notifications to users and departments, managing notification types,
+    tracking read/unread status, and querying notification history.
+  version: 1.0.0
+  contact:
+    name: Arco Development Team
+
+servers:
+  - url: /api/v1
+    description: Base API path
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Notifications
+    description: Core notification operations
+  - name: Notification Types
+    description: Notification category management
+  - name: Notification Templates
+    description: Template management for common patterns
+  - name: User Notifications
+    description: User-facing notification operations
+
+paths:
+  # ==================== Notification Sending ====================
+  /notifications:
+    post:
+      summary: Send a notification
+      description: |
+        Send a notification to specific users or departments.
+        Requires appropriate permission based on recipient type.
+      tags:
+        - Notifications
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: '#/components/schemas/SendToUsersRequest'
+                - $ref: '#/components/schemas/SendToDepartmentRequest'
+            examples:
+              toUsers:
+                summary: Send to specific users
+                value:
+                  recipient_type: 'users'
+                  user_ids:
+                    - '550e8400-e29b-41d4-a716-446655440000'
+                    - '550e8400-e29b-41d4-a716-446655440001'
+                  type_id: '550e8400-e29b-41d4-a716-446655440002'
+                  title: 'Task Assigned'
+                  content: 'You have been assigned to review the server configuration.'
+              toDepartment:
+                summary: Send to department
+                value:
+                  recipient_type: 'department'
+                  department_id: '550e8400-e29b-41d4-a716-446655440003'
+                  type_id: '550e8400-e29b-41d4-a716-446655440002'
+                  title: 'Department Meeting'
+                  content: 'Monthly team meeting scheduled for tomorrow at 10 AM.'
+      responses:
+        '201':
+          description: Notification sent successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    get:
+      summary: List sent notifications (admin/audit)
+      description: |
+        Get list of notifications sent by the current user (or all for admins).
+        Supports filtering by date range, type, etc.
+      tags:
+        - Notifications
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+        - $ref: '#/components/parameters/DateFromParam'
+        - $ref: '#/components/parameters/DateToParam'
+        - name: type_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: Filter by notification type
+      responses:
+        '200':
+          description: List of notifications
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationListResponse'
+
+  /notifications/{id}:
+    get:
+      summary: Get notification details
+      description: Get full details of a specific notification including recipient status
+      tags:
+        - Notifications
+      parameters:
+        - $ref: '#/components/parameters/NotificationIdParam'
+      responses:
+        '200':
+          description: Notification details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationDetailResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ==================== User Notifications ====================
+  /notifications/my:
+    get:
+      summary: Get my notifications
+      description: |
+        Get notifications for the currently authenticated user.
+        Returns notifications with recipient-specific status (is_read, etc.).
+      tags:
+        - User Notifications
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+        - name: is_read
+          in: query
+          schema:
+            type: boolean
+          description: Filter by read status
+        - name: type_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: Filter by notification type
+      responses:
+        '200':
+          description: User's notifications
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserNotificationListResponse'
+
+  /notifications/my/unread-count:
+    get:
+      summary: Get unread notification count
+      description: Get count of unread notifications for current user
+      tags:
+        - User Notifications
+      responses:
+        '200':
+          description: Unread count
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                    example: 5
+
+  /notifications/my/{id}/read:
+    patch:
+      summary: Mark notification as read
+      description: Mark a specific notification as read for current user
+      tags:
+        - User Notifications
+      parameters:
+        - $ref: '#/components/parameters/NotificationIdParam'
+      responses:
+        '200':
+          description: Notification marked as read
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserNotificationResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /notifications/my/{id}/unread:
+    patch:
+      summary: Mark notification as unread
+      description: Mark a specific notification as unread for current user
+      tags:
+        - User Notifications
+      parameters:
+        - $ref: '#/components/parameters/NotificationIdParam'
+      responses:
+        '200':
+          description: Notification marked as unread
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserNotificationResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /notifications/my/read-all:
+    patch:
+      summary: Mark all notifications as read
+      description: Mark all unread notifications as read for current user
+      tags:
+        - User Notifications
+      responses:
+        '200':
+          description: All notifications marked as read
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  marked_count:
+                    type: integer
+                    example: 12
+
+  # ==================== Notification Types ====================
+  /notification-types:
+    get:
+      summary: List notification types
+      description: Get all available notification types
+      tags:
+        - Notification Types
+      responses:
+        '200':
+          description: List of notification types
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/NotificationType'
+
+    post:
+      summary: Create notification type
+      description: Create a new notification type (admin only)
+      tags:
+        - Notification Types
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotificationTypeCreate'
+      responses:
+        '201':
+          description: Notification type created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationType'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /notification-types/{id}:
+    get:
+      summary: Get notification type
+      description: Get details of a specific notification type
+      tags:
+        - Notification Types
+      parameters:
+        - $ref: '#/components/parameters/TypeIdParam'
+      responses:
+        '200':
+          description: Notification type details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationType'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    patch:
+      summary: Update notification type
+      description: Update a notification type (admin only)
+      tags:
+        - Notification Types
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TypeIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotificationTypeUpdate'
+      responses:
+        '200':
+          description: Notification type updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationType'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      summary: Delete notification type
+      description: Delete a notification type (admin only, cannot delete system types)
+      tags:
+        - Notification Types
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TypeIdParam'
+      responses:
+        '204':
+          description: Notification type deleted
+        '403':
+          description: Cannot delete system type or insufficient permissions
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ==================== Notification Templates ====================
+  /notification-templates:
+    get:
+      summary: List notification templates
+      description: Get all notification templates
+      tags:
+        - Notification Templates
+      responses:
+        '200':
+          description: List of templates
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/NotificationTemplate'
+
+    post:
+      summary: Create notification template
+      description: Create a new notification template (admin only)
+      tags:
+        - Notification Templates
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotificationTemplateCreate'
+      responses:
+        '201':
+          description: Template created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationTemplate'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /notification-templates/{id}:
+    get:
+      summary: Get notification template
+      description: Get details of a specific template
+      tags:
+        - Notification Templates
+      parameters:
+        - $ref: '#/components/parameters/TemplateIdParam'
+      responses:
+        '200':
+          description: Template details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationTemplate'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    patch:
+      summary: Update notification template
+      description: Update a notification template (admin only)
+      tags:
+        - Notification Templates
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TemplateIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotificationTemplateUpdate'
+      responses:
+        '200':
+          description: Template updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationTemplate'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      summary: Delete notification template
+      description: Delete a notification template (admin only)
+      tags:
+        - Notification Templates
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TemplateIdParam'
+      responses:
+        '204':
+          description: Template deleted
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /notification-templates/{id}/preview:
+    post:
+      summary: Preview template rendering
+      description: Render a template with sample variables to preview output
+      tags:
+        - Notification Templates
+      parameters:
+        - $ref: '#/components/parameters/TemplateIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                variables:
+                  type: object
+                  description: Variable values for template rendering
+              example:
+                variables:
+                  user_name: 'John Doe'
+                  task_title: 'Review Server Config'
+      responses:
+        '200':
+          description: Rendered template
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  title:
+                    type: string
+                  content:
+                    type: string
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    # ==================== Request Schemas ====================
+    SendToUsersRequest:
+      type: object
+      required:
+        - recipient_type
+        - user_ids
+        - type_id
+        - title
+        - content
+      properties:
+        recipient_type:
+          type: string
+          enum: [users]
+        user_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+          minItems: 1
+          maxItems: 1000
+        type_id:
+          type: string
+          format: uuid
+        title:
+          type: string
+          minLength: 1
+          maxLength: 255
+        content:
+          type: string
+          minLength: 1
+          maxLength: 10000
+
+    SendToDepartmentRequest:
+      type: object
+      required:
+        - recipient_type
+        - department_id
+        - type_id
+        - title
+        - content
+      properties:
+        recipient_type:
+          type: string
+          enum: [department]
+        department_id:
+          type: string
+          format: uuid
+        type_id:
+          type: string
+          format: uuid
+        title:
+          type: string
+          minLength: 1
+          maxLength: 255
+        content:
+          type: string
+          minLength: 1
+          maxLength: 10000
+
+    NotificationTypeCreate:
+      type: object
+      required:
+        - name
+        - icon
+        - color
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        description:
+          type: string
+        icon:
+          type: string
+          maxLength: 50
+        color:
+          type: string
+          pattern: '^#[0-9A-Fa-f]{6}$'
+          example: '#1890ff'
+
+    NotificationTypeUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        description:
+          type: string
+        icon:
+          type: string
+          maxLength: 50
+        color:
+          type: string
+          pattern: '^#[0-9A-Fa-f]{6}$'
+
+    NotificationTemplateCreate:
+      type: object
+      required:
+        - name
+        - title_template
+        - content_template
+        - type_id
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        description:
+          type: string
+        title_template:
+          type: string
+          minLength: 1
+          maxLength: 255
+        content_template:
+          type: string
+          minLength: 1
+          maxLength: 10000
+        type_id:
+          type: string
+          format: uuid
+        variables:
+          type: array
+          items:
+            type: string
+
+    NotificationTemplateUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        title_template:
+          type: string
+        content_template:
+          type: string
+        type_id:
+          type: string
+          format: uuid
+        variables:
+          type: array
+          items:
+            type: string
+
+    # ==================== Response Schemas ====================
+    NotificationResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        content:
+          type: string
+        content_html:
+          type: string
+        type:
+          $ref: '#/components/schemas/NotificationType'
+        sender:
+          $ref: '#/components/schemas/UserBrief'
+        recipient_count:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+
+    NotificationDetailResponse:
+      allOf:
+        - $ref: '#/components/schemas/NotificationResponse'
+        - type: object
+          properties:
+            recipients:
+              type: array
+              items:
+                $ref: '#/components/schemas/NotificationRecipientStatus'
+
+    NotificationListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/NotificationResponse'
+        pagination:
+          $ref: '#/components/schemas/PaginationInfo'
+
+    UserNotificationResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        notification:
+          $ref: '#/components/schemas/NotificationResponse'
+        is_read:
+          type: boolean
+        read_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    UserNotificationListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserNotificationResponse'
+        pagination:
+          $ref: '#/components/schemas/PaginationInfo'
+
+    NotificationType:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        icon:
+          type: string
+        color:
+          type: string
+        is_system:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+
+    NotificationTemplate:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        title_template:
+          type: string
+        content_template:
+          type: string
+        type_id:
+          type: string
+          format: uuid
+        variables:
+          type: array
+          items:
+            type: string
+        created_at:
+          type: string
+          format: date-time
+
+    NotificationRecipientStatus:
+      type: object
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        user:
+          $ref: '#/components/schemas/UserBrief'
+        is_read:
+          type: boolean
+        read_at:
+          type: string
+          format: date-time
+        delivery_status:
+          type: string
+          enum: [pending, delivered, failed, permanent_failure]
+
+    UserBrief:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        username:
+          type: string
+        display_name:
+          type: string
+
+    PaginationInfo:
+      type: object
+      properties:
+        page:
+          type: integer
+        page_size:
+          type: integer
+        total:
+          type: integer
+        total_pages:
+          type: integer
+
+    # ==================== Error Schemas ====================
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+
+  parameters:
+    NotificationIdParam:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Notification ID
+
+    TypeIdParam:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Notification Type ID
+
+    TemplateIdParam:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Notification Template ID
+
+    PageParam:
+      name: page
+      in: query
+      schema:
+        type: integer
+        default: 1
+        minimum: 1
+      description: Page number
+
+    PageSizeParam:
+      name: page_size
+      in: query
+      schema:
+        type: integer
+        default: 20
+        minimum: 1
+        maximum: 100
+      description: Items per page
+
+    DateFromParam:
+      name: date_from
+      in: query
+      schema:
+        type: string
+        format: date-time
+      description: Filter from date (ISO 8601)
+
+    DateToParam:
+      name: date_to
+      in: query
+      schema:
+        type: string
+        format: date-time
+      description: Filter to date (ISO 8601)
+
+  responses:
+    BadRequest:
+      description: Invalid request parameters
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    Forbidden:
+      description: Insufficient permissions
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'

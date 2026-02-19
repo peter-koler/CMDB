@@ -107,6 +107,24 @@
         </div>
         <div class="header-right">
           <a-space :size="8">
+            <!-- 通知角标 -->
+            <a-popover
+              v-model:open="notificationVisible"
+              placement="bottomRight"
+              trigger="click"
+              :overlay-style="{ width: '360px', padding: 0 }"
+            >
+              <template #content>
+                <NotificationCenter
+                  v-model:visible="notificationVisible"
+                  @click="handleNotificationClick"
+                />
+              </template>
+              <NotificationBadge
+                :unread-count="unreadCount"
+                @click="notificationVisible = true"
+              />
+            </a-popover>
             <a-dropdown>
               <span class="header-action">
                 <GlobalOutlined />
@@ -168,8 +186,11 @@ import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useUserStore } from '@/stores/user'
 import { useAppStore } from '@/stores/app'
+import { useNotificationStore } from '@/stores/notifications'
 import { getConfigs } from '@/api/config'
 import { getBaseURL } from '@/utils/request'
+import NotificationBadge from '@/components/notifications/NotificationBadge.vue'
+import NotificationCenter from '@/components/notifications/NotificationCenter.vue'
 import {
   SettingOutlined,
   UserOutlined,
@@ -202,21 +223,24 @@ const router = useRouter()
 const route = useRoute()
 const userStore = useUserStore()
 const appStore = useAppStore()
+const notificationStore = useNotificationStore()
 
 const collapsed = ref(false)
 const selectedKeys = ref<string[]>([])
 const openKeys = ref<string[]>([])
 const siteLogo = ref('')
 const siteName = ref('Arco CMDB')
+const notificationVisible = ref(false)
 
 const userInfo = computed(() => userStore.userInfo)
+const unreadCount = computed(() => notificationStore.unreadCount)
 
 onMounted(async () => {
   if (!userStore.userInfo) {
     await userStore.getUserInfo()
   }
   updateSelectedKeys()
-  
+
   // 加载站点配置
   try {
     const res = await getConfigs()
@@ -230,6 +254,18 @@ onMounted(async () => {
     }
   } catch (error) {
     console.error('加载站点配置失败:', error)
+  }
+
+  // 初始化通知模块
+  try {
+    await notificationStore.initialize()
+    // 连接WebSocket
+    const token = localStorage.getItem('token')
+    if (token) {
+      notificationStore.connectWebSocket(token)
+    }
+  } catch (error) {
+    console.error('初始化通知模块失败:', error)
   }
 })
 
@@ -308,6 +344,11 @@ const handleLanguageChange = ({ key }: { key: string }) => {
 
 const toggleTheme = () => {
   appStore.setTheme(appStore.theme === 'dark' ? 'light' : 'dark')
+}
+
+const handleNotificationClick = (notification: any) => {
+  // 可以在这里处理通知点击，比如跳转到相关页面
+  console.log('通知点击:', notification)
 }
 </script>
 
