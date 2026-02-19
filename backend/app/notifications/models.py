@@ -81,6 +81,9 @@ class Notification(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     expires_at = db.Column(db.DateTime, nullable=True)
 
+    # Archive status
+    is_archived = db.Column(db.Boolean, default=False)
+
     # Relationships
     type = db.relationship("NotificationType", back_populates="notifications")
     sender = db.relationship("User", backref="sent_notifications")

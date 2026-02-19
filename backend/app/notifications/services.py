@@ -176,6 +176,48 @@ class NotificationService:
         )
 
     @staticmethod
+    def send_broadcast(
+        sender_id: int,
+        type_id: int,
+        title: str,
+        content: str,
+        template_id: Optional[int] = None,
+        variables: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[Notification, List[NotificationRecipient]]:
+        """发送全员广播通知
+
+        Args:
+            sender_id: 发送者用户ID
+            type_id: 通知类型ID
+            title: 通知标题
+            content: 通知内容
+            template_id: 模板ID（可选）
+            variables: 模板变量（可选）
+
+        Returns:
+            (Notification对象, NotificationRecipient列表)
+        """
+        # 获取所有活跃用户
+        from app.models import User
+
+        users = User.query.filter_by(status="active").all()
+
+        if not users:
+            raise ValueError("没有活跃用户")
+
+        user_ids = [user.id for user in users]
+
+        return NotificationService.send_to_users(
+            sender_id=sender_id,
+            user_ids=user_ids,
+            type_id=type_id,
+            title=title,
+            content=content,
+            template_id=template_id,
+            variables=variables,
+        )
+
+    @staticmethod
     def get_user_notifications(
         user_id: int,
         is_read: Optional[bool] = None,

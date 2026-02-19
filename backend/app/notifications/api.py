@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Optional
 
 from app import db
+from app.models import User
 from app.notifications.services import (
     NotificationService,
     NotificationTypeService,
@@ -13,6 +14,11 @@ from app.notifications.services import (
     init_notification_module,
 )
 from app.notifications.models import NotificationType, NotificationTemplate
+from app.notifications.permissions import (
+    validate_sender_permission,
+    NotificationPermissionError,
+    can_send_broadcast,
+)
 from app.utils.decorators import admin_required
 
 # 创建蓝图
@@ -54,6 +60,16 @@ def send_notification():
             if not user_ids:
                 return jsonify({"code": 400, "message": "user_ids不能为空"}), 400
 
+            # 权限验证
+            try:
+                validate_sender_permission(
+                    sender_id=sender_id,
+                    recipient_type="users",
+                    user_ids=user_ids
+                )
+            except NotificationPermissionError as e:
+                return jsonify({"code": 403, "message": str(e)}), 403
+
             notification, recipients = NotificationService.send_to_users(
                 sender_id=sender_id,
                 user_ids=user_ids,
@@ -68,6 +84,16 @@ def send_notification():
             department_id = data.get("department_id")
             if not department_id:
                 return jsonify({"code": 400, "message": "department_id不能为空"}), 400
+
+            # 权限验证
+            try:
+                validate_sender_permission(
+                    sender_id=sender_id,
+                    recipient_type="department",
+                    department_id=department_id
+                )
+            except NotificationPermissionError as e:
+                return jsonify({"code": 403, "message": str(e)}), 403
 
             notification, recipients = NotificationService.send_to_department(
                 sender_id=sender_id,
@@ -96,9 +122,68 @@ def send_notification():
 
     except ValueError as e:
         return jsonify({"code": 400, "message": str(e)}), 400
+    except NotificationPermissionError as e:
+        return jsonify({"code": 403, "message": str(e)}), 403
     except Exception as e:
         current_app.logger.error(f"发送通知失败: {e}")
         return jsonify({"code": 500, "message": "发送通知失败"}), 500
+
+
+@notifications_bp.route("/broadcast", methods=["POST"])
+@jwt_required()
+def send_broadcast():
+    """发送全员广播通知（仅管理员）"""
+    try:
+        data = request.get_json()
+        sender_id = int(get_jwt_identity())
+
+        type_id = data.get("type_id")
+        title = data.get("title")
+        content = data.get("content")
+        template_id = data.get("template_id")
+        variables = data.get("variables")
+
+        # 验证必填字段
+        if not all([type_id, title, content]):
+            return jsonify(
+                {
+                    "code": 400,
+                    "message": "缺少必填字段：type_id, title, content",
+                }
+            ), 400
+
+        # 验证广播权限
+        sender = User.query.get(sender_id)
+        if not sender or not can_send_broadcast(sender):
+            return jsonify(
+                {"code": 403, "message": "只有管理员可以发送全员广播"}
+            ), 403
+
+        notification, recipients = NotificationService.send_broadcast(
+            sender_id=sender_id,
+            type_id=type_id,
+            title=title,
+            content=content,
+            template_id=template_id,
+            variables=variables,
+        )
+
+        return jsonify(
+            {
+                "code": 201,
+                "message": "广播发送成功",
+                "data": {
+                    "notification": notification.to_dict(),
+                    "recipient_count": len(recipients),
+                },
+            }
+        ), 201
+
+    except ValueError as e:
+        return jsonify({"code": 400, "message": str(e)}), 400
+    except Exception as e:
+        current_app.logger.error(f"发送广播失败: {e}")
+        return jsonify({"code": 500, "message": "发送广播失败"}), 500
 
 
 @notifications_bp.route("", methods=["GET"])
