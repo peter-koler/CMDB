@@ -8,9 +8,11 @@ from config import config
 db = SQLAlchemy()
 jwt = JWTManager()
 migrate = Migrate()
+socketio = None
 
 
 def create_app(config_name="default"):
+    global socketio
     app = Flask(__name__)
     app.config.from_object(config[config_name])
 
@@ -18,6 +20,10 @@ def create_app(config_name="default"):
     jwt.init_app(app)
     migrate.init_app(app, db)
     CORS(app, resources={r"/api/*": {"origins": app.config["CORS_ORIGINS"]}})
+
+    # 初始化WebSocket
+    from app.notifications.websocket import init_socketio
+    socketio = init_socketio(app)
 
     # JWT error handlers
     @jwt.expired_token_loader
