@@ -131,8 +131,16 @@ def emit_to_user(user_id: int, event: str, data: dict):
         event: 事件名称
         data: 事件数据
     """
-    if socketio:
+    global socketio
+    if socketio is None:
+        from flask import current_app
+        current_app.logger.warning(f"WebSocket未初始化，跳过推送: {event}")
+        return
+    try:
         socketio.emit(event, data, room=f"user:{user_id}", namespace="/notifications")
+    except Exception as e:
+        from flask import current_app
+        current_app.logger.error(f"WebSocket推送失败: {e}")
 
 
 def emit_to_department(department_id: int, event: str, data: dict):
@@ -143,10 +151,18 @@ def emit_to_department(department_id: int, event: str, data: dict):
         event: 事件名称
         data: 事件数据
     """
-    if socketio:
+    global socketio
+    if socketio is None:
+        from flask import current_app
+        current_app.logger.warning(f"WebSocket未初始化，跳过推送: {event}")
+        return
+    try:
         socketio.emit(
             event, data, room=f"dept:{department_id}", namespace="/notifications"
         )
+    except Exception as e:
+        from flask import current_app
+        current_app.logger.error(f"WebSocket推送失败: {e}")
 
 
 def emit_to_users(user_ids: list, event: str, data: dict):
@@ -157,11 +173,19 @@ def emit_to_users(user_ids: list, event: str, data: dict):
         event: 事件名称
         data: 事件数据
     """
-    if socketio:
+    global socketio
+    if socketio is None:
+        from flask import current_app
+        current_app.logger.warning(f"WebSocket未初始化，跳过推送: {event}")
+        return
+    try:
         for user_id in user_ids:
             socketio.emit(
                 event, data, room=f"user:{user_id}", namespace="/notifications"
             )
+    except Exception as e:
+        from flask import current_app
+        current_app.logger.error(f"WebSocket推送失败: {e}")
 
 
 def broadcast_notification(notification_data: dict, recipient_ids: list = None):
