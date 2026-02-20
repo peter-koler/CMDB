@@ -223,15 +223,17 @@ class NotificationRecipient(db.Model):
             self.read_at = None
             db.session.commit()
 
-    def to_dict(self):
-        return {
+    def to_dict(self, include_notification=True):
+        data = {
             "id": self.id,
-            "notification": self.notification.to_dict() if self.notification else None,
             "is_read": self.is_read,
             "read_at": format_datetime(self.read_at),
             "delivery_status": self.delivery_status,
             "created_at": format_datetime(self.created_at),
         }
+        if include_notification:
+            data["notification"] = self.notification.to_dict() if self.notification else None
+        return data
 
 
 class NotificationAttachment(db.Model):
