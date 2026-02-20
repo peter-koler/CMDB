@@ -81,7 +81,20 @@ export const useUserStore = defineStore('user', () => {
   const hasPermission = (permission: string) => {
     if (!userInfo.value) return false
     if (userInfo.value.role === 'admin') return true
-    return userInfo.value.permissions.includes(permission)
+    const permissions = userInfo.value.permissions || []
+    if (permissions.includes('*')) return true
+    if (permissions.includes(permission)) return true
+    for (const p of permissions) {
+      if (p.endsWith(':*')) {
+        const prefix = p.slice(0, -1)
+        if (permission.startsWith(prefix)) return true
+      }
+      if (p.endsWith('*')) {
+        const prefix = p.slice(0, -1)
+        if (permission.startsWith(prefix)) return true
+      }
+    }
+    return false
   }
 
   return {

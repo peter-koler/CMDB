@@ -29,72 +29,72 @@
           <span>{{ t('menu.dashboard') }}</span>
         </a-menu-item>
         
-        <a-sub-menu key="cmdb">
+        <a-sub-menu key="cmdb" v-if="hasAnyPermission(['cmdb:instance', 'cmdb:search', 'cmdb:model'])">
           <template #icon><CloudServerOutlined /></template>
           <template #title>{{ t('menu.cmdb') }}</template>
-          <a-menu-item key="instance" @click="navigateTo('/cmdb/instance')">
+          <a-menu-item key="instance" v-if="hasPermission('cmdb:instance')" @click="navigateTo('/cmdb/instance')">
             <template #icon><HddOutlined /></template>
             <span>{{ t('menu.instance') }}</span>
           </a-menu-item>
-          <a-menu-item key="search" @click="navigateTo('/cmdb/search')">
+          <a-menu-item key="search" v-if="hasPermission('cmdb:search')" @click="navigateTo('/cmdb/search')">
             <template #icon><SearchOutlined /></template>
             <span>{{ t('menu.search') }}</span>
           </a-menu-item>
-          <a-menu-item key="history" @click="navigateTo('/cmdb/history')">
+          <a-menu-item key="history" v-if="hasPermission('cmdb:instance')" @click="navigateTo('/cmdb/history')">
             <template #icon><HistoryOutlined /></template>
             <span>{{ t('menu.history') }}</span>
           </a-menu-item>
-          <a-menu-item key="topology" @click="navigateTo('/cmdb/topology')">
+          <a-menu-item key="topology" v-if="hasPermission('cmdb:instance')" @click="navigateTo('/cmdb/topology')">
             <template #icon><ShareAltOutlined /></template>
             <span>{{ t('menu.topology') }}</span>
           </a-menu-item>
         </a-sub-menu>
         
-        <a-sub-menu key="config" v-if="userInfo?.role === 'admin'">
+        <a-sub-menu key="config" v-if="hasAnyPermission(['cmdb:model', 'cmdb:relation', 'cmdb:dict'])">
           <template #icon><AppstoreOutlined /></template>
           <template #title>{{ t('menu.config') }}</template>
-          <a-menu-item key="model" @click="navigateTo('/config/model')">
+          <a-menu-item key="model" v-if="hasPermission('cmdb:model')" @click="navigateTo('/config/model')">
             <template #icon><DatabaseOutlined /></template>
             <span>{{ t('menu.model') }}</span>
           </a-menu-item>
-          <a-menu-item key="relation-type" @click="navigateTo('/config/relation-type')">
+          <a-menu-item key="relation-type" v-if="hasPermission('cmdb:model')" @click="navigateTo('/config/relation-type')">
             <template #icon><NodeIndexOutlined /></template>
             <span>{{ t('menu.relationType') }}</span>
           </a-menu-item>
-          <a-menu-item key="relation-trigger" @click="navigateTo('/config/relation-trigger')">
+          <a-menu-item key="relation-trigger" v-if="hasPermission('cmdb:model')" @click="navigateTo('/config/relation-trigger')">
             <template #icon><ThunderboltOutlined /></template>
             <span>{{ t('menu.relationTrigger') }}</span>
           </a-menu-item>
-          <a-menu-item key="dictionary" @click="navigateTo('/config/dictionary')">
+          <a-menu-item key="dictionary" v-if="hasPermission('cmdb:dict')" @click="navigateTo('/config/dictionary')">
             <template #icon><BookOutlined /></template>
             <span>{{ t('menu.dictionary') }}</span>
           </a-menu-item>
         </a-sub-menu>
         
-        <a-sub-menu key="system">
+        <a-sub-menu key="system" v-if="hasAnyPermission(['system:user', 'system:department', 'system:role', 'system:config', 'system:log'])">
           <template #icon><SettingOutlined /></template>
           <template #title>{{ t('menu.system') }}</template>
-          <a-menu-item key="user" @click="navigateTo('/system/user')">
+          <a-menu-item key="user" v-if="hasPermission('system:user')" @click="navigateTo('/system/user')">
             <template #icon><UserOutlined /></template>
             <span>{{ t('menu.user') }}</span>
           </a-menu-item>
-          <a-menu-item key="department" @click="navigateTo('/system/department')">
+          <a-menu-item key="department" v-if="hasPermission('system:department')" @click="navigateTo('/system/department')">
             <template #icon><ApartmentOutlined /></template>
             <span>{{ t('menu.department') }}</span>
           </a-menu-item>
-          <a-menu-item key="role" @click="navigateTo('/system/role')">
+          <a-menu-item key="role" v-if="hasPermission('system:role')" @click="navigateTo('/system/role')">
             <template #icon><SafetyOutlined /></template>
             <span>{{ t('menu.role') }}</span>
           </a-menu-item>
-          <a-menu-item key="system-config" @click="navigateTo('/system/config')">
+          <a-menu-item key="system-config" v-if="hasPermission('system:config')" @click="navigateTo('/system/config')">
             <template #icon><ToolOutlined /></template>
             <span>{{ t('menu.systemConfig') }}</span>
           </a-menu-item>
-          <a-menu-item key="log" @click="navigateTo('/system/log')">
+          <a-menu-item key="log" v-if="hasPermission('system:log')" @click="navigateTo('/system/log')">
             <template #icon><FileSearchOutlined /></template>
             <span>{{ t('menu.log') }}</span>
           </a-menu-item>
-          <a-menu-item key="notification" @click="navigateTo('/system/notification')">
+          <a-menu-item key="notification" v-if="hasPermission('system:user')" @click="navigateTo('/system/notification')">
             <template #icon><BellOutlined /></template>
             <span>{{ t('menu.notification') }}</span>
           </a-menu-item>
@@ -351,8 +351,33 @@ const toggleTheme = () => {
   appStore.setTheme(appStore.theme === 'dark' ? 'light' : 'dark')
 }
 
+const hasPermission = (permission: string) => {
+  if (!userInfo.value) return false
+  if (userInfo.value.role === 'admin') return true
+  const permissions = userInfo.value.permissions || []
+  if (permissions.includes('*')) return true
+  if (permissions.includes(permission)) return true
+  for (const p of permissions) {
+    if (p.endsWith(':*')) {
+      const prefix = p.slice(0, -1)
+      if (permission.startsWith(prefix)) return true
+    }
+  }
+  return false
+}
+
+const hasAnyPermission = (permissionList: string[]) => {
+  if (!userInfo.value) return false
+  if (userInfo.value.role === 'admin') return true
+  const permissions = userInfo.value.permissions || []
+  if (permissions.includes('*')) return true
+  for (const permission of permissionList) {
+    if (hasPermission(permission)) return true
+  }
+  return false
+}
+
 const handleNotificationClick = (notification: any) => {
-  // 可以在这里处理通知点击，比如跳转到相关页面
   console.log('通知点击:', notification)
 }
 </script>

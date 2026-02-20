@@ -184,13 +184,7 @@ def get_current_user():
     permissions = set()
     if user.is_admin:
         permissions.add('*')
-        permissions.update(['user:create', 'user:view', 'user:update', 'user:delete', 
-                       'config:view', 'config:update', 'log:view', 'log:export',
-                       'model:view', 'instance:view', 'department:view', 'role:view'])
-    else:
-        permissions.update(['user:view', 'log:view'])
     
-    # Merge permissions from roles
     for ur in user.role_links:
         if ur.role:
             for p in ur.role.get_menu_permissions():
