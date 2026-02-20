@@ -119,6 +119,18 @@ const routes = [
             name: 'Log',
             component: () => import('@/views/system/log/index.vue'),
             meta: { title: '日志审计', icon: 'FileSearchOutlined', permission: 'log:view' }
+          },
+          {
+            path: 'notification',
+            name: 'SystemNotification',
+            component: () => import('@/views/notifications/index.vue'),
+            meta: { title: '通知管理', icon: 'BellOutlined', permission: 'notification:view' }
+          },
+          {
+            path: 'notification/send',
+            name: 'SystemSendNotification',
+            component: () => import('@/views/notifications/send.vue'),
+            meta: { title: '发送通知', icon: 'SendOutlined', permission: 'notification:send', hideInMenu: true }
           }
         ]
       },

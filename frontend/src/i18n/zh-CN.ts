@@ -44,7 +44,9 @@ export default {
     department: '部门管理',
     role: '角色管理',
     systemConfig: '系统配置',
-    log: '日志审计'
+    log: '日志审计',
+    notification: '通知管理',
+    sendNotification: '发送通知'
   },
   user: {
     title: '用户管理',

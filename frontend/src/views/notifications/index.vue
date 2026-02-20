@@ -171,7 +171,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useNotificationStore } from '@/stores/notifications'
 import { useUserStore } from '@/stores/user'
@@ -194,6 +194,7 @@ import {
 
 const { t } = useI18n()
 const router = useRouter()
+const route = useRoute()
 const store = useNotificationStore()
 const userStore = useUserStore()
 
@@ -356,7 +357,13 @@ const handleBatchRead = async () => {
 }
 
 const goToSend = () => {
-  router.push('/notifications/send')
+  // 根据当前路径判断是从系统管理还是通知中心进入
+  const isSystemRoute = route.path.startsWith('/system')
+  if (isSystemRoute) {
+    router.push('/system/notification/send')
+  } else {
+    router.push('/notifications/send')
+  }
 }
 </script>
 

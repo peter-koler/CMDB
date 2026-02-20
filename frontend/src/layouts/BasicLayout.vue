@@ -94,6 +94,10 @@
             <template #icon><FileSearchOutlined /></template>
             <span>{{ t('menu.log') }}</span>
           </a-menu-item>
+          <a-menu-item key="notification" @click="navigateTo('/system/notification')">
+            <template #icon><BellOutlined /></template>
+            <span>{{ t('menu.notification') }}</span>
+          </a-menu-item>
         </a-sub-menu>
       </a-menu>
     </a-layout-sider>
@@ -215,7 +219,8 @@ import {
   ThunderboltOutlined,
   ShareAltOutlined,
   HddOutlined,
-  CloudServerOutlined
+  CloudServerOutlined,
+  BellOutlined
 } from '@ant-design/icons-vue'
 
 const { t } = useI18n()

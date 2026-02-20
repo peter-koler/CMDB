@@ -126,7 +126,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useNotificationStore } from '@/stores/notifications'
 import { sendNotification, sendBroadcast } from '@/api/notifications'
@@ -163,6 +163,7 @@ import {
 
 const { t } = useI18n()
 const router = useRouter()
+const route = useRoute()
 const store = useNotificationStore()
 
 const types = computed(() => store.types)
@@ -315,7 +316,13 @@ const handleSubmit = async () => {
 }
 
 const goBack = () => {
-  router.push('/notifications')
+  // 根据来源路径返回不同的页面
+  const isSystemRoute = route.path.startsWith('/system')
+  if (isSystemRoute) {
+    router.push('/system/notification')
+  } else {
+    router.push('/notifications')
+  }
 }
 </script>
 
