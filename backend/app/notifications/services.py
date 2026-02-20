@@ -14,6 +14,7 @@ from app.notifications.models import (
     NotificationTemplate,
     NotificationAttachment,
     init_default_notification_types,
+    get_local_now,
 )
 from app.notifications.utils import render_markdown, validate_notification_content
 from app.notifications.websocket import (
@@ -23,11 +24,6 @@ from app.notifications.websocket import (
     emit_unread_status,
     emit_read_all,
 )
-
-
-def get_local_now():
-    """获取本地时间"""
-    return datetime.now(timezone.utc).astimezone()
 
 
 class NotificationService:

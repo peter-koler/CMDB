@@ -5,8 +5,8 @@ import bleach
 from markupsafe import Markup
 
 def get_local_now():
-    """获取本地时间"""
-    return datetime.now(timezone.utc).astimezone()
+    """获取本地时间（不带时区信息，用于数据库存储）"""
+    return datetime.now()
 
 
 def format_datetime(dt):
@@ -285,9 +285,9 @@ class NotificationTemplate(db.Model):
     )
 
     # Timestamps
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=get_local_now)
     updated_at = db.Column(
-        db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        db.DateTime, default=get_local_now, onupdate=get_local_now
     )
 
     # Relationships

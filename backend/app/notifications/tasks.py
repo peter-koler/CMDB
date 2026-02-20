@@ -5,7 +5,7 @@ from flask import current_app
 from sqlalchemy import func
 
 from app import db
-from app.notifications.models import Notification, NotificationRecipient
+from app.notifications.models import Notification, NotificationRecipient, get_local_now
 from app.notifications.websocket import emit_to_user
 
 
@@ -17,10 +17,8 @@ def cleanup_expired_notifications():
     try:
         current_app.logger.info("开始清理过期通知...")
         
-        # 获取当前时间
-        now = datetime.utcnow()
+        now = get_local_now()
         
-        # 查找已过期的通知
         expired_notifications = Notification.query.filter(
             Notification.expires_at < now
         ).all()
@@ -55,8 +53,7 @@ def retry_failed_deliveries():
     try:
         current_app.logger.info("开始重试失败的推送...")
         
-        # 查找推送失败的接收者记录（最近24小时内）
-        one_day_ago = datetime.utcnow() - timedelta(hours=24)
+        one_day_ago = get_local_now() - timedelta(hours=24)
         
         failed_recipients = NotificationRecipient.query.filter(
             NotificationRecipient.delivery_status == 'failed',
@@ -101,8 +98,7 @@ def generate_notification_stats():
     try:
         current_app.logger.info("开始生成通知统计报告...")
         
-        # 获取昨天的时间范围
-        yesterday = datetime.utcnow() - timedelta(days=1)
+        yesterday = get_local_now() - timedelta(days=1)
         start_of_day = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
         end_of_day = yesterday.replace(hour=23, minute=59, second=59, microsecond=999999)
         
@@ -163,10 +159,8 @@ def archive_old_notifications():
     try:
         current_app.logger.info("开始归档旧通知...")
         
-        # 获取90天前的时间
-        archive_date = datetime.utcnow() - timedelta(days=90)
+        archive_date = get_local_now() - timedelta(days=90)
         
-        # 查找需要归档的通知
         old_notifications = Notification.query.filter(
             Notification.created_at < archive_date,
             Notification.is_archived == False

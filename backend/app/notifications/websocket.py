@@ -5,7 +5,7 @@ from flask_socketio import SocketIO, emit, join_room, leave_room, disconnect
 from flask_jwt_extended import decode_token
 from app import db
 from app.models import User
-from app.notifications.models import NotificationRecipient
+from app.notifications.models import NotificationRecipient, get_local_now
 import functools
 
 # SocketIO实例将在应用初始化时设置
@@ -232,13 +232,12 @@ def emit_read_status(recipient_id: int, notification_id: int, user_id: int):
     if socketio is None:
         return
     try:
-        from datetime import datetime
         socketio.emit(
             "notification:read",
             {
                 "recipient_id": recipient_id,
                 "notification_id": notification_id,
-                "read_at": datetime.utcnow().isoformat(),
+                "read_at": get_local_now().isoformat(),
             },
             room=f"user:{user_id}",
             namespace="/notifications",
@@ -282,10 +281,9 @@ def emit_read_all(user_id: int, marked_count: int):
     if socketio is None:
         return
     try:
-        from datetime import datetime
         socketio.emit(
             "notifications:read_all",
-            {"marked_count": marked_count, "read_at": datetime.utcnow().isoformat()},
+            {"marked_count": marked_count, "read_at": get_local_now().isoformat()},
             room=f"user:{user_id}",
             namespace="/notifications",
         )
