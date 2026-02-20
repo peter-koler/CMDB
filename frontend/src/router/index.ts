@@ -75,13 +75,13 @@ const routes = [
             path: 'history',
             name: 'CiHistory',
             component: () => import('@/views/cmdb/history/index.vue'),
-            meta: { title: '变更历史', icon: 'HistoryOutlined', permission: 'cmdb:instance' }
+            meta: { title: '变更历史', icon: 'HistoryOutlined', permission: 'cmdb:history' }
           },
           {
             path: 'topology',
             name: 'Topology',
             component: () => import('@/views/cmdb/topology/index.vue'),
-            meta: { title: '拓扑视图', icon: 'BranchOutlined', permission: 'cmdb:instance' }
+            meta: { title: '拓扑视图', icon: 'BranchOutlined', permission: 'cmdb:topology' }
           }
         ]
       },

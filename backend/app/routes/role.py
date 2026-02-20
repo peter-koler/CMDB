@@ -356,6 +356,20 @@ def get_menu_tree():
                     'actions': [
                         {'key': 'cmdb:search:search', 'title': '搜索'}
                     ]
+                },
+                {
+                    'key': 'cmdb:history',
+                    'title': '变更历史',
+                    'actions': [
+                        {'key': 'cmdb:history:view', 'title': '查看'}
+                    ]
+                },
+                {
+                    'key': 'cmdb:topology',
+                    'title': '拓扑视图',
+                    'actions': [
+                        {'key': 'cmdb:topology:view', 'title': '查看'}
+                    ]
                 }
             ]
         }

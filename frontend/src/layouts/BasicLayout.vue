@@ -29,7 +29,7 @@
           <span>{{ t('menu.dashboard') }}</span>
         </a-menu-item>
         
-        <a-sub-menu key="cmdb" v-if="hasAnyPermission(['cmdb:instance', 'cmdb:search', 'cmdb:model'])">
+        <a-sub-menu key="cmdb" v-if="hasAnyPermission(['cmdb:instance', 'cmdb:search', 'cmdb:model', 'cmdb:history', 'cmdb:topology'])">
           <template #icon><CloudServerOutlined /></template>
           <template #title>{{ t('menu.cmdb') }}</template>
           <a-menu-item key="instance" v-if="hasPermission('cmdb:instance')" @click="navigateTo('/cmdb/instance')">
@@ -40,11 +40,11 @@
             <template #icon><SearchOutlined /></template>
             <span>{{ t('menu.search') }}</span>
           </a-menu-item>
-          <a-menu-item key="history" v-if="hasPermission('cmdb:instance')" @click="navigateTo('/cmdb/history')">
+          <a-menu-item key="history" v-if="hasPermission('cmdb:history')" @click="navigateTo('/cmdb/history')">
             <template #icon><HistoryOutlined /></template>
             <span>{{ t('menu.history') }}</span>
           </a-menu-item>
-          <a-menu-item key="topology" v-if="hasPermission('cmdb:instance')" @click="navigateTo('/cmdb/topology')">
+          <a-menu-item key="topology" v-if="hasPermission('cmdb:topology')" @click="navigateTo('/cmdb/topology')">
             <template #icon><ShareAltOutlined /></template>
             <span>{{ t('menu.topology') }}</span>
           </a-menu-item>
