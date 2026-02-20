@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify
-from app.models.department import Department, DepartmentUser
+from app.models.department import Department, DepartmentUser, DepartmentRole
+from app.models.role import Role, UserRole
 from app.models.user import User
 from app import db
 from app.utils.auth import token_required, admin_required
@@ -69,19 +70,16 @@ def update_department(id):
     department = Department.query.get_or_404(id)
     data = request.get_json()
     
-    # 检查编码是否被其他部门使用
     if data.get('code') and data['code'] != department.code:
         existing = Department.query.filter_by(code=data['code']).first()
         if existing:
             return jsonify({'code': 400, 'message': '部门编码已存在'}), 400
         department.code = data['code']
     
-    # 检查父部门是否合法（不能设置自己或子部门为父部门）
     new_parent_id = data.get('parent_id')
     if new_parent_id is not None:
         if new_parent_id == id:
             return jsonify({'code': 400, 'message': '不能将自己设为父部门'}), 400
-        # 检查是否将子部门设为父部门
         children_ids = department.get_all_children_ids()
         if new_parent_id in children_ids:
             return jsonify({'code': 400, 'message': '不能将子部门设为父部门'}), 400
@@ -94,9 +92,35 @@ def update_department(id):
     department.name = data.get('name', department.name)
     department.manager_id = data.get('manager_id', department.manager_id)
     department.sort_order = data.get('sort_order', department.sort_order)
+    
+    if 'role_ids' in data:
+        old_role_ids = set(department.get_role_ids())
+        new_role_ids = set(data['role_ids'])
+        
+        department.set_role_ids(data['role_ids'])
+        
+        added_roles = new_role_ids - old_role_ids
+        removed_roles = old_role_ids - new_role_ids
+        
+        for role_id in added_roles:
+            for dept_user in department.department_users:
+                existing = UserRole.query.filter_by(
+                    user_id=dept_user.user_id, role_id=role_id
+                ).first()
+                if not existing:
+                    user_role = UserRole(user_id=dept_user.user_id, role_id=role_id)
+                    db.session.add(user_role)
+        
+        for role_id in removed_roles:
+            for dept_user in department.department_users:
+                user_role = UserRole.query.filter_by(
+                    user_id=dept_user.user_id, role_id=role_id
+                ).first()
+                if user_role:
+                    db.session.delete(user_role)
+    
     department.save()
     
-    # 更新所有子部门的路径
     if new_parent_id is not None:
         _update_children_path(department)
     
@@ -207,6 +231,8 @@ def add_department_users(dept_id):
     if not user_ids:
         return jsonify({'code': 400, 'message': '请选择要添加的用户'}), 400
     
+    dept_role_ids = department.get_role_ids()
+    
     added_count = 0
     for user_id in user_ids:
         user = User.query.get(user_id)
@@ -230,6 +256,14 @@ def add_department_users(dept_id):
             user.department_id = dept_id
             db.session.add(user)
         
+        for role_id in dept_role_ids:
+            existing_role = UserRole.query.filter_by(
+                user_id=user_id, role_id=role_id
+            ).first()
+            if not existing_role:
+                user_role = UserRole(user_id=user_id, role_id=role_id)
+                db.session.add(user_role)
+        
         added_count += 1
     
     db.session.commit()
@@ -247,9 +281,19 @@ def add_department_users(dept_id):
 @log_operation(operation_type='DELETE', operation_object='department_user')
 def remove_department_user(dept_id, user_id):
     """从部门移除用户"""
+    department = Department.query.get_or_404(dept_id)
     dept_user = DepartmentUser.query.filter_by(
         department_id=dept_id, user_id=user_id
     ).first_or_404()
+    
+    dept_role_ids = department.get_role_ids()
+    
+    for role_id in dept_role_ids:
+        user_role = UserRole.query.filter_by(
+            user_id=user_id, role_id=role_id
+        ).first()
+        if user_role:
+            db.session.delete(user_role)
     
     user = User.query.get(user_id)
     if user and user.department_id == dept_id:

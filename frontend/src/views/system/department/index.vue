@@ -61,7 +61,16 @@
             row-key="id"
           >
             <template #bodyCell="{ column, record }">
-              <template v-if="column.key === 'is_leader'">
+              <template v-if="column.key === 'roles'">
+                <a-space v-if="record.user?.roles && record.user.roles.length > 0" wrap>
+                  <a-tag v-for="role in record.user.roles.slice(0, 2)" :key="role.id" color="blue" size="small">
+                    {{ role.name }}
+                  </a-tag>
+                  <a-tag v-if="record.user.roles.length > 2" size="small">+{{ record.user.roles.length - 2 }}</a-tag>
+                </a-space>
+                <span v-else>-</span>
+              </template>
+              <template v-else-if="column.key === 'is_leader'">
                 <a-tag v-if="record.is_leader" color="blue">负责人</a-tag>
                 <span v-else>-</span>
               </template>
@@ -96,6 +105,18 @@
         </a-form-item>
         <a-form-item label="排序" name="sort_order">
           <a-input-number v-model:value="deptForm.sort_order" :min="0" style="width: 100%" />
+        </a-form-item>
+        <a-form-item label="部门角色" name="role_ids">
+          <a-select
+            v-model:value="deptForm.role_ids"
+            mode="multiple"
+            placeholder="请选择部门角色"
+            :options="roleOptions"
+            style="width: 100%"
+          />
+        </a-form-item>
+        <a-form-item>
+          <a-alert message="选择部门角色后，该部门的用户将自动获得这些角色" type="info" show-icon />
         </a-form-item>
       </a-form>
     </a-modal>
@@ -134,24 +155,25 @@ import {
   updateDepartmentSort
 } from '@/api/department'
 import { getUsers } from '@/api/user'
+import { getRoles } from '@/api/role'
 
-// 部门树
 const departmentTree = ref<any[]>([])
 const selectedKeys = ref<string[]>([])
 const expandedKeys = ref<string[]>([])
 const currentDeptId = ref<number | null>(null)
 const currentDept = computed(() => findDept(departmentTree.value, currentDeptId.value))
 
-// 用户列表
 const loading = ref(false)
 const users = ref<any[]>([])
 const allUsers = ref<any[]>([])
 const targetKeys = ref<string[]>([])
+const roleOptions = ref<any[]>([])
 
 const columns = [
   { title: '用户名', dataIndex: ['user', 'username'], key: 'username' },
   { title: '邮箱', dataIndex: ['user', 'email'], key: 'email' },
-  { title: '角色', key: 'is_leader', width: 100 },
+  { title: '角色', key: 'roles', width: 200 },
+  { title: '身份', key: 'is_leader', width: 100 },
   { title: '加入时间', dataIndex: 'joined_at', key: 'joined_at' },
   { title: '操作', key: 'action', width: 200 }
 ]
@@ -171,7 +193,8 @@ const deptForm = reactive({
   name: '',
   code: '',
   parent_id: null as number | null,
-  sort_order: 0
+  sort_order: 0,
+  role_ids: [] as number[]
 })
 
 const deptRules = {
@@ -179,13 +202,27 @@ const deptRules = {
   code: [{ required: true, message: '请输入部门编码' }]
 }
 
-// 用户添加
 const userModalVisible = ref(false)
 
 onMounted(() => {
   fetchDepartments()
   fetchAllUsers()
+  fetchRoles()
 })
+
+const fetchRoles = async () => {
+  try {
+    const res = await getRoles({ per_page: 100 })
+    if (res.code === 200) {
+      roleOptions.value = res.data.items.map((role: any) => ({
+        value: role.id,
+        label: role.name
+      }))
+    }
+  } catch (error) {
+    console.error(error)
+  }
+}
 
 const fetchDepartments = async () => {
   try {
@@ -363,14 +400,22 @@ const handleMenuClick = (e: any, id: number) => {
 const showDeptModal = (dept?: any, parentId?: number) => {
   isEditDept.value = !!dept
   if (dept) {
-    Object.assign(deptForm, dept)
+    Object.assign(deptForm, {
+      id: dept.id,
+      name: dept.name,
+      code: dept.code,
+      parent_id: dept.parent_id,
+      sort_order: dept.sort_order,
+      role_ids: dept.role_ids || []
+    })
   } else {
     Object.assign(deptForm, {
       id: null,
       name: '',
       code: '',
       parent_id: parentId || null,
-      sort_order: 0
+      sort_order: 0,
+      role_ids: []
     })
   }
   deptModalVisible.value = true

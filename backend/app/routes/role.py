@@ -200,17 +200,21 @@ def add_role_users(role_id):
     data = request.get_json()
     
     user_ids = data.get('user_ids', [])
-    if not user_ids:
-        return jsonify({'code': 400, 'message': '请选择要分配的用户'}), 400
+    
+    if data.get('replace', False):
+        existing_user_ids = [ur.user_id for ur in UserRole.query.filter_by(role_id=role_id).all()]
+        for user_id in existing_user_ids:
+            if user_id not in user_ids:
+                ur = UserRole.query.filter_by(role_id=role_id, user_id=user_id).first()
+                if ur:
+                    db.session.delete(ur)
     
     added_count = 0
     for user_id in user_ids:
-        # 检查用户是否存在
         user = User.query.get(user_id)
         if not user:
             continue
         
-        # 检查是否已关联
         existing = UserRole.query.filter_by(
             role_id=role_id, user_id=user_id
         ).first()
@@ -218,10 +222,11 @@ def add_role_users(role_id):
             continue
         
         user_role = UserRole(role_id=role_id, user_id=user_id)
-        user_role.save()
+        db.session.add(user_role)
         added_count += 1
     
-    # 记录操作日志
+    db.session.commit()
+    
     identity = get_jwt_identity()
     claims = get_jwt()
     log_operation(int(identity), claims.get('username'), 'UPDATE', 'role', role_id, f'为角色 {role.name} 分配 {added_count} 个用户')

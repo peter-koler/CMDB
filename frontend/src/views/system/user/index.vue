@@ -454,17 +454,14 @@ const handleRoleOk = async () => {
   if (!currentUserId.value) return
   
   try {
-    // 获取当前用户的角色
     const user = users.value.find(u => u.id === currentUserId.value)
     const currentRoles = user?.roles?.map((r: any) => String(r.id)) || []
     
-    // 找出新增的角色
     const newRoles = selectedRoleKeys.value.filter(id => !currentRoles.includes(id))
     for (const roleId of newRoles) {
       await addRoleUsers(Number(roleId), { user_ids: [currentUserId.value] })
     }
     
-    // 找出移除的角色
     const removedRoles = currentRoles.filter((id: string) => !selectedRoleKeys.value.includes(id))
     for (const roleId of removedRoles) {
       await removeRoleUser(Number(roleId), currentUserId.value)

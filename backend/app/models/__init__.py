@@ -6,7 +6,7 @@ from app.models.model_category import ModelCategory
 from app.models.cmdb_model import CmdbModel, ModelType
 from app.models.model_region import ModelRegion
 from app.models.model_field import ModelField
-from app.models.department import Department, DepartmentUser
+from app.models.department import Department, DepartmentUser, DepartmentRole
 from app.models.role import Role, UserRole
 from app.models.ci_instance import CiInstance, CiHistory, CodeSequence
 from app.models.cmdb_relation import RelationType, CmdbRelation, RelationTrigger
@@ -31,6 +31,7 @@ __all__ = [
     "ModelField",
     "Department",
     "DepartmentUser",
+    "DepartmentRole",
     "Role",
     "UserRole",
     "CiInstance",

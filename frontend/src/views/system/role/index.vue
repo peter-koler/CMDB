@@ -338,7 +338,7 @@ const handleAssignUsers = async () => {
   
   try {
     const currentIds = targetUserKeys.value.map(Number)
-    await addRoleUsers(currentRole.value.id, { user_ids: currentIds })
+    await addRoleUsers(currentRole.value.id, { user_ids: currentIds, replace: true })
     message.success('分配成功')
     userModalVisible.value = false
     fetchRoles()
