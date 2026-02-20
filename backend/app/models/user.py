@@ -25,7 +25,6 @@ class User(db.Model):
     @property
     def is_admin(self):
         """检查是否是管理员"""
-        # 兼容旧字段
         if self.role == 'admin':
             return True
         
@@ -49,13 +48,30 @@ class User(db.Model):
         db.session.commit()
     
     def to_dict(self):
+        departments = []
+        if self.department:
+            departments.append({
+                'id': self.department.id,
+                'name': self.department.name
+            })
+        
+        roles = []
+        for ur in self.role_links:
+            if ur.role:
+                roles.append({
+                    'id': ur.role.id,
+                    'name': ur.role.name,
+                    'code': ur.role.code
+                })
+        
         return {
             'id': self.id,
             'username': self.username,
             'email': self.email,
             'phone': self.phone,
             'department_id': self.department_id,
-            'department_name': self.department.name if self.department else None,
+            'departments': departments,
+            'roles': roles,
             'role': self.role,
             'status': self.status,
             'failed_login_attempts': self.failed_login_attempts,
