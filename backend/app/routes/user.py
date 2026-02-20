@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 from app import db
 from app.models.user import User
+from app.models.department import DepartmentUser
 from app.models.password_history import PasswordHistory
 from app.routes.auth import validate_password, log_operation
 from datetime import datetime
@@ -32,8 +33,7 @@ def get_users():
         query = query.filter(
             db.or_(
                 User.username.like(f'%{keyword}%'),
-                User.email.like(f'%{keyword}%'),
-                User.department.like(f'%{keyword}%')
+                User.email.like(f'%{keyword}%')
             )
         )
     
@@ -75,7 +75,7 @@ def create_user():
     password = data.get('password')
     email = data.get('email')
     phone = data.get('phone')
-    department = data.get('department')
+    department_id = data.get('department_id')
     role = data.get('role', 'user')
     
     if not username or not password:
@@ -92,12 +92,20 @@ def create_user():
         username=username,
         email=email,
         phone=phone,
-        department=department,
+        department_id=department_id,
         role=role,
         status='active'
     )
     user.set_password(password)
     user.save()
+    
+    if department_id:
+        dept_user = DepartmentUser(
+            user_id=user.id,
+            department_id=department_id
+        )
+        db.session.add(dept_user)
+        db.session.commit()
     
     log_operation(int(identity), claims.get('username'), 'CREATE', 'user', user.id, f'创建用户: {username}')
     
@@ -141,8 +149,30 @@ def update_user(user_id):
         user.email = data['email']
     if 'phone' in data:
         user.phone = data['phone']
-    if 'department' in data:
-        user.department = data['department']
+    if 'department_id' in data:
+        new_dept_id = data['department_id']
+        old_dept_id = user.department_id
+        
+        if new_dept_id != old_dept_id:
+            user.department_id = new_dept_id
+            
+            if old_dept_id:
+                old_dept_user = DepartmentUser.query.filter_by(
+                    user_id=user_id, department_id=old_dept_id
+                ).first()
+                if old_dept_user:
+                    db.session.delete(old_dept_user)
+            
+            if new_dept_id:
+                existing = DepartmentUser.query.filter_by(
+                    user_id=user_id, department_id=new_dept_id
+                ).first()
+                if not existing:
+                    new_dept_user = DepartmentUser(
+                        user_id=user_id,
+                        department_id=new_dept_id
+                    )
+                    db.session.add(new_dept_user)
     if 'role' in data:
         user.role = data['role']
     if 'status' in data:

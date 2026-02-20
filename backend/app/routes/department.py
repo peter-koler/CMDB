@@ -200,7 +200,7 @@ def get_department_users(dept_id):
 @log_operation(operation_type='UPDATE', operation_object='department_user')
 def add_department_users(dept_id):
     """批量添加用户到部门"""
-    Department.query.get_or_404(dept_id)
+    department = Department.query.get_or_404(dept_id)
     data = request.get_json()
     
     user_ids = data.get('user_ids', [])
@@ -209,12 +209,10 @@ def add_department_users(dept_id):
     
     added_count = 0
     for user_id in user_ids:
-        # 检查用户是否存在
         user = User.query.get(user_id)
         if not user:
             continue
         
-        # 检查是否已关联
         existing = DepartmentUser.query.filter_by(
             department_id=dept_id, user_id=user_id
         ).first()
@@ -226,8 +224,15 @@ def add_department_users(dept_id):
             user_id=user_id,
             is_leader=data.get('is_leader', False)
         )
-        dept_user.save()
+        db.session.add(dept_user)
+        
+        if not user.department_id:
+            user.department_id = dept_id
+            db.session.add(user)
+        
         added_count += 1
+    
+    db.session.commit()
     
     return jsonify({
         'code': 200,
@@ -246,7 +251,20 @@ def remove_department_user(dept_id, user_id):
         department_id=dept_id, user_id=user_id
     ).first_or_404()
     
-    dept_user.delete()
+    user = User.query.get(user_id)
+    if user and user.department_id == dept_id:
+        other_dept = DepartmentUser.query.filter(
+            DepartmentUser.user_id == user_id,
+            DepartmentUser.department_id != dept_id
+        ).first()
+        if other_dept:
+            user.department_id = other_dept.department_id
+        else:
+            user.department_id = None
+        db.session.add(user)
+    
+    db.session.delete(dept_user)
+    db.session.commit()
     
     return jsonify({
         'code': 200,
