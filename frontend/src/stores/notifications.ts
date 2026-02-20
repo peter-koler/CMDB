@@ -281,6 +281,8 @@ export const useNotificationStore = defineStore('notifications', () => {
     handleNewNotification,
     connectWebSocket,
     disconnectWebSocket,
-    initialize
+    initialize,
+    incrementUnreadCount: () => { unreadCount.value++ },
+    decrementUnreadCount: () => { unreadCount.value = Math.max(0, unreadCount.value - 1) }
   }
 })

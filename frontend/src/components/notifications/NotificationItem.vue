@@ -48,6 +48,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useRouter } from 'vue-router'
 import {
   BellOutlined,
   InfoCircleOutlined,
@@ -67,6 +68,8 @@ import 'dayjs/locale/zh-cn'
 
 dayjs.extend(relativeTime)
 dayjs.locale('zh-cn')
+
+const router = useRouter()
 
 const props = defineProps<{
   notification: any
@@ -108,6 +111,7 @@ const handleClick = () => {
   if (!props.notification.is_read && props.notification.id) {
     emit('read', props.notification.id)
   }
+  router.push(`/notifications/detail/${props.notification.id}`)
 }
 
 const handleDownload = (attachment: any) => {
