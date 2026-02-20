@@ -10,10 +10,10 @@ import {
   getNotificationTypes
 } from '@/api/notifications'
 import { message } from 'ant-design-vue'
+import { io, Socket } from 'socket.io-client'
 
-// WebSocket连接
-let socket: WebSocket | null = null
-let reconnectTimer: number | null = null
+// Socket.IO连接
+let socket: Socket | null = null
 
 export const useNotificationStore = defineStore('notifications', () => {
   // ==================== State ====================
@@ -197,65 +197,54 @@ export const useNotificationStore = defineStore('notifications', () => {
   }
 
   /**
-   * 连接WebSocket
+   * 连接Socket.IO
    */
   const connectWebSocket = (token: string) => {
-    if (socket?.readyState === WebSocket.OPEN) {
+    if (socket?.connected) {
       return
     }
 
-    const wsUrl = `${(import.meta as any).env?.VITE_WS_URL || 'ws://localhost:5000'}/notifications?token=${token}`
+    const wsUrl = (import.meta as any).env?.VITE_WS_URL || 'http://localhost:5000'
 
     try {
-      socket = new WebSocket(wsUrl)
+      socket = io(wsUrl, {
+        path: '/socket.io',
+        transports: ['websocket', 'polling'],
+        query: { token }
+      })
 
-      socket.onopen = () => {
-        console.log('WebSocket连接成功')
+      socket.on('connect', () => {
+        console.log('Socket.IO连接成功')
         connected.value = true
-        if (reconnectTimer) {
-          clearTimeout(reconnectTimer)
-          reconnectTimer = null
-        }
-      }
+      })
 
-      socket.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data)
-          if (data.event === 'notification:new') {
-            handleNewNotification(data.data)
-          }
-        } catch (error) {
-          console.error('解析WebSocket消息失败:', error)
-        }
-      }
+      socket.on('authenticated', (data) => {
+        console.log('认证成功:', data)
+      })
 
-      socket.onclose = () => {
-        console.log('WebSocket连接关闭')
+      socket.on('notification:new', (data) => {
+        handleNewNotification(data)
+      })
+
+      socket.on('disconnect', () => {
+        console.log('Socket.IO连接关闭')
         connected.value = false
-        // 3秒后重连
-        reconnectTimer = window.setTimeout(() => {
-          connectWebSocket(token)
-        }, 3000)
-      }
+      })
 
-      socket.onerror = (error) => {
-        console.error('WebSocket错误:', error)
-      }
+      socket.on('connect_error', (error) => {
+        console.error('Socket.IO连接错误:', error)
+      })
     } catch (error) {
-      console.error('创建WebSocket连接失败:', error)
+      console.error('创建Socket.IO连接失败:', error)
     }
   }
 
   /**
-   * 断开WebSocket
+   * 断开Socket.IO
    */
   const disconnectWebSocket = () => {
-    if (reconnectTimer) {
-      clearTimeout(reconnectTimer)
-      reconnectTimer = null
-    }
     if (socket) {
-      socket.close()
+      socket.disconnect()
       socket = null
     }
     connected.value = false
