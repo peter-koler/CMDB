@@ -84,32 +84,32 @@
         <template #bodyCell="{ column, record }">
           <!-- 类型 -->
           <template v-if="column.key === 'type'">
-            <a-tag :color="record.type?.color || '#1890ff'">
-              <component :is="getIconComponent(record.type?.icon)" />
-              {{ record.type?.name }}
+            <a-tag :color="record.notification?.type?.color || '#1890ff'">
+              <component :is="getIconComponent(record.notification?.type?.icon)" />
+              {{ record.notification?.type?.name }}
             </a-tag>
           </template>
 
           <!-- 标题 -->
           <template v-if="column.key === 'title'">
             <span :class="{ 'unread-text': !record.is_read }">
-              {{ record.title }}
+              {{ record.notification?.title }}
             </span>
           </template>
 
           <!-- 内容 -->
           <template v-if="column.key === 'content'">
-            <div class="content-preview" v-html="record.content_html || record.content" />
+            <div class="content-preview" v-html="record.notification?.content_html || record.notification?.content" />
           </template>
 
           <!-- 发送者 -->
           <template v-if="column.key === 'sender'">
-            {{ record.sender?.username || '-' }}
+            {{ record.notification?.sender?.username || '-' }}
           </template>
 
           <!-- 时间 -->
           <template v-if="column.key === 'time'">
-            {{ formatTime(record.created_at) }}
+            {{ formatTime(record.notification?.created_at) }}
           </template>
 
           <!-- 状态 -->
@@ -148,21 +148,21 @@
     <!-- 通知详情弹窗 -->
     <a-modal
       v-model:open="detailVisible"
-      :title="selectedNotification?.title"
+      :title="selectedNotification?.notification?.title"
       :footer="null"
       width="600px"
     >
       <div class="notification-detail">
         <div class="detail-meta">
-          <a-tag :color="selectedNotification?.type?.color">
-            {{ selectedNotification?.type?.name }}
+          <a-tag :color="selectedNotification?.notification?.type?.color">
+            {{ selectedNotification?.notification?.type?.name }}
           </a-tag>
-          <span>{{ selectedNotification?.sender?.username }}</span>
-          <span>{{ formatTime(selectedNotification?.created_at) }}</span>
+          <span>{{ selectedNotification?.notification?.sender?.username }}</span>
+          <span>{{ formatTime(selectedNotification?.notification?.created_at) }}</span>
         </div>
         <div
           class="detail-content"
-          v-html="selectedNotification?.content_html || selectedNotification?.content"
+          v-html="selectedNotification?.notification?.content_html || selectedNotification?.notification?.content"
         />
       </div>
     </a-modal>

@@ -5,23 +5,23 @@
   >
     <div class="notification-icon">
       <component
-        :is="getIconComponent(notification.type?.icon)"
-        :style="{ color: notification.type?.color || '#1890ff' }"
+        :is="getIconComponent(notificationData?.type?.icon)"
+        :style="{ color: notificationData?.type?.color || '#1890ff' }"
       />
     </div>
     <div class="notification-content">
-      <div class="notification-title">{{ notification.title }}</div>
+      <div class="notification-title">{{ notificationData?.title }}</div>
       <div
         class="notification-body"
-        v-html="notification.content_html || notification.content"
+        v-html="notificationData?.content_html || notificationData?.content"
       />
       <div class="notification-meta">
-        <span class="notification-time">{{ formatTime(notification.created_at) }}</span>
+        <span class="notification-time">{{ formatTime(notificationData?.created_at) }}</span>
         <span
-          v-if="notification.sender"
+          v-if="notificationData?.sender"
           class="notification-sender"
         >
-          {{ notification.sender.username }}
+          {{ notificationData.sender.username }}
         </span>
       </div>
     </div>
@@ -33,6 +33,7 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import {
   BellOutlined,
   InfoCircleOutlined,
@@ -61,7 +62,10 @@ const emit = defineEmits<{
   read: [recipientId: number]
 }>()
 
-// 图标映射
+const notificationData = computed(() => {
+  return props.notification?.notification || props.notification
+})
+
 const iconMap: Record<string, any> = {
   bell: BellOutlined,
   info: InfoCircleOutlined,

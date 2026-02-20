@@ -228,17 +228,24 @@ def emit_read_status(recipient_id: int, notification_id: int, user_id: int):
         notification_id: 通知ID
         user_id: 用户ID
     """
-    if socketio:
+    global socketio
+    if socketio is None:
+        return
+    try:
+        from datetime import datetime
         socketio.emit(
             "notification:read",
             {
                 "recipient_id": recipient_id,
                 "notification_id": notification_id,
-                "read_at": db.func.now().isoformat(),
+                "read_at": datetime.utcnow().isoformat(),
             },
             room=f"user:{user_id}",
             namespace="/notifications",
         )
+    except Exception as e:
+        from flask import current_app
+        current_app.logger.error(f"WebSocket推送失败: {e}")
 
 
 def emit_unread_status(recipient_id: int, notification_id: int, user_id: int):
@@ -249,13 +256,19 @@ def emit_unread_status(recipient_id: int, notification_id: int, user_id: int):
         notification_id: 通知ID
         user_id: 用户ID
     """
-    if socketio:
+    global socketio
+    if socketio is None:
+        return
+    try:
         socketio.emit(
             "notification:unread",
             {"recipient_id": recipient_id, "notification_id": notification_id},
             room=f"user:{user_id}",
             namespace="/notifications",
         )
+    except Exception as e:
+        from flask import current_app
+        current_app.logger.error(f"WebSocket推送失败: {e}")
 
 
 def emit_read_all(user_id: int, marked_count: int):
@@ -265,10 +278,17 @@ def emit_read_all(user_id: int, marked_count: int):
         user_id: 用户ID
         marked_count: 标记为已读的数量
     """
-    if socketio:
+    global socketio
+    if socketio is None:
+        return
+    try:
+        from datetime import datetime
         socketio.emit(
             "notifications:read_all",
-            {"marked_count": marked_count, "read_at": db.func.now().isoformat()},
+            {"marked_count": marked_count, "read_at": datetime.utcnow().isoformat()},
             room=f"user:{user_id}",
             namespace="/notifications",
         )
+    except Exception as e:
+        from flask import current_app
+        current_app.logger.error(f"WebSocket推送失败: {e}")
