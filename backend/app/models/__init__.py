@@ -16,6 +16,7 @@ from app.notifications.models import (
     NotificationRecipient,
     NotificationType,
     NotificationTemplate,
+    NotificationAttachment,
 )
 
 __all__ = [
@@ -44,4 +45,5 @@ __all__ = [
     "NotificationRecipient",
     "NotificationType",
     "NotificationTemplate",
+    "NotificationAttachment",
 ]

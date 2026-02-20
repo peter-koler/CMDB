@@ -14,6 +14,7 @@ from app.notifications.models import (
     NotificationRecipient,
     NotificationType,
     NotificationTemplate,
+    NotificationAttachment,
     init_default_notification_types,
 )
 
@@ -22,5 +23,6 @@ __all__ = [
     "NotificationRecipient",
     "NotificationType",
     "NotificationTemplate",
+    "NotificationAttachment",
     "init_default_notification_types",
 ]

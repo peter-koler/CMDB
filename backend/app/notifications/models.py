@@ -1,8 +1,22 @@
 from app import db
-from datetime import datetime
+from datetime import datetime, timezone
 import markdown
 import bleach
 from markupsafe import Markup
+
+def get_local_now():
+    """获取本地时间"""
+    return datetime.now(timezone.utc).astimezone()
+
+
+def format_datetime(dt):
+    """格式化时间为ISO格式，带时区信息"""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.isoformat()
+
 
 # Allowed HTML tags for notification content
 ALLOWED_TAGS = [
@@ -17,8 +31,32 @@ ALLOWED_TAGS = [
     "code",
     "pre",
     "blockquote",
+    "img",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "table",
+    "thead",
+    "tbody",
+    "tr",
+    "th",
+    "td",
+    "span",
+    "div",
 ]
-ALLOWED_ATTRIBUTES = {"a": ["href", "title"], "code": ["class"]}
+ALLOWED_ATTRIBUTES = {
+    "a": ["href", "title", "target"],
+    "code": ["class"],
+    "img": ["src", "alt", "title", "width", "height"],
+    "span": ["style", "class"],
+    "div": ["style", "class"],
+    "table": ["style", "class"],
+    "td": ["style", "class", "colspan", "rowspan"],
+    "th": ["style", "class", "colspan", "rowspan"],
+}
 
 
 class NotificationType(db.Model):
@@ -32,9 +70,9 @@ class NotificationType(db.Model):
     icon = db.Column(db.String(50), default="bell")
     color = db.Column(db.String(20), default="#1890ff")
     is_system = db.Column(db.Boolean, default=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=get_local_now)
     updated_at = db.Column(
-        db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        db.DateTime, default=get_local_now, onupdate=get_local_now
     )
 
     # Relationships
@@ -53,8 +91,8 @@ class NotificationType(db.Model):
             "icon": self.icon,
             "color": self.color,
             "is_system": self.is_system,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "created_at": format_datetime(self.created_at),
+            "updated_at": format_datetime(self.updated_at),
         }
 
 
@@ -78,7 +116,7 @@ class Notification(db.Model):
     )
 
     # Timestamps
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=get_local_now)
     expires_at = db.Column(db.DateTime, nullable=True)
 
     # Archive status
@@ -102,10 +140,11 @@ class Notification(db.Model):
 
     @staticmethod
     def render_content(content):
-        """将Markdown内容渲染为安全HTML"""
-        html = markdown.markdown(content, extensions=["nl2br", "fenced_code"])
+        """将内容渲染为安全HTML（支持富文本）"""
+        if not content:
+            return ""
         clean_html = bleach.clean(
-            html, tags=ALLOWED_TAGS, attributes=ALLOWED_ATTRIBUTES
+            content, tags=ALLOWED_TAGS, attributes=ALLOWED_ATTRIBUTES
         )
         return clean_html
 
@@ -122,8 +161,9 @@ class Notification(db.Model):
             }
             if self.sender
             else None,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "expires_at": self.expires_at.isoformat() if self.expires_at else None,
+            "created_at": format_datetime(self.created_at),
+            "expires_at": format_datetime(self.expires_at),
+            "attachments": [a.to_dict() for a in self.attachments] if self.attachments else [],
         }
         if include_content_html:
             data["content_html"] = self.content_html
@@ -153,7 +193,7 @@ class NotificationRecipient(db.Model):
     last_attempt_at = db.Column(db.DateTime, nullable=True)
 
     # Timestamps
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=get_local_now)
 
     # Relationships
     notification = db.relationship("Notification", back_populates="recipients")
@@ -173,7 +213,7 @@ class NotificationRecipient(db.Model):
         """标记为已读"""
         if not self.is_read:
             self.is_read = True
-            self.read_at = datetime.utcnow()
+            self.read_at = get_local_now()
             db.session.commit()
 
     def mark_as_unread(self):
@@ -188,9 +228,40 @@ class NotificationRecipient(db.Model):
             "id": self.id,
             "notification": self.notification.to_dict() if self.notification else None,
             "is_read": self.is_read,
-            "read_at": self.read_at.isoformat() if self.read_at else None,
+            "read_at": format_datetime(self.read_at),
             "delivery_status": self.delivery_status,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "created_at": format_datetime(self.created_at),
+        }
+
+
+class NotificationAttachment(db.Model):
+    """通知附件"""
+
+    __tablename__ = "notification_attachments"
+
+    id = db.Column(db.Integer, primary_key=True)
+    notification_id = db.Column(
+        db.Integer, db.ForeignKey("notifications.id"), nullable=False
+    )
+    filename = db.Column(db.String(255), nullable=False)
+    original_filename = db.Column(db.String(255), nullable=False)
+    file_path = db.Column(db.String(500), nullable=False)
+    file_size = db.Column(db.Integer, nullable=False)
+    mime_type = db.Column(db.String(100), nullable=False)
+    created_at = db.Column(db.DateTime, default=get_local_now)
+
+    notification = db.relationship("Notification", backref="attachments")
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "notification_id": self.notification_id,
+            "filename": self.filename,
+            "original_filename": self.original_filename,
+            "file_size": self.file_size,
+            "mime_type": self.mime_type,
+            "download_url": f"/api/v1/notifications/attachments/{self.id}/download",
+            "created_at": format_datetime(self.created_at),
         }
 
 

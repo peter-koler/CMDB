@@ -44,8 +44,8 @@ def send_notification():
         content = data.get("content")
         template_id = data.get("template_id")
         variables = data.get("variables")
+        attachments = data.get("attachments", [])
 
-        # 验证必填字段
         if not all([recipient_type, type_id, title, content]):
             return jsonify(
                 {
@@ -54,13 +54,11 @@ def send_notification():
                 }
             ), 400
 
-        # 根据接收者类型发送
         if recipient_type == "users":
             user_ids = data.get("user_ids", [])
             if not user_ids:
                 return jsonify({"code": 400, "message": "user_ids不能为空"}), 400
 
-            # 权限验证
             try:
                 validate_sender_permission(
                     sender_id=sender_id,
@@ -78,6 +76,7 @@ def send_notification():
                 content=content,
                 template_id=template_id,
                 variables=variables,
+                attachments=attachments,
             )
 
         elif recipient_type == "department":
@@ -85,7 +84,6 @@ def send_notification():
             if not department_id:
                 return jsonify({"code": 400, "message": "department_id不能为空"}), 400
 
-            # 权限验证
             try:
                 validate_sender_permission(
                     sender_id=sender_id,
@@ -103,6 +101,7 @@ def send_notification():
                 content=content,
                 template_id=template_id,
                 variables=variables,
+                attachments=attachments,
             )
         else:
             return jsonify(
@@ -142,8 +141,8 @@ def send_broadcast():
         content = data.get("content")
         template_id = data.get("template_id")
         variables = data.get("variables")
+        attachments = data.get("attachments", [])
 
-        # 验证必填字段
         if not all([type_id, title, content]):
             return jsonify(
                 {
@@ -152,7 +151,6 @@ def send_broadcast():
                 }
             ), 400
 
-        # 验证广播权限
         sender = User.query.get(sender_id)
         if not sender or not can_send_broadcast(sender):
             return jsonify(
@@ -166,6 +164,7 @@ def send_broadcast():
             content=content,
             template_id=template_id,
             variables=variables,
+            attachments=attachments,
         )
 
         return jsonify(
@@ -646,3 +645,105 @@ def preview_template(template_id: int):
     except Exception as e:
         current_app.logger.error(f"预览模板失败: {e}")
         return jsonify({"code": 500, "message": "预览失败"}), 500
+
+
+# ==================== 附件管理 ====================
+
+import os
+import uuid
+from werkzeug.utils import secure_filename
+from flask import send_from_directory
+from app.notifications.models import NotificationAttachment, Notification
+
+UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "uploads", "notifications")
+ALLOWED_EXTENSIONS = {'txt', 'pdf', 'png', 'jpg', 'jpeg', 'gif', 'doc', 'docx', 'xls', 'xlsx', 'zip', 'rar'}
+
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+@notifications_bp.route("/upload", methods=["POST"])
+@jwt_required()
+def upload_attachment():
+    """上传通知附件"""
+    try:
+        if 'file' not in request.files:
+            return jsonify({"code": 400, "message": "没有选择文件"}), 400
+
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({"code": 400, "message": "没有选择文件"}), 400
+
+        if not allowed_file(file.filename):
+            return jsonify({"code": 400, "message": "不支持的文件类型"}), 400
+
+        original_filename = secure_filename(file.filename)
+        ext = original_filename.rsplit('.', 1)[1].lower() if '.' in original_filename else ''
+        filename = f"{uuid.uuid4().hex}.{ext}" if ext else uuid.uuid4().hex
+
+        today = datetime.now().strftime("%Y%m%d")
+        upload_dir = os.path.join(UPLOAD_FOLDER, today)
+        os.makedirs(upload_dir, exist_ok=True)
+
+        file_path = os.path.join(upload_dir, filename)
+        file.save(file_path)
+
+        file_size = os.path.getsize(file_path)
+        mime_type = file.content_type or 'application/octet-stream'
+
+        return jsonify({
+            "code": 200,
+            "message": "上传成功",
+            "data": {
+                "filename": filename,
+                "original_filename": original_filename,
+                "file_path": f"{today}/{filename}",
+                "file_size": file_size,
+                "mime_type": mime_type,
+            }
+        })
+
+    except Exception as e:
+        current_app.logger.error(f"上传附件失败: {e}")
+        return jsonify({"code": 500, "message": "上传失败"}), 500
+
+
+@notifications_bp.route("/attachments/<int:attachment_id>/download", methods=["GET"])
+@jwt_required()
+def download_attachment(attachment_id: int):
+    """下载通知附件"""
+    try:
+        user_id = int(get_jwt_identity())
+
+        attachment = NotificationAttachment.query.get(attachment_id)
+        if not attachment:
+            return jsonify({"code": 404, "message": "附件不存在"}), 404
+
+        recipient = db.session.query(NotificationRecipient).filter_by(
+            notification_id=attachment.notification_id,
+            user_id=user_id
+        ).first()
+
+        if not recipient:
+            return jsonify({"code": 403, "message": "无权下载此附件"}), 403
+
+        directory = os.path.join(UPLOAD_FOLDER, os.path.dirname(attachment.file_path))
+        filename = os.path.basename(attachment.file_path)
+
+        if not os.path.exists(os.path.join(directory, filename)):
+            return jsonify({"code": 404, "message": "文件不存在"}), 404
+
+        return send_from_directory(
+            directory,
+            filename,
+            as_attachment=True,
+            download_name=attachment.original_filename
+        )
+
+    except Exception as e:
+        current_app.logger.error(f"下载附件失败: {e}")
+        return jsonify({"code": 500, "message": "下载失败"}), 500
+
+
+from app.notifications.models import NotificationRecipient

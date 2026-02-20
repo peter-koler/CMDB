@@ -1,7 +1,7 @@
 """通知模块业务服务层"""
 
 from typing import List, Optional, Dict, Any, Tuple
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from sqlalchemy import func, or_, and_
 from flask import current_app
 
@@ -12,6 +12,7 @@ from app.notifications.models import (
     NotificationRecipient,
     NotificationType,
     NotificationTemplate,
+    NotificationAttachment,
     init_default_notification_types,
 )
 from app.notifications.utils import render_markdown, validate_notification_content
@@ -22,6 +23,11 @@ from app.notifications.websocket import (
     emit_unread_status,
     emit_read_all,
 )
+
+
+def get_local_now():
+    """获取本地时间"""
+    return datetime.now(timezone.utc).astimezone()
 
 
 class NotificationService:
@@ -36,6 +42,7 @@ class NotificationService:
         content: str,
         template_id: Optional[int] = None,
         variables: Optional[Dict[str, Any]] = None,
+        attachments: Optional[List[Dict[str, Any]]] = None,
     ) -> Tuple[Notification, List[NotificationRecipient]]:
         """向指定用户发送通知
 
@@ -44,29 +51,26 @@ class NotificationService:
             user_ids: 接收者用户ID列表
             type_id: 通知类型ID
             title: 通知标题
-            content: 通知内容（Markdown格式）
+            content: 通知内容（富文本HTML格式）
             template_id: 模板ID（可选）
             variables: 模板变量（可选）
+            attachments: 附件列表（可选）
 
         Returns:
             (Notification对象, NotificationRecipient列表)
         """
-        # 验证内容
         is_valid, error_msg = validate_notification_content(title, content)
         if not is_valid:
             raise ValueError(error_msg)
 
-        # 验证发送者
         sender = User.query.get(sender_id)
         if not sender:
             raise ValueError("发送者不存在")
 
-        # 验证通知类型
         notification_type = NotificationType.query.get(type_id)
         if not notification_type:
             raise ValueError("通知类型不存在")
 
-        # 如果有模板，使用模板渲染
         if template_id and variables:
             template = NotificationTemplate.query.get(template_id)
             if template:
@@ -75,9 +79,8 @@ class NotificationService:
                 except ValueError as e:
                     raise ValueError(f"模板渲染失败: {e}")
 
-        # 计算过期时间
         retention_days = current_app.config.get("NOTIFICATION_RETENTION_DAYS", 90)
-        expires_at = datetime.utcnow() + timedelta(days=retention_days)
+        expires_at = get_local_now() + timedelta(days=retention_days)
 
         # 创建通知
         notification = Notification(
@@ -90,13 +93,25 @@ class NotificationService:
             expires_at=expires_at,
         )
         db.session.add(notification)
-        db.session.flush()  # 获取notification.id
+        db.session.flush()
+
+        if attachments:
+            for att in attachments:
+                attachment = NotificationAttachment(
+                    notification_id=notification.id,
+                    filename=att.get("filename"),
+                    original_filename=att.get("original_filename"),
+                    file_path=att.get("file_path"),
+                    file_size=att.get("file_size"),
+                    mime_type=att.get("mime_type"),
+                )
+                db.session.add(attachment)
 
         # 创建接收人记录
         recipients = []
         valid_user_ids = set()
 
-        for user_id in set(user_ids):  # 去重
+        for user_id in set(user_ids):
             user = User.query.filter_by(id=user_id, status="active").first()
             if user:
                 recipient = NotificationRecipient(
@@ -110,13 +125,11 @@ class NotificationService:
 
         db.session.commit()
 
-        # WebSocket实时推送
         notification_data = notification.to_dict()
         for recipient in recipients:
             notification_data["recipient_id"] = recipient.id
             emit_to_user(recipient.user_id, "notification:new", notification_data)
 
-        # 记录审计日志
         current_app.logger.info(
             f"Notification sent: id={notification.id}, "
             f"sender={sender_id}, recipients={len(recipients)}"
@@ -133,27 +146,13 @@ class NotificationService:
         content: str,
         template_id: Optional[int] = None,
         variables: Optional[Dict[str, Any]] = None,
+        attachments: Optional[List[Dict[str, Any]]] = None,
     ) -> Tuple[Notification, List[NotificationRecipient]]:
-        """向部门所有成员发送通知
-
-        Args:
-            sender_id: 发送者用户ID
-            department_id: 部门ID
-            type_id: 通知类型ID
-            title: 通知标题
-            content: 通知内容
-            template_id: 模板ID（可选）
-            variables: 模板变量（可选）
-
-        Returns:
-            (Notification对象, NotificationRecipient列表)
-        """
-        # 获取部门成员
+        """向部门所有成员发送通知"""
         department = Department.query.get(department_id)
         if not department:
             raise ValueError("部门不存在")
 
-        # 获取部门下所有活跃用户
         from app.models import User
 
         members = User.query.filter_by(
@@ -173,6 +172,7 @@ class NotificationService:
             content=content,
             template_id=template_id,
             variables=variables,
+            attachments=attachments,
         )
 
     @staticmethod
@@ -183,21 +183,9 @@ class NotificationService:
         content: str,
         template_id: Optional[int] = None,
         variables: Optional[Dict[str, Any]] = None,
+        attachments: Optional[List[Dict[str, Any]]] = None,
     ) -> Tuple[Notification, List[NotificationRecipient]]:
-        """发送全员广播通知
-
-        Args:
-            sender_id: 发送者用户ID
-            type_id: 通知类型ID
-            title: 通知标题
-            content: 通知内容
-            template_id: 模板ID（可选）
-            variables: 模板变量（可选）
-
-        Returns:
-            (Notification对象, NotificationRecipient列表)
-        """
-        # 获取所有活跃用户
+        """发送全员广播通知"""
         from app.models import User
 
         users = User.query.filter_by(status="active").all()
@@ -215,6 +203,7 @@ class NotificationService:
             content=content,
             template_id=template_id,
             variables=variables,
+            attachments=attachments,
         )
 
     @staticmethod

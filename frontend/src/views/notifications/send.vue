@@ -87,14 +87,29 @@
 
         <!-- 内容 -->
         <a-form-item :label="t('notifications.content')" name="content">
-          <a-textarea
-            v-model:value="formState.content"
-            :placeholder="t('notifications.contentPlaceholder')"
-            :rows="6"
-            :max-length="2000"
-            show-count
+          <RichEditor
+            v-model="formState.content"
+            placeholder="请输入通知内容..."
+            :height="300"
           />
-          <div class="form-hint">{{ t('notifications.markdownSupport') }}</div>
+        </a-form-item>
+
+        <!-- 附件上传 -->
+        <a-form-item label="附件">
+          <a-upload
+            v-model:file-list="fileList"
+            :action="uploadUrl"
+            :headers="uploadHeaders"
+            :before-upload="beforeUpload"
+            @change="handleUploadChange"
+            @remove="handleRemoveAttachment"
+          >
+            <a-button>
+              <UploadOutlined />
+              选择附件
+            </a-button>
+          </a-upload>
+          <div class="form-hint">支持上传文档、图片、压缩包等，单个文件不超过10MB</div>
         </a-form-item>
 
         <!-- 预览 -->
@@ -103,7 +118,7 @@
             <div class="preview-header">
               <span class="preview-title">{{ formState.title || t('notifications.previewTitle') }}</span>
             </div>
-            <div class="preview-content" v-html="renderedContent" />
+            <div class="preview-content" v-html="formState.content || t('notifications.previewContent')" />
           </a-card>
         </a-form-item>
 
@@ -133,19 +148,8 @@ import { sendNotification, sendBroadcast } from '@/api/notifications'
 import { getUsers } from '@/api/user'
 import { getDepartments } from '@/api/department'
 import { message } from 'ant-design-vue'
-// Markdown渲染和HTML净化（简化版本，不使用外部库）
-const renderMarkdown = (text: string): string => {
-  if (!text) return ''
-  // 简单的Markdown转换
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.*?)\*/g, '<em>$1</em>')
-    .replace(/`(.*?)`/g, '<code>$1</code>')
-    .replace(/\n/g, '<br>')
-}
+import RichEditor from '@/components/RichEditor.vue'
+import type { UploadFile } from 'ant-design-vue'
 import {
   ArrowLeftOutlined,
   SendOutlined,
@@ -158,7 +162,8 @@ import {
   AlertOutlined,
   StarOutlined,
   FileTextOutlined,
-  SettingOutlined
+  SettingOutlined,
+  UploadOutlined
 } from '@ant-design/icons-vue'
 
 const { t } = useI18n()
@@ -170,6 +175,13 @@ const types = computed(() => store.types)
 const submitting = ref(false)
 const userOptions = ref<{ label: string; value: number }[]>([])
 const departmentTree = ref<any[]>([])
+const fileList = ref<UploadFile[]>([])
+const attachments = ref<any[]>([])
+
+const uploadUrl = '/api/v1/notifications/upload'
+const uploadHeaders = {
+  Authorization: `Bearer ${localStorage.getItem('token')}`
+}
 
 const formState = reactive({
   recipient_type: 'users',
@@ -190,9 +202,44 @@ const rules = {
     { max: 100, message: t('validations.maxLength', { max: 100 }) }
   ],
   content: [
-    { required: true, message: t('validations.required') },
-    { max: 2000, message: t('validations.maxLength', { max: 2000 }) }
+    { required: true, message: t('validations.required') }
   ]
+}
+
+const beforeUpload = (file: File) => {
+  const isLt10M = file.size / 1024 / 1024 < 10
+  if (!isLt10M) {
+    message.error('文件大小不能超过10MB')
+    return false
+  }
+  return true
+}
+
+const handleUploadChange = (info: any) => {
+  if (info.file.status === 'done') {
+    const response = info.file.response
+    if (response.code === 200) {
+      attachments.value.push(response.data)
+      message.success(`${info.file.name} 上传成功`)
+    } else {
+      message.error(response.message || '上传失败')
+    }
+  } else if (info.file.status === 'error') {
+    message.error(`${info.file.name} 上传失败`)
+  }
+}
+
+const handleRemoveAttachment = (file: UploadFile) => {
+  const index = fileList.value.findIndex(f => f.uid === file.uid)
+  if (index > -1) {
+    fileList.value.splice(index, 1)
+  }
+  const attIndex = attachments.value.findIndex(
+    a => a.original_filename === file.name
+  )
+  if (attIndex > -1) {
+    attachments.value.splice(attIndex, 1)
+  }
 }
 
 const iconMap: Record<string, any> = {
@@ -211,11 +258,6 @@ const iconMap: Record<string, any> = {
 const getIconComponent = (iconName?: string) => {
   return iconMap[iconName || 'bell'] || BellOutlined
 }
-
-const renderedContent = computed(() => {
-  if (!formState.content) return t('notifications.previewContent')
-  return renderMarkdown(formState.content)
-})
 
 onMounted(async () => {
   await Promise.all([
@@ -288,7 +330,8 @@ const handleSubmit = async () => {
       res = await sendBroadcast({
         type_id: formState.type_id!,
         title: formState.title,
-        content: formState.content
+        content: formState.content,
+        attachments: attachments.value
       })
     } else {
       res = await sendNotification({
@@ -297,7 +340,8 @@ const handleSubmit = async () => {
         department_id: formState.recipient_type === 'department' ? formState.department_id : undefined,
         type_id: formState.type_id!,
         title: formState.title,
-        content: formState.content
+        content: formState.content,
+        attachments: attachments.value
       })
     }
 

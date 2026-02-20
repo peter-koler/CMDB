@@ -15,6 +15,20 @@
         class="notification-body"
         v-html="notificationData?.content_html || notificationData?.content"
       />
+      <div
+        v-if="notificationData?.attachments?.length"
+        class="notification-attachments"
+      >
+        <PaperClipOutlined />
+        <span
+          v-for="att in notificationData.attachments"
+          :key="att.id"
+          class="attachment-link"
+          @click.stop="handleDownload(att)"
+        >
+          {{ att.original_filename }}
+        </span>
+      </div>
       <div class="notification-meta">
         <span class="notification-time">{{ formatTime(notificationData?.created_at) }}</span>
         <span
@@ -44,7 +58,8 @@ import {
   AlertOutlined,
   StarOutlined,
   FileTextOutlined,
-  SettingOutlined
+  SettingOutlined,
+  PaperClipOutlined
 } from '@ant-design/icons-vue'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
@@ -90,10 +105,15 @@ const formatTime = (time: string) => {
 
 const handleClick = () => {
   emit('click', props.notification)
-  // 如果是未读状态，自动标记为已读
   if (!props.notification.is_read && props.notification.id) {
     emit('read', props.notification.id)
   }
+}
+
+const handleDownload = (attachment: any) => {
+  const token = localStorage.getItem('token')
+  const url = `${attachment.download_url}?token=${token}`
+  window.open(url, '_blank')
 }
 </script>
 
@@ -179,6 +199,24 @@ const handleClick = () => {
 
 .notification-sender {
   color: #8c8c8c;
+}
+
+.notification-attachments {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: #1890ff;
+}
+
+.attachment-link {
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.attachment-link:hover {
+  color: #40a9ff;
 }
 
 .unread-indicator {
