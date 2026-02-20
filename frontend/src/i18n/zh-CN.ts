@@ -16,7 +16,10 @@ export default {
     info: '提示',
     logout: '退出登录',
     darkMode: '深色模式',
-    lightMode: '浅色模式'
+    lightMode: '浅色模式',
+    action: '操作',
+    confirmDelete: '确认删除',
+    all: '全部'
   },
   login: {
     title: 'IT运维平台',
@@ -117,6 +120,7 @@ export default {
     sender: '发送者',
     time: '时间',
     content: '内容',
+    notificationTitle: '标题',
     search: '搜索',
     searchPlaceholder: '搜索通知标题或内容',
     selectUsers: '选择用户',
@@ -133,7 +137,9 @@ export default {
     previewContent: '通知内容预览...',
     titlePlaceholder: '请输入通知标题',
     contentPlaceholder: '请输入通知内容，支持Markdown格式',
-    markdownSupport: '支持Markdown格式：**粗体**、*斜体*、`代码`等'
+    markdownSupport: '支持Markdown格式：**粗体**、*斜体*、`代码`等',
+    deleteConfirm: '确定要删除选中的 {count} 条通知吗？',
+    deleteSuccess: '成功删除 {count} 条通知'
   },
   validations: {
     required: '此项为必填项',

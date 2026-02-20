@@ -20,6 +20,17 @@ export const getNotifications = (params?: {
 }
 
 /**
+ * 获取单个通知详情
+ * @param recipientId 接收者记录ID
+ */
+export const getNotificationDetail = (recipientId: number) => {
+  return request({
+    url: `/notifications/my/${recipientId}`,
+    method: 'GET'
+  })
+}
+
+/**
  * 获取未读通知数量
  */
 export const getUnreadCount = () => {
@@ -48,6 +59,17 @@ export const markAsUnread = (recipientId: number) => {
   return request({
     url: `/notifications/my/${recipientId}/unread`,
     method: 'PATCH'
+  })
+}
+
+/**
+ * 删除通知
+ * @param recipientId 接收者记录ID
+ */
+export const deleteNotification = (recipientId: number) => {
+  return request({
+    url: `/notifications/my/${recipientId}`,
+    method: 'DELETE'
   })
 }
 

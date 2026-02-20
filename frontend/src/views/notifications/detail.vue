@@ -105,7 +105,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { useNotificationStore } from '@/stores/notifications'
-import { markAsRead, markAsUnread } from '@/api/notifications'
+import { getNotificationDetail, markAsRead, markAsUnread } from '@/api/notifications'
 import {
   ArrowLeftOutlined,
   UserOutlined,
@@ -175,14 +175,11 @@ const loadNotification = async () => {
 
   loading.value = true
   try {
-    const allNotifications = store.notifications
-    const found = allNotifications.find((n: any) => n.id === parseInt(recipientId))
-    
-    if (found) {
-      notification.value = found
+    const res = await getNotificationDetail(parseInt(recipientId))
+    if (res.code === 200) {
+      notification.value = res.data
     } else {
-      await store.fetchNotifications()
-      notification.value = store.notifications.find((n: any) => n.id === parseInt(recipientId))
+      message.error(res.message || '获取通知失败')
     }
   } catch (error) {
     console.error('加载通知失败:', error)
@@ -301,6 +298,35 @@ onMounted(() => {
   color: #333;
 }
 
+.content-html :deep(h1),
+.content-html :deep(h2),
+.content-html :deep(h3),
+.content-html :deep(h4),
+.content-html :deep(h5),
+.content-html :deep(h6) {
+  margin: 16px 0 8px;
+  font-weight: 600;
+  color: #262626;
+}
+
+.content-html :deep(p) {
+  margin: 8px 0;
+}
+
+.content-html :deep(ul),
+.content-html :deep(ol) {
+  margin: 8px 0;
+  padding-left: 24px;
+}
+
+.content-html :deep(blockquote) {
+  margin: 8px 0;
+  padding: 8px 16px;
+  border-left: 4px solid #1890ff;
+  background-color: #f6f8fa;
+  color: #666;
+}
+
 .content-html :deep(img) {
   max-width: 100%;
   height: auto;
@@ -338,6 +364,15 @@ onMounted(() => {
   padding: 2px 6px;
   border-radius: 3px;
   font-family: monospace;
+}
+
+.content-html :deep(a) {
+  color: #1890ff;
+  text-decoration: none;
+}
+
+.content-html :deep(a:hover) {
+  text-decoration: underline;
 }
 
 .detail-attachments h3 {

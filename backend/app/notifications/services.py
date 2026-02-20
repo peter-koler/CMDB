@@ -341,14 +341,36 @@ class NotificationService:
         # 批量更新
         result = NotificationRecipient.query.filter_by(
             user_id=user_id, is_read=False
-        ).update({"is_read": True, "read_at": datetime.utcnow()})
+        ).update({"is_read": True, "read_at": get_local_now()})
 
         db.session.commit()
 
-        # WebSocket同步
         emit_read_all(user_id=user_id, marked_count=result)
 
         return result
+
+    @staticmethod
+    def delete_notification(recipient_id: int, user_id: int) -> bool:
+        """删除通知
+
+        Args:
+            recipient_id: 接收者记录ID
+            user_id: 用户ID（用于权限验证）
+
+        Returns:
+            是否删除成功
+        """
+        recipient = NotificationRecipient.query.filter_by(
+            id=recipient_id, user_id=user_id
+        ).first()
+
+        if not recipient:
+            return False
+
+        db.session.delete(recipient)
+        db.session.commit()
+
+        return True
 
     @staticmethod
     def search_notifications(

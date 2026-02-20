@@ -20,6 +20,14 @@
               <template #icon><CheckOutlined /></template>
               {{ t('notifications.markRead') }}
             </a-button>
+            <a-button
+              danger
+              :disabled="selectedRowKeys.length === 0"
+              @click="handleBatchDelete"
+            >
+              <template #icon><DeleteOutlined /></template>
+              {{ t('common.delete') }}
+            </a-button>
           </a-space>
         </div>
       </template>
@@ -92,9 +100,14 @@
 
           <!-- 标题 -->
           <template v-if="column.key === 'title'">
-            <span :class="{ 'unread-text': !record.is_read }">
+            <a-button
+              type="link"
+              class="title-link"
+              :class="{ 'unread-text': !record.is_read }"
+              @click="goToDetail(record.id)"
+            >
               {{ record.notification?.title }}
-            </span>
+            </a-button>
           </template>
 
           <!-- 内容 -->
@@ -175,11 +188,13 @@ import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useNotificationStore } from '@/stores/notifications'
 import { useUserStore } from '@/stores/user'
-import { message } from 'ant-design-vue'
+import { deleteNotification } from '@/api/notifications'
+import { message, Modal } from 'ant-design-vue'
 import dayjs from 'dayjs'
 import {
   SendOutlined,
   CheckOutlined,
+  DeleteOutlined,
   BellOutlined,
   InfoCircleOutlined,
   CheckCircleOutlined,
@@ -247,7 +262,7 @@ const columns = [
     width: 120
   },
   {
-    title: t('notifications.title'),
+    title: t('notifications.notificationTitle'),
     key: 'title',
     ellipsis: true
   },
@@ -357,13 +372,49 @@ const handleBatchRead = async () => {
 }
 
 const goToSend = () => {
-  // 根据当前路径判断是从系统管理还是通知中心进入
   const isSystemRoute = route.path.startsWith('/system')
   if (isSystemRoute) {
     router.push('/system/notification/send')
   } else {
     router.push('/notifications/send')
   }
+}
+
+const goToDetail = (id: number) => {
+  const isSystemRoute = route.path.startsWith('/system')
+  if (isSystemRoute) {
+    router.push(`/system/notification/detail/${id}`)
+  } else {
+    router.push(`/notifications/detail/${id}`)
+  }
+}
+
+const handleBatchDelete = () => {
+  Modal.confirm({
+    title: t('common.confirmDelete'),
+    content: t('notifications.deleteConfirm', { count: selectedRowKeys.value.length }),
+    okText: t('common.confirm'),
+    cancelText: t('common.cancel'),
+    okButtonProps: { danger: true },
+    async onOk() {
+      let successCount = 0
+      for (const id of selectedRowKeys.value) {
+        try {
+          const res = await deleteNotification(id)
+          if (res.code === 200) {
+            successCount++
+          }
+        } catch (error) {
+          console.error('删除通知失败:', error)
+        }
+      }
+      if (successCount > 0) {
+        message.success(t('notifications.deleteSuccess', { count: successCount }))
+        loadData()
+      }
+      selectedRowKeys.value = []
+    }
+  })
 }
 </script>
 

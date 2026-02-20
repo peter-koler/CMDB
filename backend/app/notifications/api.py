@@ -276,6 +276,32 @@ def get_my_notifications():
         return jsonify({"code": 500, "message": "获取列表失败"}), 500
 
 
+@notifications_bp.route("/my/<int:recipient_id>", methods=["GET"])
+@jwt_required()
+def get_notification_detail(recipient_id: int):
+    """获取单个通知详情"""
+    try:
+        user_id = int(get_jwt_identity())
+
+        recipient = NotificationRecipient.query.filter_by(
+            id=recipient_id, user_id=user_id
+        ).first()
+
+        if not recipient:
+            return jsonify({"code": 404, "message": "通知不存在"}), 404
+
+        return jsonify(
+            {
+                "code": 200,
+                "data": recipient.to_dict(include_notification=True),
+            }
+        )
+
+    except Exception as e:
+        current_app.logger.error(f"获取通知详情失败: {e}")
+        return jsonify({"code": 500, "message": "获取详情失败"}), 500
+
+
 @notifications_bp.route("/my/unread-count", methods=["GET"])
 @jwt_required()
 def get_unread_count():
@@ -351,6 +377,27 @@ def mark_all_as_read():
     except Exception as e:
         current_app.logger.error(f"全部标记已读失败: {e}")
         return jsonify({"code": 500, "message": "操作失败"}), 500
+
+
+@notifications_bp.route("/my/<int:recipient_id>", methods=["DELETE"])
+@jwt_required()
+def delete_notification(recipient_id: int):
+    """删除通知"""
+    try:
+        user_id = int(get_jwt_identity())
+
+        result = NotificationService.delete_notification(recipient_id, user_id)
+
+        if result:
+            return jsonify({"code": 200, "message": "删除成功"})
+        else:
+            return jsonify({"code": 404, "message": "通知不存在"}), 404
+
+    except ValueError as e:
+        return jsonify({"code": 403, "message": str(e)}), 403
+    except Exception as e:
+        current_app.logger.error(f"删除通知失败: {e}")
+        return jsonify({"code": 500, "message": "删除失败"}), 500
 
 
 @notifications_bp.route("/my/search", methods=["GET"])

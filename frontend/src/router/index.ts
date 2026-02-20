@@ -131,6 +131,12 @@ const routes = [
             name: 'SystemSendNotification',
             component: () => import('@/views/notifications/send.vue'),
             meta: { title: '发送通知', icon: 'SendOutlined', permission: 'notification:send', hideInMenu: true }
+          },
+          {
+            path: 'notification/detail/:id',
+            name: 'SystemNotificationDetail',
+            component: () => import('@/views/notifications/detail.vue'),
+            meta: { title: '通知详情', icon: 'FileTextOutlined', hideInMenu: true }
           }
         ]
       },
