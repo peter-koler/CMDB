@@ -63,7 +63,13 @@
           </template>
           <template v-else-if="column.key === 'next_run_at'">
             <span v-if="record.batch_scan_enabled && record.next_run_at">
-              {{ record.next_run_at }}
+              {{ formatDateTime(record.next_run_at) }}
+            </span>
+            <span v-else class="text-muted">-</span>
+          </template>
+          <template v-else-if="column.key === 'last_run_at'">
+            <span v-if="record.last_run_at">
+              {{ formatDateTime(record.last_run_at) }}
             </span>
             <span v-else class="text-muted">-</span>
           </template>
@@ -180,6 +186,22 @@ const columns = [
   { title: '上次执行状态', dataIndex: 'last_run_status', key: 'last_run_status', width: 120 },
   { title: '操作', key: 'action', width: 150, fixed: 'right' as const }
 ]
+
+const formatDateTime = (dateStr: string | null) => {
+  if (!dateStr) return '-'
+  try {
+    const date = new Date(dateStr)
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    const day = String(date.getDate()).padStart(2, '0')
+    const hours = String(date.getHours()).padStart(2, '0')
+    const minutes = String(date.getMinutes()).padStart(2, '0')
+    const seconds = String(date.getSeconds()).padStart(2, '0')
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
+  } catch {
+    return dateStr
+  }
+}
 
 const filterOption = (input: string, option: any) => {
   return option.children?.[0]?.children?.toLowerCase().includes(input.toLowerCase())

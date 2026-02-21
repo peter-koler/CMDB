@@ -124,11 +124,11 @@
 
           <a-row :gutter="16">
             <a-col :xs="24" :sm="12">
-              <a-statistic title="下次执行时间" :value="config.next_run_at || '-'" :value-style="{ fontSize: '16px' }" />
+              <a-statistic title="下次执行时间" :value="formatDateTime(config.next_run_at)" :value-style="{ fontSize: '16px' }" />
             </a-col>
             <a-col :xs="24" :sm="12">
               <a-space direction="vertical" :size="0">
-                <span>上次执行: {{ config.last_run_at || '-' }}</span>
+                <span>上次执行: {{ formatDateTime(config.last_run_at) }}</span>
                 <span>状态:
                   <a-tag v-if="config.last_run_status === 'completed'" color="green">成功</a-tag>
                   <a-tag v-else-if="config.last_run_status === 'failed'" color="error">失败</a-tag>
@@ -232,6 +232,9 @@
             <a-tag v-if="record.status === 'success'" color="green">成功</a-tag>
             <a-tag v-else-if="record.status === 'failed'" color="error">失败</a-tag>
             <a-tag v-else-if="record.status === 'skipped'" color="warning">跳过</a-tag>
+          </template>
+          <template v-else-if="column.key === 'created_at'">
+            {{ formatDateTime(record.created_at) }}
           </template>
         </template>
       </a-table>
@@ -575,6 +578,22 @@ const fetchLogs = async () => {
 const handleLogsTableChange = (pag: any) => {
   logsPagination.current = pag.current
   fetchLogs()
+}
+
+const formatDateTime = (dateStr: string | null) => {
+  if (!dateStr) return '-'
+  try {
+    const date = new Date(dateStr)
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    const day = String(date.getDate()).padStart(2, '0')
+    const hours = String(date.getHours()).padStart(2, '0')
+    const minutes = String(date.getMinutes()).padStart(2, '0')
+    const seconds = String(date.getSeconds()).padStart(2, '0')
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
+  } catch {
+    return dateStr
+  }
 }
 
 const handleSubmit = async () => {
