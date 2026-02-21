@@ -16,8 +16,8 @@ class Role(db.Model):
     menu_permissions = db.Column(db.Text, default='[]')  # ["system:user:create", "cmdb:instance:view"]
     data_permissions = db.Column(db.Text, default='{}')  # {"scope": "department", "inherit": true}
     
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
     
     # 关联
     user_roles = db.relationship('UserRole', backref='role', lazy='dynamic', cascade='all, delete-orphan')
@@ -95,7 +95,7 @@ class UserRole(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     role_id = db.Column(db.Integer, db.ForeignKey('roles.id'), nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.now)
     
     # 关联
     user = db.relationship('User', backref='role_links', lazy='joined')

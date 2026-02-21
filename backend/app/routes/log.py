@@ -96,7 +96,7 @@ def clean_logs():
         return jsonify({'code': 403, 'message': '无权限清理日志'}), 403
     
     retention_days = int(SystemConfig.get_value('log_retention_days', '30'))
-    cutoff_date = datetime.utcnow() - timedelta(days=retention_days)
+    cutoff_date = datetime.now() - timedelta(days=retention_days)
     
     deleted = OperationLog.query.filter(OperationLog.created_at < cutoff_date).delete()
     db.session.commit()

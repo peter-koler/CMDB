@@ -8,7 +8,10 @@ interface UserInfo {
   role: string
   email?: string
   phone?: string
+  avatar?: string
   department?: string
+  department_id?: number
+  department_name?: string
   permissions: string[]
 }
 

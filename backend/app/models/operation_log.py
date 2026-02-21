@@ -15,7 +15,7 @@ class OperationLog(db.Model):
     user_agent = db.Column(db.Text)
     status = db.Column(db.String(20), default='success', index=True)
     error_message = db.Column(db.Text)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.now, index=True)
     
     def save(self):
         db.session.add(self)

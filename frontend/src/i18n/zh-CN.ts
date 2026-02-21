@@ -19,7 +19,9 @@ export default {
     lightMode: '浅色模式',
     action: '操作',
     confirmDelete: '确认删除',
-    all: '全部'
+    all: '全部',
+    saveSuccess: '保存成功',
+    saveFailed: '保存失败'
   },
   login: {
     title: 'IT运维平台',
@@ -71,7 +73,30 @@ export default {
     statusActive: '正常',
     statusLocked: '锁定',
     statusDisabled: '禁用',
-    profile: '个人中心'
+    profile: '个人中心',
+    admin: '管理员',
+    user: '普通用户'
+  },
+  profile: {
+    basicInfo: '基本信息',
+    changeAvatar: '更换头像',
+    emailPlaceholder: '请输入邮箱地址',
+    phonePlaceholder: '请输入手机号码',
+    invalidEmail: '请输入有效的邮箱地址',
+    invalidPhone: '请输入有效的手机号码',
+    changePassword: '修改密码',
+    oldPassword: '旧密码',
+    newPassword: '新密码',
+    confirmPassword: '确认密码',
+    oldPasswordRequired: '请输入旧密码',
+    newPasswordRequired: '请输入新密码',
+    confirmPasswordRequired: '请确认新密码',
+    passwordMismatch: '两次输入的密码不一致',
+    passwordChanged: '密码修改成功',
+    passwordChangeFailed: '密码修改失败',
+    avatarTooLarge: '头像文件不能超过2MB',
+    avatarUpdated: '头像更新成功',
+    avatarUploadFailed: '头像上传失败'
   },
   config: {
     title: '系统配置',

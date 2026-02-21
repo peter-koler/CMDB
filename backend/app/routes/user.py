@@ -241,7 +241,7 @@ def reset_password(user_id):
     PasswordHistory.add_history(user.id, password_hash)
     
     user.set_password(new_password)
-    user.last_password_change = datetime.utcnow()
+    user.last_password_change = datetime.now()
     user.failed_login_attempts = 0
     user.locked_until = None
     user.save()

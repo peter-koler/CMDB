@@ -1,7 +1,10 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import (
-    create_access_token, create_refresh_token, 
-    jwt_required, get_jwt_identity, get_jwt
+    create_access_token,
+    create_refresh_token,
+    jwt_required,
+    get_jwt_identity,
+    get_jwt,
 )
 from app.models.user import User
 from app.models.config import SystemConfig
@@ -10,30 +13,42 @@ from app.models.password_history import PasswordHistory
 from datetime import datetime, timedelta
 import bcrypt
 import re
+import os
+import uuid
 
-auth_bp = Blueprint('auth', __name__, url_prefix='/api/v1/auth')
+auth_bp = Blueprint("auth", __name__, url_prefix="/api/v1/auth")
+
 
 def validate_password(password):
-    min_length = int(SystemConfig.get_value('password_min_length', '8'))
-    require_uppercase = SystemConfig.get_value('require_uppercase', 'true') == 'true'
-    require_lowercase = SystemConfig.get_value('require_lowercase', 'true') == 'true'
-    require_digit = SystemConfig.get_value('require_digit', 'true') == 'true'
-    require_special = SystemConfig.get_value('require_special', 'true') == 'true'
-    
-    if len(password) < min_length:
-        return False, f'密码长度至少{min_length}位'
-    if require_uppercase and not re.search(r'[A-Z]', password):
-        return False, '密码必须包含大写字母'
-    if require_lowercase and not re.search(r'[a-z]', password):
-        return False, '密码必须包含小写字母'
-    if require_digit and not re.search(r'\d', password):
-        return False, '密码必须包含数字'
-    if require_special and not re.search(r'[!@#$%^&*(),.?":{}|<>]', password):
-        return False, '密码必须包含特殊字符'
-    return True, 'OK'
+    min_length = int(SystemConfig.get_value("password_min_length", "8"))
+    require_uppercase = SystemConfig.get_value("require_uppercase", "true") == "true"
+    require_lowercase = SystemConfig.get_value("require_lowercase", "true") == "true"
+    require_digit = SystemConfig.get_value("require_digit", "true") == "true"
+    require_special = SystemConfig.get_value("require_special", "true") == "true"
 
-def log_operation(user_id, username, operation_type, operation_object=None, object_id=None, 
-                  operation_desc=None, status='success', error_message=None):
+    if len(password) < min_length:
+        return False, f"密码长度至少{min_length}位"
+    if require_uppercase and not re.search(r"[A-Z]", password):
+        return False, "密码必须包含大写字母"
+    if require_lowercase and not re.search(r"[a-z]", password):
+        return False, "密码必须包含小写字母"
+    if require_digit and not re.search(r"\d", password):
+        return False, "密码必须包含数字"
+    if require_special and not re.search(r'[!@#$%^&*(),.?":{}|<>]', password):
+        return False, "密码必须包含特殊字符"
+    return True, "OK"
+
+
+def log_operation(
+    user_id,
+    username,
+    operation_type,
+    operation_object=None,
+    object_id=None,
+    operation_desc=None,
+    status="success",
+    error_message=None,
+):
     log = OperationLog(
         user_id=user_id,
         username=username,
@@ -42,202 +57,379 @@ def log_operation(user_id, username, operation_type, operation_object=None, obje
         object_id=object_id,
         operation_desc=operation_desc,
         ip_address=request.remote_addr,
-        user_agent=request.headers.get('User-Agent'),
+        user_agent=request.headers.get("User-Agent"),
         status=status,
-        error_message=error_message
+        error_message=error_message,
     )
     log.save()
 
+
 def check_and_update_lockout(user):
-    if user.locked_until and user.locked_until > datetime.utcnow():
-        return False, '账户已被锁定，请稍后再试'
-    
-    if user.locked_until and user.locked_until <= datetime.utcnow():
+    if user.locked_until and user.locked_until > datetime.now():
+        return False, "账户已被锁定，请稍后再试"
+
+    if user.locked_until and user.locked_until <= datetime.now():
         user.locked_until = None
         user.failed_login_attempts = 0
         user.save()
-    
-    return True, 'OK'
 
-@auth_bp.route('/login', methods=['POST'])
+    return True, "OK"
+
+
+@auth_bp.route("/login", methods=["POST"])
 def login():
     data = request.get_json()
-    username = data.get('username')
-    password = data.get('password')
-    
+    username = data.get("username")
+    password = data.get("password")
+
     if not username or not password:
-        return jsonify({'code': 400, 'message': '用户名和密码不能为空'}), 400
-    
+        return jsonify({"code": 400, "message": "用户名和密码不能为空"}), 400
+
     user = User.query.filter_by(username=username).first()
-    
+
     if not user:
-        log_operation(None, username, 'LOGIN', 'user', None, '登录尝试', 'failed', '用户不存在')
-        return jsonify({'code': 401, 'message': '用户名或密码错误'}), 401
-    
+        log_operation(
+            None, username, "LOGIN", "user", None, "登录尝试", "failed", "用户不存在"
+        )
+        return jsonify({"code": 401, "message": "用户名或密码错误"}), 401
+
     if user.deleted_at:
-        log_operation(user.id, username, 'LOGIN', 'user', user.id, '登录尝试', 'failed', '账户已删除')
-        return jsonify({'code': 401, 'message': '账户已被禁用'}), 401
-    
-    if user.status == 'disabled':
-        log_operation(user.id, username, 'LOGIN', 'user', user.id, '登录尝试', 'failed', '账户已禁用')
-        return jsonify({'code': 401, 'message': '账户已被禁用'}), 401
-    
+        log_operation(
+            user.id,
+            username,
+            "LOGIN",
+            "user",
+            user.id,
+            "登录尝试",
+            "failed",
+            "账户已删除",
+        )
+        return jsonify({"code": 401, "message": "账户已被禁用"}), 401
+
+    if user.status == "disabled":
+        log_operation(
+            user.id,
+            username,
+            "LOGIN",
+            "user",
+            user.id,
+            "登录尝试",
+            "failed",
+            "账户已禁用",
+        )
+        return jsonify({"code": 401, "message": "账户已被禁用"}), 401
+
     ok, msg = check_and_update_lockout(user)
     if not ok:
-        return jsonify({'code': 401, 'message': msg}), 401
-    
+        return jsonify({"code": 401, "message": msg}), 401
+
     if not user.check_password(password):
         user.failed_login_attempts += 1
-        max_failures = int(SystemConfig.get_value('max_login_failures', '5'))
-        
+        max_failures = int(SystemConfig.get_value("max_login_failures", "5"))
+
         if user.failed_login_attempts >= max_failures:
-            lock_duration = int(SystemConfig.get_value('lock_duration_hours', '24'))
-            user.locked_until = datetime.utcnow() + timedelta(hours=lock_duration)
-        
+            lock_duration = int(SystemConfig.get_value("lock_duration_hours", "24"))
+            user.locked_until = datetime.now() + timedelta(hours=lock_duration)
+
         user.save()
-        log_operation(user.id, username, 'LOGIN', 'user', user.id, '登录尝试', 'failed', '密码错误')
-        return jsonify({'code': 401, 'message': '用户名或密码错误'}), 401
-    
+        log_operation(
+            user.id,
+            username,
+            "LOGIN",
+            "user",
+            user.id,
+            "登录尝试",
+            "failed",
+            "密码错误",
+        )
+        return jsonify({"code": 401, "message": "用户名或密码错误"}), 401
+
     user.failed_login_attempts = 0
     user.locked_until = None
     user.save()
-    
-    access_token_expires = int(SystemConfig.get_value('access_token_expire', '30'))
-    refresh_token_expires = int(SystemConfig.get_value('refresh_token_expire', '10080'))
-    
+
+    access_token_expires = int(SystemConfig.get_value("access_token_expire", "30"))
+    refresh_token_expires = int(SystemConfig.get_value("refresh_token_expire", "10080"))
+
     access_token = create_access_token(
         identity=str(user.id),
-        additional_claims={'username': user.username, 'role': 'admin' if user.is_admin else 'user'},
-        expires_delta=timedelta(minutes=access_token_expires)
+        additional_claims={
+            "username": user.username,
+            "role": "admin" if user.is_admin else "user",
+        },
+        expires_delta=timedelta(minutes=access_token_expires),
     )
     refresh_token = create_refresh_token(
-        identity=str(user.id),
-        expires_delta=timedelta(minutes=refresh_token_expires)
+        identity=str(user.id), expires_delta=timedelta(minutes=refresh_token_expires)
     )
-    
-    log_operation(user.id, username, 'LOGIN', 'user', user.id, '用户登录成功')
-    
-    return jsonify({
-        'code': 200,
-        'message': 'success',
-        'data': {
-            'access_token': access_token,
-            'refresh_token': refresh_token,
-            'token_type': 'Bearer',
-            'expires_in': access_token_expires * 60,
-            'user': {
-                'id': user.id,
-                'username': user.username,
-                'role': 'admin' if user.is_admin else 'user',
-                'email': user.email
-            }
-        }
-    })
 
-@auth_bp.route('/logout', methods=['POST'])
+    log_operation(user.id, username, "LOGIN", "user", user.id, "用户登录成功")
+
+    return jsonify(
+        {
+            "code": 200,
+            "message": "success",
+            "data": {
+                "access_token": access_token,
+                "refresh_token": refresh_token,
+                "token_type": "Bearer",
+                "expires_in": access_token_expires * 60,
+                "user": {
+                    "id": user.id,
+                    "username": user.username,
+                    "role": "admin" if user.is_admin else "user",
+                    "email": user.email,
+                },
+            },
+        }
+    )
+
+
+@auth_bp.route("/logout", methods=["POST"])
 @jwt_required()
 def logout():
     identity = get_jwt_identity()
     claims = get_jwt()
-    username = claims.get('username')
-    
-    log_operation(int(identity), username, 'LOGOUT', 'user', int(identity), '用户登出')
-    
-    return jsonify({'code': 200, 'message': '登出成功'})
+    username = claims.get("username")
 
-@auth_bp.route('/refresh', methods=['POST'])
+    log_operation(int(identity), username, "LOGOUT", "user", int(identity), "用户登出")
+
+    return jsonify({"code": 200, "message": "登出成功"})
+
+
+@auth_bp.route("/refresh", methods=["POST"])
 @jwt_required(refresh=True)
 def refresh():
     identity = get_jwt_identity()
     user = User.query.get(int(identity))
-    
-    if not user or user.deleted_at or user.status == 'disabled':
-        return jsonify({'code': 401, 'message': '无效的令牌'}), 401
-    
-    access_token_expires = int(SystemConfig.get_value('access_token_expire', '30'))
-    
+
+    if not user or user.deleted_at or user.status == "disabled":
+        return jsonify({"code": 401, "message": "无效的令牌"}), 401
+
+    access_token_expires = int(SystemConfig.get_value("access_token_expire", "30"))
+
     access_token = create_access_token(
         identity=str(user.id),
-        additional_claims={'username': user.username, 'role': 'admin' if user.is_admin else 'user'},
-        expires_delta=timedelta(minutes=access_token_expires)
+        additional_claims={
+            "username": user.username,
+            "role": "admin" if user.is_admin else "user",
+        },
+        expires_delta=timedelta(minutes=access_token_expires),
     )
-    
-    return jsonify({
-        'code': 200,
-        'message': 'success',
-        'data': {
-            'access_token': access_token,
-            'token_type': 'Bearer',
-            'expires_in': access_token_expires * 60
-        }
-    })
 
-@auth_bp.route('/me', methods=['GET'])
+    return jsonify(
+        {
+            "code": 200,
+            "message": "success",
+            "data": {
+                "access_token": access_token,
+                "token_type": "Bearer",
+                "expires_in": access_token_expires * 60,
+            },
+        }
+    )
+
+
+@auth_bp.route("/me", methods=["GET"])
 @jwt_required()
 def get_current_user():
     identity = get_jwt_identity()
     user = User.query.get(int(identity))
-    
+
     if not user or user.deleted_at:
-        return jsonify({'code': 404, 'message': '用户不存在'}), 404
-    
+        return jsonify({"code": 404, "message": "用户不存在"}), 404
+
     permissions = set()
     if user.is_admin:
-        permissions.add('*')
-    
+        permissions.add("*")
+
     for ur in user.role_links:
         if ur.role:
             for p in ur.role.get_menu_permissions():
                 permissions.add(p)
-    
-    return jsonify({
-        'code': 200,
-        'data': {
-            'id': user.id,
-            'username': user.username,
-            'role': 'admin' if user.is_admin else 'user',
-            'permissions': list(permissions),
-            'department_id': user.department_id,
-            'department_name': user.department.name if user.department else None,
-            'email': user.email,
-            'phone': user.phone,
-            'avatar': None
-        }
-    })
 
-@auth_bp.route('/change-password', methods=['POST'])
+    return jsonify(
+        {
+            "code": 200,
+            "data": {
+                "id": user.id,
+                "username": user.username,
+                "role": "admin" if user.is_admin else "user",
+                "permissions": list(permissions),
+                "department_id": user.department_id,
+                "department_name": user.department.name if user.department else None,
+                "email": user.email,
+                "phone": user.phone,
+                "avatar": user.avatar,
+            },
+        }
+    )
+
+
+@auth_bp.route("/profile", methods=["GET"])
+@jwt_required()
+def get_profile():
+    identity = get_jwt_identity()
+    user = User.query.get(int(identity))
+
+    if not user or user.deleted_at:
+        return jsonify({"code": 404, "message": "用户不存在"}), 404
+
+    return jsonify(
+        {
+            "code": 200,
+            "data": {
+                "id": user.id,
+                "username": user.username,
+                "email": user.email,
+                "phone": user.phone,
+                "avatar": user.avatar,
+                "department_id": user.department_id,
+                "department_name": user.department.name if user.department else None,
+                "role": "admin" if user.is_admin else "user",
+            },
+        }
+    )
+
+
+@auth_bp.route("/profile", methods=["PUT"])
+@jwt_required()
+def update_profile():
+    identity = get_jwt_identity()
+    user = User.query.get(int(identity))
+    data = request.get_json()
+
+    if not user or user.deleted_at:
+        return jsonify({"code": 404, "message": "用户不存在"}), 404
+
+    email = data.get("email")
+    phone = data.get("phone")
+
+    if email:
+        existing = User.query.filter(User.email == email, User.id != user.id).first()
+        if existing:
+            return jsonify({"code": 400, "message": "邮箱已被使用"}), 400
+        user.email = email
+
+    if phone:
+        existing = User.query.filter(User.phone == phone, User.id != user.id).first()
+        if existing:
+            return jsonify({"code": 400, "message": "手机号已被使用"}), 400
+        user.phone = phone
+
+    user.save()
+
+    log_operation(user.id, user.username, "UPDATE", "profile", user.id, "更新个人资料")
+
+    return jsonify(
+        {
+            "code": 200,
+            "message": "更新成功",
+            "data": {
+                "id": user.id,
+                "username": user.username,
+                "email": user.email,
+                "phone": user.phone,
+                "avatar": user.avatar,
+            },
+        }
+    )
+
+
+ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
+
+
+def allowed_file(filename):
+    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+@auth_bp.route("/avatar", methods=["POST"])
+@jwt_required()
+def upload_avatar():
+    identity = get_jwt_identity()
+    user = User.query.get(int(identity))
+
+    if not user or user.deleted_at:
+        return jsonify({"code": 404, "message": "用户不存在"}), 404
+
+    if "avatar" not in request.files:
+        return jsonify({"code": 400, "message": "未上传文件"}), 400
+
+    file = request.files["avatar"]
+
+    if file.filename == "":
+        return jsonify({"code": 400, "message": "未选择文件"}), 400
+
+    if not allowed_file(file.filename):
+        return jsonify(
+            {
+                "code": 400,
+                "message": "不支持的文件格式，仅支持 png, jpg, jpeg, gif, webp",
+            }
+        ), 400
+
+    upload_folder = os.path.join(current_app.root_path, "static", "avatars")
+    if not os.path.exists(upload_folder):
+        os.makedirs(upload_folder)
+
+    ext = file.filename.rsplit(".", 1)[1].lower()
+    filename = f"{user.id}_{uuid.uuid4().hex[:8]}.{ext}"
+    filepath = os.path.join(upload_folder, filename)
+    file.save(filepath)
+
+    avatar_url = f"/static/avatars/{filename}"
+    user.avatar = avatar_url
+    user.save()
+
+    log_operation(user.id, user.username, "UPDATE", "avatar", user.id, "上传头像")
+
+    return jsonify({"code": 200, "message": "上传成功", "data": {"avatar": avatar_url}})
+
+
+@auth_bp.route("/change-password", methods=["POST"])
 @jwt_required()
 def change_password():
     identity = get_jwt_identity()
     user = User.query.get(int(identity))
     data = request.get_json()
-    
-    old_password = data.get('old_password')
-    new_password = data.get('new_password')
-    
+
+    old_password = data.get("old_password")
+    new_password = data.get("new_password")
+
     if not old_password or not new_password:
-        return jsonify({'code': 400, 'message': '旧密码和新密码不能为空'}), 400
-    
+        return jsonify({"code": 400, "message": "旧密码和新密码不能为空"}), 400
+
     if not user.check_password(old_password):
-        log_operation(user.id, user.username, 'UPDATE', 'password', user.id, '修改密码', 'failed', '旧密码错误')
-        return jsonify({'code': 400, 'message': '旧密码错误'}), 400
-    
+        log_operation(
+            user.id,
+            user.username,
+            "UPDATE",
+            "password",
+            user.id,
+            "修改密码",
+            "failed",
+            "旧密码错误",
+        )
+        return jsonify({"code": 400, "message": "旧密码错误"}), 400
+
     ok, msg = validate_password(new_password)
     if not ok:
-        return jsonify({'code': 400, 'message': msg}), 400
-    
+        return jsonify({"code": 400, "message": msg}), 400
+
     if PasswordHistory.check_password_history(user.id, new_password):
-        return jsonify({'code': 400, 'message': '新密码不能与最近使用的密码相同'}), 400
-    
-    password_hash = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+        return jsonify({"code": 400, "message": "新密码不能与最近使用的密码相同"}), 400
+
+    password_hash = bcrypt.hashpw(
+        new_password.encode("utf-8"), bcrypt.gensalt()
+    ).decode("utf-8")
     PasswordHistory.add_history(user.id, password_hash)
-    
+
     user.set_password(new_password)
-    user.last_password_change = datetime.utcnow()
+    user.last_password_change = datetime.now()
     user.failed_login_attempts = 0
     user.locked_until = None
     user.save()
-    
-    log_operation(user.id, user.username, 'UPDATE', 'password', user.id, '修改密码成功')
-    
-    return jsonify({'code': 200, 'message': '密码修改成功'})
+
+    log_operation(user.id, user.username, "UPDATE", "password", user.id, "修改密码成功")
+
+    return jsonify({"code": 200, "message": "密码修改成功"})

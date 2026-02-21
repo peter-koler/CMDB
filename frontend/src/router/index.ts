@@ -175,6 +175,12 @@ const routes = [
         name: 'NotificationDetail',
         component: () => import('@/views/notifications/detail.vue'),
         meta: { title: '通知详情', icon: 'FileTextOutlined', hideInMenu: true }
+      },
+      {
+        path: 'profile',
+        name: 'Profile',
+        component: () => import('@/views/profile/index.vue'),
+        meta: { title: '个人中心', icon: 'UserOutlined', hideInMenu: true }
       }
     ]
   }

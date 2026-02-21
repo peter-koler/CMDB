@@ -24,7 +24,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-trigger_bp = Blueprint("trigger", __name__, url_prefix="/api")
+trigger_bp = Blueprint("trigger", __name__, url_prefix="/api/v1")
 
 
 @trigger_bp.route("/models/<int:model_id>/triggers", methods=["GET"])
@@ -33,10 +33,10 @@ def get_triggers(model_id):
     """获取模型的触发器列表"""
     model = CmdbModel.query.get(model_id)
     if not model:
-        return jsonify({"error": "模型不存在"}), 404
+        return jsonify({"code": 404, "message": "模型不存在"}), 404
 
     triggers = RelationTrigger.query.filter_by(source_model_id=model_id).all()
-    return jsonify({"data": [t.to_dict() for t in triggers]})
+    return jsonify({"code": 200, "message": "success", "data": [t.to_dict() for t in triggers]})
 
 
 @trigger_bp.route("/models/<int:model_id>/triggers", methods=["POST"])
@@ -45,7 +45,7 @@ def create_trigger(model_id):
     """创建触发器"""
     model = CmdbModel.query.get(model_id)
     if not model:
-        return jsonify({"error": "模型不存在"}), 404
+        return jsonify({"code": 404, "message": "模型不存在"}), 404
 
     data = request.get_json()
 
@@ -57,7 +57,7 @@ def create_trigger(model_id):
     ]
     for field in required_fields:
         if field not in data:
-            return jsonify({"error": f"缺少必填字段: {field}"}), 400
+            return jsonify({"code": 400, "message": f"缺少必填字段: {field}"}), 400
 
     trigger = RelationTrigger(
         name=data["name"],
@@ -73,7 +73,7 @@ def create_trigger(model_id):
     db.session.add(trigger)
     db.session.commit()
 
-    return jsonify({"data": trigger.to_dict()}), 201
+    return jsonify({"code": 201, "message": "success", "data": trigger.to_dict()}), 201
 
 
 @trigger_bp.route("/triggers/<int:trigger_id>", methods=["GET"])
@@ -82,9 +82,9 @@ def get_trigger(trigger_id):
     """获取触发器详情"""
     trigger = RelationTrigger.query.get(trigger_id)
     if not trigger:
-        return jsonify({"error": "触发器不存在"}), 404
+        return jsonify({"code": 404, "message": "触发器不存在"}), 404
 
-    return jsonify({"data": trigger.to_dict()})
+    return jsonify({"code": 200, "message": "success", "data": trigger.to_dict()})
 
 
 @trigger_bp.route("/triggers/<int:trigger_id>", methods=["PUT"])
@@ -93,7 +93,7 @@ def update_trigger(trigger_id):
     """更新触发器"""
     trigger = RelationTrigger.query.get(trigger_id)
     if not trigger:
-        return jsonify({"error": "触发器不存在"}), 404
+        return jsonify({"code": 404, "message": "触发器不存在"}), 404
 
     data = request.get_json()
 
@@ -108,7 +108,7 @@ def update_trigger(trigger_id):
 
     db.session.commit()
 
-    return jsonify({"data": trigger.to_dict()})
+    return jsonify({"code": 200, "message": "success", "data": trigger.to_dict()})
 
 
 @trigger_bp.route("/triggers/<int:trigger_id>", methods=["DELETE"])
@@ -117,12 +117,12 @@ def delete_trigger(trigger_id):
     """删除触发器"""
     trigger = RelationTrigger.query.get(trigger_id)
     if not trigger:
-        return jsonify({"error": "触发器不存在"}), 404
+        return jsonify({"code": 404, "message": "触发器不存在"}), 404
 
     db.session.delete(trigger)
     db.session.commit()
 
-    return "", 204
+    return jsonify({"code": 200, "message": "success"})
 
 
 @trigger_bp.route("/triggers/<int:trigger_id>/logs", methods=["GET"])
@@ -131,7 +131,7 @@ def get_trigger_logs(trigger_id):
     """获取触发器执行日志"""
     trigger = RelationTrigger.query.get(trigger_id)
     if not trigger:
-        return jsonify({"error": "触发器不存在"}), 404
+        return jsonify({"code": 404, "message": "触发器不存在"}), 404
 
     page = request.args.get("page", 1, type=int)
     page_size = request.args.get("page_size", 20, type=int)
@@ -152,6 +152,8 @@ def get_trigger_logs(trigger_id):
 
     return jsonify(
         {
+            "code": 200,
+            "message": "success",
             "data": [log.to_dict() for log in logs],
             "total": total,
             "page": page,
@@ -166,7 +168,7 @@ def trigger_batch_scan(model_id):
     """触发批量扫描"""
     model = CmdbModel.query.get(model_id)
     if not model:
-        return jsonify({"error": "模型不存在"}), 404
+        return jsonify({"code": 404, "message": "模型不存在"}), 404
 
     from threading import Thread
 
@@ -181,7 +183,7 @@ def trigger_batch_scan(model_id):
     thread.daemon = True
     thread.start()
 
-    return jsonify({"message": "任务已触发"}), 202
+    return jsonify({"code": 202, "message": "任务已触发"}), 202
 
 
 @trigger_bp.route("/models/<int:model_id>/batch-scan", methods=["GET"])
@@ -190,12 +192,12 @@ def get_model_batch_scan_tasks(model_id):
     """获取模型的批量扫描任务列表"""
     model = CmdbModel.query.get(model_id)
     if not model:
-        return jsonify({"error": "模型不存在"}), 404
+        return jsonify({"code": 404, "message": "模型不存在"}), 404
 
     status = request.args.get("status")
     tasks = get_model_scan_tasks(model_id, status=status)
 
-    return jsonify({"data": [task.to_dict() for task in tasks]})
+    return jsonify({"code": 200, "message": "success", "data": [task.to_dict() for task in tasks]})
 
 
 @trigger_bp.route("/batch-scan/tasks", methods=["GET"])
@@ -218,6 +220,8 @@ def get_all_batch_scan_tasks():
 
     return jsonify(
         {
+            "code": 200,
+            "message": "success",
             "data": [task.to_dict() for task in tasks],
             "total": total,
             "page": page,
@@ -232,9 +236,9 @@ def get_batch_scan_task(task_id):
     """获取批量扫描任务详情"""
     task = BatchScanTask.query.get(task_id)
     if not task:
-        return jsonify({"error": "任务不存在"}), 404
+        return jsonify({"code": 404, "message": "任务不存在"}), 404
 
-    return jsonify({"data": task.to_dict()})
+    return jsonify({"code": 200, "message": "success", "data": task.to_dict()})
 
 
 @trigger_bp.route("/batch-scan/config/<int:model_id>", methods=["GET"])
@@ -243,7 +247,7 @@ def get_batch_scan_config(model_id):
     """获取模型批量扫描配置"""
     model = CmdbModel.query.get(model_id)
     if not model:
-        return jsonify({"error": "模型不存在"}), 404
+        return jsonify({"code": 404, "message": "模型不存在"}), 404
 
     config = model.get_config()
 
@@ -265,6 +269,8 @@ def get_batch_scan_config(model_id):
 
     return jsonify(
         {
+            "code": 200,
+            "message": "success",
             "data": {
                 "model_id": model_id,
                 "model_name": model.name,
@@ -286,7 +292,7 @@ def update_batch_scan_config(model_id):
     """更新模型批量扫描配置"""
     model = CmdbModel.query.get(model_id)
     if not model:
-        return jsonify({"error": "模型不存在"}), 404
+        return jsonify({"code": 404, "message": "模型不存在"}), 404
 
     data = request.get_json()
 
@@ -303,7 +309,7 @@ def update_batch_scan_config(model_id):
             CronTrigger.from_crontab(cron)
             config["batch_scan_cron"] = cron
         except Exception as e:
-            return jsonify({"error": f"无效的 Cron 表达式: {e}"}), 400
+            return jsonify({"code": 400, "message": f"无效的 Cron 表达式: {e}"}), 400
 
     model.set_config(config)
     db.session.commit()

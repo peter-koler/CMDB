@@ -23,8 +23,8 @@ class ModelField(db.Model):
     date_format = db.Column(db.String(50))  # 时间格式，如 'YYYY-MM-DD' 或 'YYYY-MM-DD HH:mm:ss'
     sort_order = db.Column(db.Integer, default=0)
     config = db.Column(db.Text, default='{}')  # JSON格式额外配置
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
     
     def to_dict(self):
         return {

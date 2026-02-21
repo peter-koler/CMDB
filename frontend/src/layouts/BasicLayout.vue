@@ -161,14 +161,17 @@
             <a-dropdown>
               <span class="header-action user-info">
                 <a-avatar size="small" class="user-avatar">
-                  {{ userInfo?.username?.charAt(0)?.toUpperCase() }}
+                  <template #icon>
+                    <img v-if="userInfo?.avatar" :src="avatarFullUrl" alt="avatar" />
+                    <span v-else>{{ userInfo?.username?.charAt(0)?.toUpperCase() }}</span>
+                  </template>
                 </a-avatar>
                 <span class="user-name">{{ userInfo?.username }}</span>
                 <DownOutlined class="dropdown-icon" />
               </span>
               <template #overlay>
                 <a-menu class="user-menu">
-                  <a-menu-item key="profile">
+                  <a-menu-item key="profile" @click="navigateTo('/profile')">
                     <UserOutlined />
                     <span>{{ t('user.profile') }}</span>
                   </a-menu-item>
@@ -248,6 +251,11 @@ const notificationVisible = ref(false)
 
 const userInfo = computed(() => userStore.userInfo)
 const unreadCount = computed(() => notificationStore.unreadCount)
+const avatarFullUrl = computed(() => {
+  if (!userInfo.value?.avatar) return ''
+  if (userInfo.value.avatar.startsWith('http')) return userInfo.value.avatar
+  return getBaseURL() + userInfo.value.avatar
+})
 
 onMounted(async () => {
   if (!userStore.userInfo) {

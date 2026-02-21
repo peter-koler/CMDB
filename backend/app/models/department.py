@@ -14,8 +14,8 @@ class Department(db.Model):
     sort_order = db.Column(db.Integer, default=0)
     path = db.Column(db.String(500), default='')
     role_ids = db.Column(db.Text, default='[]')
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
     
     children = db.relationship('Department', backref=db.backref('parent', remote_side=[id]), lazy='dynamic')
     department_users = db.relationship('DepartmentUser', backref='department', lazy='dynamic', cascade='all, delete-orphan')
@@ -91,7 +91,7 @@ class DepartmentRole(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     department_id = db.Column(db.Integer, db.ForeignKey('departments.id'), nullable=False)
     role_id = db.Column(db.Integer, db.ForeignKey('roles.id'), nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.now)
     
     role = db.relationship('Role', backref='department_links')
     
@@ -119,7 +119,7 @@ class DepartmentUser(db.Model):
     department_id = db.Column(db.Integer, db.ForeignKey('departments.id'), nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     is_leader = db.Column(db.Boolean, default=False)
-    joined_at = db.Column(db.DateTime, default=datetime.utcnow)
+    joined_at = db.Column(db.DateTime, default=datetime.now)
     
     # 用户关系
     user = db.relationship('User', backref='department_links', lazy='joined')

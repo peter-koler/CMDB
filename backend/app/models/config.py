@@ -9,7 +9,7 @@ class SystemConfig(db.Model):
     config_value = db.Column(db.Text, nullable=False)
     description = db.Column(db.Text)
     updated_by = db.Column(db.Integer, db.ForeignKey('users.id'))
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
     
     @classmethod
     def get_value(cls, key, default=None):

@@ -39,3 +39,31 @@ export const changePassword = (oldPassword: string, newPassword: string) => {
     data: { old_password: oldPassword, new_password: newPassword }
   })
 }
+
+export const getProfile = () => {
+  return request({
+    url: '/auth/profile',
+    method: 'GET'
+  })
+}
+
+export const updateProfile = (data: { email?: string; phone?: string }) => {
+  return request({
+    url: '/auth/profile',
+    method: 'PUT',
+    data
+  })
+}
+
+export const uploadAvatar = (file: File) => {
+  const formData = new FormData()
+  formData.append('avatar', file)
+  return request({
+    url: '/auth/avatar',
+    method: 'POST',
+    data: formData,
+    headers: {
+      'Content-Type': 'multipart/form-data'
+    }
+  })
+}

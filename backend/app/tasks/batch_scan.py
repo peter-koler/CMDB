@@ -96,7 +96,7 @@ def batch_scan_model(
         )
 
         task.status = "running"
-        task.started_at = datetime.utcnow()
+        task.started_at = datetime.now()
         db.session.commit()
 
         triggers = RelationTrigger.query.filter_by(
@@ -105,7 +105,7 @@ def batch_scan_model(
 
         if not triggers:
             task.status = "completed"
-            task.completed_at = datetime.utcnow()
+            task.completed_at = datetime.now()
             db.session.commit()
             return {"status": "completed", "message": "没有活跃的触发器"}
 
@@ -163,7 +163,7 @@ def batch_scan_model(
             db.session.commit()
 
         task.status = "completed"
-        task.completed_at = datetime.utcnow()
+        task.completed_at = datetime.now()
         db.session.commit()
 
         logger.info(f"批量扫描完成: model_id={model_id}, result={result}")
@@ -179,7 +179,7 @@ def batch_scan_model(
         if "task" in locals():
             task.status = "failed"
             task.error_message = str(e)
-            task.completed_at = datetime.utcnow()
+            task.completed_at = datetime.now()
             db.session.commit()
 
         return {"status": "failed", "message": str(e)}

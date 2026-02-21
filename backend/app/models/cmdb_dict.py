@@ -12,8 +12,8 @@ class CmdbDictType(db.Model):
     description = db.Column(db.String(500))
     enabled = db.Column(db.Boolean, default=True, nullable=False)
     sort_order = db.Column(db.Integer, default=0, nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
     created_by = db.Column(db.Integer, db.ForeignKey('users.id'))
 
     items = db.relationship(
@@ -56,8 +56,8 @@ class CmdbDictItem(db.Model):
     label = db.Column(db.String(100), nullable=False)
     enabled = db.Column(db.Boolean, default=True, nullable=False)
     sort_order = db.Column(db.Integer, default=0, nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
     created_by = db.Column(db.Integer, db.ForeignKey('users.id'))
 
     children = db.relationship(

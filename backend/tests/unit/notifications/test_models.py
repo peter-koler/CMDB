@@ -156,7 +156,7 @@ class TestNotificationRecipient:
             notification_id=test_notification.id,
             user_id=test_user.id,
             is_read=True,
-            read_at=datetime.utcnow()
+            read_at=datetime.now()
         )
         db_session.add(recipient)
         db_session.commit()

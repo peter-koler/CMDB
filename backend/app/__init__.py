@@ -4,6 +4,7 @@ from flask_jwt_extended import JWTManager
 from flask_cors import CORS
 from flask_migrate import Migrate
 from config import config
+import os
 
 db = SQLAlchemy()
 jwt = JWTManager()
@@ -13,7 +14,8 @@ socketio = None
 
 def create_app(config_name="default"):
     global socketio
-    app = Flask(__name__)
+    static_folder = os.path.join(os.path.dirname(__file__), "static")
+    app = Flask(__name__, static_folder=static_folder, static_url_path="/static")
     app.config.from_object(config[config_name])
 
     db.init_app(app)

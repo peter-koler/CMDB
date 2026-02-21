@@ -13,11 +13,12 @@
 - ✅ 批量扫描配置页面
 - ✅ 触发器列表管理页面
 - ✅ 批量扫描历史页面
+- ✅ 模型属性字段从 form_config 获取
+- ✅ 后端 API 返回格式统一
 
 **待完成功能**:
 - ⏳ 触发器匹配逻辑单元测试
 - ⏳ 批量扫描任务单元测试
-
 ## 背景与目标
 系统需要在新增或更新 CI 时自动生成符合规则的关系，并支持后台批量扫描历史数据，定期补齐缺失关系，降低人工维护成本，确保模型关系一致性。
 
@@ -227,6 +228,69 @@ class BatchScanTask(db.Model):
 4. Cron 配置修改后定时任务生效
 5. 触发器执行失败可在日志中查看原因
 6. 触发器列表页面管理功能
+
+## 问题修复记录
+
+### 2026-02-21 修复记录
+
+#### 1. 模型字段下拉框为空问题
+**问题描述**: 新增触发器时，源字段和目标字段下拉框无法获取模型属性信息。
+
+**原因分析**:
+- 模型的字段信息存储在 `form_config` 字段中（JSON 字符串格式）
+- `fields` 关系使用 `lazy="dynamic"`，需要调用 `.all()` 方法
+- 前端仅从 `res.data.fields` 获取，未解析 `form_config`
+
+**修复方案**:
+1. 后端 `cmdb_model.py` 的 `to_full_dict()` 方法中，将 `self.fields` 改为 `self.fields.all()`
+2. 前端 `relation-trigger/index.vue` 的 `fetchModelFields()` 方法增加 `form_config` 解析逻辑：
+   ```typescript
+   if (fields.length === 0 && res.data?.form_config) {
+     const formConfig = typeof res.data.form_config === 'string' 
+       ? JSON.parse(res.data.form_config) 
+       : res.data.form_config
+     fields = formConfig.map((item: any) => ({
+       code: item.props?.code,
+       name: item.props?.label
+     })).filter((f: any) => f.code && f.name)
+   }
+   ```
+
+**涉及文件**:
+- `backend/app/models/cmdb_model.py`
+- `frontend/src/views/config/relation-trigger/index.vue`
+
+#### 2. 批量扫描配置 API 404 错误
+**问题描述**: 扫描配置页面启用批量扫描时，API 返回 404。
+
+**原因分析**:
+- `trigger_bp` 的 `url_prefix` 设置为 `/api`，而前端请求的是 `/api/v1/batch-scan/config/{id}`
+
+**修复方案**:
+将 `trigger_bp` 的 `url_prefix` 从 `/api` 改为 `/api/v1`
+
+**涉及文件**:
+- `backend/app/routes/trigger.py`
+
+#### 3. 批量扫描配置保存无响应
+**问题描述**: 点击确定后没有成功/失败提示。
+
+**原因分析**:
+- 后端 API 返回格式不统一，缺少 `code` 字段
+- 前端检查 `res.code === 200`，但后端返回 `{"data": {...}}`
+
+**修复方案**:
+统一所有 API 返回格式为：
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {...}
+}
+```
+
+**涉及文件**:
+- `backend/app/routes/trigger.py` (所有 API 端点)
 
 ## 测试覆盖
 

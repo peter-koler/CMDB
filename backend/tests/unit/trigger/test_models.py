@@ -111,14 +111,14 @@ class TestBatchScanTask:
         db_session.commit()
 
         task.status = "running"
-        task.started_at = datetime.utcnow()
+        task.started_at = datetime.now()
         db_session.commit()
 
         assert task.status == "running"
         assert task.started_at is not None
 
         task.status = "completed"
-        task.completed_at = datetime.utcnow()
+        task.completed_at = datetime.now()
         task.total_count = 100
         task.processed_count = 100
         task.created_count = 50

@@ -60,6 +60,8 @@ dist-ssr/
 
 # Uploads
 backend/uploads/
+backend/app/static/avatars/*
+!backend/app/static/avatars/.gitkeep
 
 # Tools
 tools/

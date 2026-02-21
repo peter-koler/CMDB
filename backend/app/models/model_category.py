@@ -10,8 +10,8 @@ class ModelCategory(db.Model):
     code = db.Column(db.String(100), unique=True, nullable=False)
     parent_id = db.Column(db.Integer, db.ForeignKey('model_categories.id'), nullable=True)
     sort_order = db.Column(db.Integer, default=0)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
     
     # 自关联关系
     children = db.relationship('ModelCategory', backref=db.backref('parent', remote_side=[id]), lazy='dynamic')

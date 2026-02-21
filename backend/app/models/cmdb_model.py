@@ -22,9 +22,9 @@ class CmdbModel(db.Model):
     form_config = db.Column(
         db.Text, default="[]"
     )  # JSON格式存储表单配置（用于拖拽设计器）
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(
-        db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        db.DateTime, default=datetime.now, onupdate=datetime.now
     )
     created_by = db.Column(db.Integer, db.ForeignKey("users.id"))
 
@@ -81,7 +81,7 @@ class CmdbModel(db.Model):
     def to_full_dict(self):
         data = self.to_dict()
         data["regions"] = [region.to_dict() for region in self.regions]
-        data["fields"] = [field.to_dict() for field in self.fields]
+        data["fields"] = [field.to_dict() for field in self.fields.all()]
         return data
 
     def save(self):
@@ -114,7 +114,7 @@ class ModelType(db.Model):
     name = db.Column(db.String(50), nullable=False)
     code = db.Column(db.String(50), unique=True, nullable=False)
     description = db.Column(db.String(200))
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.now)
 
     models = db.relationship("CmdbModel", backref="model_type", lazy="dynamic")
 

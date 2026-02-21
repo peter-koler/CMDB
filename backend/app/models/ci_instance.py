@@ -20,9 +20,9 @@ class CiInstance(db.Model):
     )
     created_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
     updated_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(
-        db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        db.DateTime, default=datetime.now, onupdate=datetime.now
     )
 
     # 关联
@@ -153,7 +153,7 @@ class CiHistory(db.Model):
     operator_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
     operator_name = db.Column(db.String(100))
     ip_address = db.Column(db.String(50))
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.now, index=True)
 
     # 关联
     ci = db.relationship("CiInstance", backref="histories", lazy="joined")

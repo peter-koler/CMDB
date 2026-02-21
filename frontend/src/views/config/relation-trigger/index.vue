@@ -309,7 +309,20 @@ const fetchModelFields = async (modelId: number, isSource: boolean) => {
   try {
     const res = await getModelDetail(modelId)
     if (res.code === 200) {
-      const fields = res.data.fields || []
+      let fields = res.data?.fields || []
+      if (fields.length === 0 && res.data?.form_config) {
+        try {
+          const formConfig = typeof res.data.form_config === 'string' 
+            ? JSON.parse(res.data.form_config) 
+            : res.data.form_config
+          fields = formConfig.map((item: any) => ({
+            code: item.props?.code,
+            name: item.props?.label
+          })).filter((f: any) => f.code && f.name)
+        } catch (e) {
+          console.error('parse form_config error:', e)
+        }
+      }
       if (isSource) {
         sourceModelFields.value = fields
       } else {
@@ -317,7 +330,7 @@ const fetchModelFields = async (modelId: number, isSource: boolean) => {
       }
     }
   } catch (error) {
-    console.error(error)
+    console.error('fetchModelFields error:', error)
   } finally {
     if (isSource) {
       sourceFieldsLoading.value = false

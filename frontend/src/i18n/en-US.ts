@@ -16,7 +16,9 @@ export default {
     info: 'Info',
     logout: 'Logout',
     darkMode: 'Dark Mode',
-    lightMode: 'Light Mode'
+    lightMode: 'Light Mode',
+    saveSuccess: 'Saved successfully',
+    saveFailed: 'Save failed'
   },
   login: {
     title: 'IT Operations Platform',
@@ -66,7 +68,30 @@ export default {
     statusActive: 'Active',
     statusLocked: 'Locked',
     statusDisabled: 'Disabled',
-    profile: 'Profile'
+    profile: 'Profile',
+    admin: 'Admin',
+    user: 'User'
+  },
+  profile: {
+    basicInfo: 'Basic Information',
+    changeAvatar: 'Change Avatar',
+    emailPlaceholder: 'Please enter email address',
+    phonePlaceholder: 'Please enter phone number',
+    invalidEmail: 'Please enter a valid email address',
+    invalidPhone: 'Please enter a valid phone number',
+    changePassword: 'Change Password',
+    oldPassword: 'Old Password',
+    newPassword: 'New Password',
+    confirmPassword: 'Confirm Password',
+    oldPasswordRequired: 'Please enter old password',
+    newPasswordRequired: 'Please enter new password',
+    confirmPasswordRequired: 'Please confirm new password',
+    passwordMismatch: 'Passwords do not match',
+    passwordChanged: 'Password changed successfully',
+    passwordChangeFailed: 'Failed to change password',
+    avatarTooLarge: 'Avatar file size cannot exceed 2MB',
+    avatarUpdated: 'Avatar updated successfully',
+    avatarUploadFailed: 'Failed to upload avatar'
   },
   config: {
     title: 'System Config',

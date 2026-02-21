@@ -11,8 +11,8 @@ class ModelRegion(db.Model):
     code = db.Column(db.String(100), nullable=False)
     layout = db.Column(db.String(20), default='2')  # 1, 2, 3, 4 列
     sort_order = db.Column(db.Integer, default=0)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
     
     fields = db.relationship('ModelField', backref='region', lazy='dynamic')
     

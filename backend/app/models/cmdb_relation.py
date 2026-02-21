@@ -26,9 +26,9 @@ class RelationType(db.Model):
     description = db.Column(db.Text)
     style = db.Column(db.Text, default="{}")
 
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(
-        db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        db.DateTime, default=datetime.now, onupdate=datetime.now
     )
 
     def to_dict(self):
@@ -82,9 +82,9 @@ class CmdbRelation(db.Model):
 
     source_type = db.Column(db.String(20), default="manual")
 
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(
-        db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        db.DateTime, default=datetime.now, onupdate=datetime.now
     )
 
     source_ci = db.relationship(
@@ -159,9 +159,9 @@ class RelationTrigger(db.Model):
     is_active = db.Column(db.Boolean, default=True)
     description = db.Column(db.Text)
 
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(
-        db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        db.DateTime, default=datetime.now, onupdate=datetime.now
     )
 
     source_model = db.relationship("CmdbModel", foreign_keys=[source_model_id])
@@ -220,7 +220,7 @@ class TriggerExecutionLog(db.Model):
     )
     status = db.Column(db.String(20), nullable=False)
     message = db.Column(db.Text, nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.now)
 
     trigger = db.relationship("RelationTrigger", backref="execution_logs")
     source_ci = db.relationship("CiInstance", foreign_keys=[source_ci_id])
@@ -273,7 +273,7 @@ class BatchScanTask(db.Model):
     trigger_source = db.Column(db.String(20), nullable=False)
     started_at = db.Column(db.DateTime, nullable=True)
     completed_at = db.Column(db.DateTime, nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.now)
     created_by = db.Column(
         db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )

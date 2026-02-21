@@ -800,7 +800,7 @@ def export_model(id):
     
     export_data = {
         'model': model.to_full_dict(),
-        'export_time': datetime.utcnow().isoformat(),
+        'export_time': datetime.now().isoformat(),
         'version': '1.0'
     }
     
