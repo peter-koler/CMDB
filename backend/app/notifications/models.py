@@ -2,7 +2,7 @@ from app import db
 from datetime import datetime, timezone
 import markdown
 import bleach
-from markupsafe import Markup
+import re
 
 def get_local_now():
     """获取本地时间（不带时区信息，用于数据库存储）"""
@@ -143,8 +143,18 @@ class Notification(db.Model):
         """将内容渲染为安全HTML（支持富文本）"""
         if not content:
             return ""
+        sanitized = re.sub(
+            r"<(script|style)[^>]*>.*?</\1>",
+            "",
+            content,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        html = markdown.markdown(sanitized)
         clean_html = bleach.clean(
-            content, tags=ALLOWED_TAGS, attributes=ALLOWED_ATTRIBUTES
+            html,
+            tags=ALLOWED_TAGS,
+            attributes=ALLOWED_ATTRIBUTES,
+            strip=True,
         )
         return clean_html
 
@@ -226,6 +236,8 @@ class NotificationRecipient(db.Model):
     def to_dict(self, include_notification=True):
         data = {
             "id": self.id,
+            "notification_id": self.notification_id,
+            "user_id": self.user_id,
             "is_read": self.is_read,
             "read_at": format_datetime(self.read_at),
             "delivery_status": self.delivery_status,
@@ -298,12 +310,20 @@ class NotificationTemplate(db.Model):
 
     def render(self, variables_dict):
         """渲染模板"""
-        try:
-            title = self.title_template.format(**variables_dict)
-            content = self.content_template.format(**variables_dict)
-            return title, content
-        except KeyError as e:
-            raise ValueError(f"Missing template variable: {e}")
+        pattern = re.compile(r"{{\s*(\w+)\s*}}")
+
+        def replace(template):
+            def replacer(match):
+                key = match.group(1)
+                if key not in variables_dict:
+                    raise ValueError(f"Missing template variable: {key}")
+                return str(variables_dict[key])
+
+            return pattern.sub(replacer, template)
+
+        title = replace(self.title_template)
+        content = replace(self.content_template)
+        return title, content
 
     def to_dict(self):
         return {

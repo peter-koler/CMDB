@@ -1,9 +1,12 @@
 """通知模块REST API端点"""
 
-from flask import Blueprint, request, jsonify, current_app
-from flask_jwt_extended import jwt_required, get_jwt_identity
+import os
+import uuid
 from datetime import datetime
-from typing import Optional
+
+from flask import Blueprint, request, jsonify, current_app, send_from_directory
+from flask_jwt_extended import jwt_required, get_jwt_identity
+from werkzeug.utils import secure_filename
 
 from app import db
 from app.models import User
@@ -11,9 +14,11 @@ from app.notifications.services import (
     NotificationService,
     NotificationTypeService,
     NotificationTemplateService,
-    init_notification_module,
 )
-from app.notifications.models import NotificationType, NotificationTemplate
+from app.notifications.models import (
+    NotificationAttachment,
+    NotificationRecipient,
+)
 from app.notifications.permissions import (
     validate_sender_permission,
     NotificationPermissionError,
@@ -190,14 +195,9 @@ def send_broadcast():
 def list_sent_notifications():
     """获取发送的通知列表（管理员/发送者查看）"""
     try:
-        sender_id = int(get_jwt_identity())
-
         # 获取查询参数
         page = request.args.get("page", 1, type=int)
         page_size = request.args.get("page_size", 20, type=int)
-        date_from = request.args.get("date_from")
-        date_to = request.args.get("date_to")
-        type_id = request.args.get("type_id", type=int)
 
         # TODO: 实现发送通知列表查询
         # 这里简化处理，实际应该查询Notification表
@@ -227,8 +227,6 @@ def list_sent_notifications():
 def get_notification(notification_id: int):
     """获取通知详情"""
     try:
-        user_id = int(get_jwt_identity())
-
         # TODO: 实现通知详情查询
 
         return jsonify({"code": 200, "data": {}})
@@ -696,12 +694,6 @@ def preview_template(template_id: int):
 
 # ==================== 附件管理 ====================
 
-import os
-import uuid
-from werkzeug.utils import secure_filename
-from flask import send_from_directory
-from app.notifications.models import NotificationAttachment, Notification
-
 UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "uploads", "notifications")
 ALLOWED_EXTENSIONS = {'txt', 'pdf', 'png', 'jpg', 'jpeg', 'gif', 'doc', 'docx', 'xls', 'xlsx', 'zip', 'rar'}
 
@@ -791,6 +783,3 @@ def download_attachment(attachment_id: int):
     except Exception as e:
         current_app.logger.error(f"下载附件失败: {e}")
         return jsonify({"code": 500, "message": "下载失败"}), 500
-
-
-from app.notifications.models import NotificationRecipient

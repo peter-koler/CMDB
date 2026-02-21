@@ -3,7 +3,12 @@ from datetime import datetime
 from collections import deque
 import csv
 import io
-from app.models.cmdb_relation import RelationType, CmdbRelation, RelationTrigger
+from app.models.cmdb_relation import (
+    RelationType,
+    CmdbRelation,
+    RelationTrigger,
+    TriggerExecutionLog,
+)
 from app.models.ci_instance import CiInstance
 from app.models.department import Department
 from app.models.role import UserRole, Role
@@ -924,6 +929,9 @@ def update_relation_trigger(id):
 def delete_relation_trigger(id):
     """删除触发器"""
     trigger = RelationTrigger.query.get_or_404(id)
+    TriggerExecutionLog.query.filter_by(trigger_id=id).delete(
+        synchronize_session=False
+    )
     trigger.delete()
     
     return jsonify({

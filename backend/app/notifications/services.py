@@ -1,8 +1,8 @@
 """通知模块业务服务层"""
 
 from typing import List, Optional, Dict, Any, Tuple
-from datetime import datetime, timedelta, timezone
-from sqlalchemy import func, or_, and_
+from datetime import datetime, timedelta
+from sqlalchemy import or_
 from flask import current_app
 
 from app import db
@@ -16,10 +16,9 @@ from app.notifications.models import (
     init_default_notification_types,
     get_local_now,
 )
-from app.notifications.utils import render_markdown, validate_notification_content
+from app.notifications.utils import validate_notification_content
 from app.notifications.websocket import (
     emit_to_user,
-    emit_to_users,
     emit_read_status,
     emit_unread_status,
     emit_read_all,

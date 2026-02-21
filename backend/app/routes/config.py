@@ -2,7 +2,6 @@ import os
 import uuid
 from flask import Blueprint, request, jsonify, current_app, send_from_directory
 from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
-from werkzeug.utils import secure_filename
 from app.models.config import SystemConfig
 from app.routes.auth import log_operation
 
@@ -118,7 +117,7 @@ def upload_logo():
         if os.path.exists(old_filepath):
             try:
                 os.remove(old_filepath)
-            except:
+            except OSError:
                 pass
 
     # 保存文件
@@ -163,7 +162,7 @@ def delete_logo():
         if os.path.exists(old_filepath):
             try:
                 os.remove(old_filepath)
-            except:
+            except OSError:
                 pass
 
     # 清空配置

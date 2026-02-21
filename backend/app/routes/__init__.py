@@ -8,6 +8,7 @@ from app.routes.role import role_bp
 from app.routes.ci_instance import ci_bp
 from app.routes.cmdb_relation import cmdb_relation_bp
 from app.notifications.api import notifications_bp
+from app.routes.trigger import trigger_bp
 
 
 def register_routes(app):
@@ -21,3 +22,4 @@ def register_routes(app):
     app.register_blueprint(ci_bp)
     app.register_blueprint(cmdb_relation_bp)
     app.register_blueprint(notifications_bp)
+    app.register_blueprint(trigger_bp)

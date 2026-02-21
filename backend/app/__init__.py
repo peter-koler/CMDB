@@ -23,6 +23,7 @@ def create_app(config_name="default"):
 
     # 初始化WebSocket
     from app.notifications.websocket import init_socketio
+
     socketio = init_socketio(app)
 
     # JWT error handlers
@@ -56,15 +57,16 @@ def create_app(config_name="default"):
 
     with app.app_context():
         db.create_all()
-        init_default_data()
+        init_default_data(app)
 
     return app
 
 
-def init_default_data():
+def init_default_data(app):
     from app.models.user import User
     from app.models.config import SystemConfig
     from app.notifications.models import init_default_notification_types
+    from app.tasks.scheduler import init_scheduler
 
     admin = User.query.filter_by(username="admin").first()
     if not admin:
@@ -98,3 +100,6 @@ def init_default_data():
 
     # 初始化默认通知类型
     init_default_notification_types()
+
+    # 初始化调度器
+    init_scheduler(app)

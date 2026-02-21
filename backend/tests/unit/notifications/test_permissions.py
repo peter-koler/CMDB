@@ -9,7 +9,7 @@ from app.notifications.permissions import (
     NotificationPermissionError,
     get_accessible_departments
 )
-from app.models import User, Department
+from app.models import Department
 
 
 class TestCanSendToUser:

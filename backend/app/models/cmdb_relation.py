@@ -12,28 +12,19 @@ class RelationType(db.Model):
     __tablename__ = "relation_types"
 
     id = db.Column(db.Integer, primary_key=True)
-    code = db.Column(
-        db.String(50), unique=True, nullable=False, index=True
-    )  # 唯一编码，如 runs_on
-    name = db.Column(db.String(100), nullable=False)  # 显示名称
-    source_label = db.Column(db.String(100), nullable=False)  # 源端描述，如 "运行"
-    target_label = db.Column(db.String(100), nullable=False)  # 目标端描述，如 "承载"
-    direction = db.Column(
-        db.String(20), default="directed"
-    )  # directed(有向), bidirectional(双向)
+    code = db.Column(db.String(50), unique=True, nullable=False, index=True)
+    name = db.Column(db.String(100), nullable=False)
+    source_label = db.Column(db.String(100), nullable=False)
+    target_label = db.Column(db.String(100), nullable=False)
+    direction = db.Column(db.String(20), default="directed")
 
-    # 新增字段
-    source_model_ids = db.Column(db.Text, default="[]")  # JSON数组，允许的源模型ID列表
-    target_model_ids = db.Column(
-        db.Text, default="[]"
-    )  # JSON数组，允许的目标模型ID列表
-    cardinality = db.Column(
-        db.String(20), default="many_many"
-    )  # one_one/one_many/many_many
-    allow_self_loop = db.Column(db.Boolean, default=False)  # 是否允许自环
+    source_model_ids = db.Column(db.Text, default="[]")
+    target_model_ids = db.Column(db.Text, default="[]")
+    cardinality = db.Column(db.String(20), default="many_many")
+    allow_self_loop = db.Column(db.Boolean, default=False)
 
     description = db.Column(db.Text)
-    style = db.Column(db.Text, default="{}")  # JSON配置，前端拓扑图样式（颜色、线条等）
+    style = db.Column(db.Text, default="{}")
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(
@@ -89,7 +80,6 @@ class CmdbRelation(db.Model):
         db.Integer, db.ForeignKey("relation_types.id"), nullable=False
     )
 
-    # 关系来源：manual(手动), reference(引用属性自动), rule(规则触发器自动)
     source_type = db.Column(db.String(20), default="manual")
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -97,7 +87,6 @@ class CmdbRelation(db.Model):
         db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
     )
 
-    # 关联对象
     source_ci = db.relationship(
         "CiInstance", foreign_keys=[source_ci_id], backref="source_relations"
     )
@@ -150,23 +139,21 @@ class RelationTrigger(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
 
-    # 触发范围：源模型 -> 目标模型
     source_model_id = db.Column(
-        db.Integer, db.ForeignKey("cmdb_models.id"), nullable=False
+        db.Integer,
+        db.ForeignKey("cmdb_models.id", ondelete="SET NULL"),
+        nullable=True,
     )
     target_model_id = db.Column(
-        db.Integer, db.ForeignKey("cmdb_models.id"), nullable=False
+        db.Integer,
+        db.ForeignKey("cmdb_models.id", ondelete="SET NULL"),
+        nullable=True,
     )
     relation_type_id = db.Column(
         db.Integer, db.ForeignKey("relation_types.id"), nullable=False
     )
 
-    # 触发类型：reference(引用属性), expression(规则表达式)
     trigger_type = db.Column(db.String(20), default="expression")
-
-    # 触发条件 (JSON)
-    # reference示例: {"source_field": "host_id", "target_field": "id"}
-    # expression示例: {"operator": "and", "rules": [{"field": "ip", "op": "eq", "target_field": "manage_ip"}]}
     trigger_condition = db.Column(db.Text, nullable=False)
 
     is_active = db.Column(db.Boolean, default=True)
@@ -200,6 +187,133 @@ class RelationTrigger(db.Model):
             "is_active": self.is_active,
             "description": self.description,
             "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+    def save(self):
+        db.session.add(self)
+        db.session.commit()
+
+    def delete(self):
+        db.session.delete(self)
+        db.session.commit()
+
+
+class TriggerExecutionLog(db.Model):
+    """
+    触发器执行日志
+    记录每次触发器执行的详细信息
+    """
+
+    __tablename__ = "trigger_execution_logs"
+
+    id = db.Column(db.Integer, primary_key=True)
+    trigger_id = db.Column(
+        db.Integer,
+        db.ForeignKey("relation_triggers.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    source_ci_id = db.Column(
+        db.Integer, db.ForeignKey("ci_instances.id", ondelete="CASCADE"), nullable=False
+    )
+    target_ci_id = db.Column(
+        db.Integer, db.ForeignKey("ci_instances.id", ondelete="SET NULL"), nullable=True
+    )
+    status = db.Column(db.String(20), nullable=False)
+    message = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    trigger = db.relationship("RelationTrigger", backref="execution_logs")
+    source_ci = db.relationship("CiInstance", foreign_keys=[source_ci_id])
+    target_ci = db.relationship("CiInstance", foreign_keys=[target_ci_id])
+
+    __table_args__ = (
+        db.Index("idx_trigger_log_trigger_id", "trigger_id"),
+        db.Index("idx_trigger_log_created_at", "created_at"),
+        db.Index("idx_trigger_log_status", "status"),
+    )
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "trigger_id": self.trigger_id,
+            "trigger_name": self.trigger.name if self.trigger else None,
+            "source_ci_id": self.source_ci_id,
+            "source_ci_name": self.source_ci.name if self.source_ci else None,
+            "target_ci_id": self.target_ci_id,
+            "target_ci_name": self.target_ci.name if self.target_ci else None,
+            "status": self.status,
+            "message": self.message,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+    def save(self):
+        db.session.add(self)
+        db.session.commit()
+
+
+class BatchScanTask(db.Model):
+    """
+    批量扫描任务
+    跟踪批量扫描任务的执行状态和历史
+    """
+
+    __tablename__ = "batch_scan_tasks"
+
+    id = db.Column(db.Integer, primary_key=True)
+    model_id = db.Column(
+        db.Integer, db.ForeignKey("cmdb_models.id", ondelete="CASCADE"), nullable=False
+    )
+    status = db.Column(db.String(20), nullable=False, default="pending")
+    total_count = db.Column(db.Integer, default=0)
+    processed_count = db.Column(db.Integer, default=0)
+    created_count = db.Column(db.Integer, default=0)
+    skipped_count = db.Column(db.Integer, default=0)
+    failed_count = db.Column(db.Integer, default=0)
+    error_message = db.Column(db.Text, nullable=True)
+    trigger_source = db.Column(db.String(20), nullable=False)
+    started_at = db.Column(db.DateTime, nullable=True)
+    completed_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_by = db.Column(
+        db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
+    model = db.relationship("CmdbModel", backref="batch_scan_tasks")
+    creator = db.relationship("User", backref="batch_scan_tasks")
+
+    __table_args__ = (
+        db.Index("idx_batch_scan_model_id", "model_id"),
+        db.Index("idx_batch_scan_status", "status"),
+        db.Index("idx_batch_scan_created_at", "created_at"),
+    )
+
+    @property
+    def duration_seconds(self):
+        if self.started_at and self.completed_at:
+            return int((self.completed_at - self.started_at).total_seconds())
+        return None
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "model_id": self.model_id,
+            "model_name": self.model.name if self.model else None,
+            "status": self.status,
+            "total_count": self.total_count,
+            "processed_count": self.processed_count,
+            "created_count": self.created_count,
+            "skipped_count": self.skipped_count,
+            "failed_count": self.failed_count,
+            "error_message": self.error_message,
+            "trigger_source": self.trigger_source,
+            "started_at": self.started_at.isoformat() if self.started_at else None,
+            "completed_at": self.completed_at.isoformat()
+            if self.completed_at
+            else None,
+            "duration_seconds": self.duration_seconds,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "created_by": self.created_by,
+            "created_by_name": self.creator.username if self.creator else None,
         }
 
     def save(self):

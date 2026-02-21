@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify
-from app.models.department import Department, DepartmentUser, DepartmentRole
-from app.models.role import Role, UserRole
+from app.models.department import Department, DepartmentUser
+from app.models.role import UserRole
 from app.models.user import User
 from app import db
 from app.utils.auth import token_required, admin_required

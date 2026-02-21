@@ -1,9 +1,8 @@
 """通知模块权限控制"""
 
 from typing import Optional
-from flask import current_app
+
 from app.models import User, Department
-from app.notifications.models import NotificationType
 
 
 class NotificationPermissionError(Exception):
@@ -100,8 +99,6 @@ def validate_sender_permission(sender_id: int, recipient_type: str,
     Raises:
         NotificationPermissionError: 当权限验证失败时
     """
-    from app import db
-
     sender = User.query.get(sender_id)
     if not sender:
         raise NotificationPermissionError("发送者不存在")

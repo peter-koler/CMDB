@@ -50,7 +50,7 @@
           </a-menu-item>
         </a-sub-menu>
         
-        <a-sub-menu key="config" v-if="hasAnyPermission(['cmdb:model', 'cmdb:relation', 'cmdb:dict'])">
+        <a-sub-menu key="config" v-if="hasAnyPermission(['cmdb:model', 'cmdb:relation', 'cmdb:dict', 'cmdb:batch-scan'])">
           <template #icon><AppstoreOutlined /></template>
           <template #title>{{ t('menu.config') }}</template>
           <a-menu-item key="model" v-if="hasPermission('cmdb:model')" @click="navigateTo('/config/model')">
@@ -64,6 +64,14 @@
           <a-menu-item key="relation-trigger" v-if="hasPermission('cmdb:model')" @click="navigateTo('/config/relation-trigger')">
             <template #icon><ThunderboltOutlined /></template>
             <span>{{ t('menu.relationTrigger') }}</span>
+          </a-menu-item>
+          <a-menu-item key="batch-scan-config" v-if="hasPermission('cmdb:batch-scan:config')" @click="navigateTo('/config/batch-scan-config')">
+            <template #icon><SettingOutlined /></template>
+            <span>扫描配置</span>
+          </a-menu-item>
+          <a-menu-item key="batch-scan" v-if="hasPermission('cmdb:batch-scan:view')" @click="navigateTo('/config/batch-scan')">
+            <template #icon><ScanOutlined /></template>
+            <span>批量扫描</span>
           </a-menu-item>
           <a-menu-item key="dictionary" v-if="hasPermission('cmdb:dict')" @click="navigateTo('/config/dictionary')">
             <template #icon><BookOutlined /></template>
@@ -220,7 +228,8 @@ import {
   ShareAltOutlined,
   HddOutlined,
   CloudServerOutlined,
-  BellOutlined
+  BellOutlined,
+  ScanOutlined
 } from '@ant-design/icons-vue'
 
 const { t } = useI18n()
@@ -303,6 +312,12 @@ const updateSelectedKeys = () => {
     openKeys.value = ['config']
   } else if (path.includes('/config/relation-trigger')) {
     selectedKeys.value = ['relation-trigger']
+    openKeys.value = ['config']
+  } else if (path.includes('/config/batch-scan-config')) {
+    selectedKeys.value = ['batch-scan-config']
+    openKeys.value = ['config']
+  } else if (path.includes('/config/batch-scan')) {
+    selectedKeys.value = ['batch-scan']
     openKeys.value = ['config']
   } else if (path.includes('/config/dictionary')) {
     selectedKeys.value = ['dictionary']

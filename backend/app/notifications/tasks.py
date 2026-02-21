@@ -1,6 +1,7 @@
 """通知模块后台定时任务"""
 
-from datetime import datetime, timedelta
+from datetime import timedelta
+
 from flask import current_app
 from sqlalchemy import func
 
@@ -118,7 +119,7 @@ def generate_notification_stats():
         read_count = NotificationRecipient.query.filter(
             NotificationRecipient.created_at >= start_of_day,
             NotificationRecipient.created_at <= end_of_day,
-            NotificationRecipient.is_read == True
+            NotificationRecipient.is_read.is_(True)
         ).count()
         
         # 统计各类型通知数量
@@ -163,7 +164,7 @@ def archive_old_notifications():
         
         old_notifications = Notification.query.filter(
             Notification.created_at < archive_date,
-            Notification.is_archived == False
+            Notification.is_archived.is_(False)
         ).all()
         
         archived_count = 0

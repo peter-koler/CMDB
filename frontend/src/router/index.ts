@@ -47,6 +47,18 @@ const routes = [
             meta: { title: '关系触发器', icon: 'ThunderboltOutlined', permission: 'cmdb:model' }
           },
           {
+            path: 'batch-scan-config',
+            name: 'BatchScanConfig',
+            component: () => import('@/views/config/batch-scan-config/index.vue'),
+            meta: { title: '扫描配置', icon: 'SettingOutlined', permission: 'cmdb:batch-scan:config' }
+          },
+          {
+            path: 'batch-scan',
+            name: 'BatchScan',
+            component: () => import('@/views/config/batch-scan/index.vue'),
+            meta: { title: '批量扫描', icon: 'ScanOutlined', permission: 'cmdb:batch-scan:view' }
+          },
+          {
             path: 'dictionary',
             name: 'Dictionary',
             component: () => import('@/views/config/dictionary/index.vue'),
@@ -82,6 +94,12 @@ const routes = [
             name: 'Topology',
             component: () => import('@/views/cmdb/topology/index.vue'),
             meta: { title: '拓扑视图', icon: 'BranchOutlined', permission: 'cmdb:topology' }
+          },
+          {
+            path: 'trigger-config',
+            name: 'TriggerConfig',
+            component: () => import('@/views/cmdb/TriggerConfig.vue'),
+            meta: { title: '触发器配置', icon: 'SettingOutlined', permission: 'cmdb:model' }
           }
         ]
       },

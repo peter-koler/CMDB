@@ -1,0 +1,585 @@
+openapi: 3.0.0
+info:
+  title: CMDB CI 关系触发器 API
+  version: 1.0.0
+  description: 触发器管理和批量扫描相关 API
+
+servers:
+  - url: /api
+
+paths:
+  /models/{model_id}/triggers:
+    get:
+      summary: 获取模型的触发器列表
+      tags:
+        - 触发器管理
+      parameters:
+        - name: model_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/RelationTrigger'
+        '401':
+          description: 未授权
+        '404':
+          description: 模型不存在
+
+    post:
+      summary: 创建触发器
+      tags:
+        - 触发器管理
+      parameters:
+        - name: model_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TriggerCreate'
+      responses:
+        '201':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/RelationTrigger'
+        '400':
+          description: 参数错误
+        '401':
+          description: 未授权
+
+  /triggers/{trigger_id}:
+    get:
+      summary: 获取触发器详情
+      tags:
+        - 触发器管理
+      parameters:
+        - name: trigger_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/RelationTrigger'
+        '404':
+          description: 触发器不存在
+
+    put:
+      summary: 更新触发器
+      tags:
+        - 触发器管理
+      parameters:
+        - name: trigger_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TriggerUpdate'
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/RelationTrigger'
+        '400':
+          description: 参数错误
+        '404':
+          description: 触发器不存在
+
+    delete:
+      summary: 删除触发器
+      tags:
+        - 触发器管理
+      parameters:
+        - name: trigger_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: 删除成功
+        '404':
+          description: 触发器不存在
+
+  /triggers/{trigger_id}/logs:
+    get:
+      summary: 获取触发器执行日志
+      tags:
+        - 触发器管理
+      parameters:
+        - name: trigger_id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [success, failed, skipped]
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TriggerExecutionLog'
+                  total:
+                    type: integer
+                  page:
+                    type: integer
+                  page_size:
+                    type: integer
+
+  /models/{model_id}/batch-scan:
+    post:
+      summary: 触发批量扫描
+      tags:
+        - 批量扫描
+      parameters:
+        - name: model_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '202':
+          description: 任务已创建
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/BatchScanTask'
+        '400':
+          description: 参数错误（如已有任务在运行）
+        '404':
+          description: 模型不存在
+
+    get:
+      summary: 获取批量扫描任务列表
+      tags:
+        - 批量扫描
+      parameters:
+        - name: model_id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, running, completed, failed]
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/BatchScanTask'
+
+  /batch-scan/tasks/{task_id}:
+    get:
+      summary: 获取批量扫描任务详情
+      tags:
+        - 批量扫描
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/BatchScanTask'
+        '404':
+          description: 任务不存在
+
+  /batch-scan/tasks:
+    get:
+      summary: 获取所有批量扫描任务历史
+      description: 管理员查看所有模型的批量扫描执行历史
+      tags:
+        - 批量扫描
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: model_id
+          in: query
+          schema:
+            type: integer
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, running, completed, failed]
+        - name: trigger_source
+          in: query
+          schema:
+            type: string
+            enum: [manual, scheduled]
+        - name: start_date
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: end_date
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/BatchScanTask'
+                  total:
+                    type: integer
+                  page:
+                    type: integer
+                  page_size:
+                    type: integer
+
+  /batch-scan/config/{model_id}:
+    get:
+      summary: 获取模型批量扫描配置
+      tags:
+        - 批量扫描
+      parameters:
+        - name: model_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/BatchScanConfig'
+        '404':
+          description: 模型不存在
+
+    put:
+      summary: 更新模型批量扫描配置
+      tags:
+        - 批量扫描
+      parameters:
+        - name: model_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchScanConfigUpdate'
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/BatchScanConfig'
+        '400':
+          description: 参数错误（如无效的 Cron 表达式）
+        '404':
+          description: 模型不存在
+
+components:
+  schemas:
+    RelationTrigger:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        source_model_id:
+          type: integer
+        source_model_name:
+          type: string
+        target_model_id:
+          type: integer
+        target_model_name:
+          type: string
+        relation_type_id:
+          type: integer
+        relation_type_name:
+          type: string
+        trigger_type:
+          type: string
+          enum: [reference, expression]
+        trigger_condition:
+          type: object
+          properties:
+            source_field:
+              type: string
+            target_field:
+              type: string
+        is_active:
+          type: boolean
+        description:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    TriggerCreate:
+      type: object
+      required:
+        - name
+        - source_model_id
+        - target_model_id
+        - relation_type_id
+        - trigger_condition
+      properties:
+        name:
+          type: string
+          maxLength: 100
+        source_model_id:
+          type: integer
+        target_model_id:
+          type: integer
+        relation_type_id:
+          type: integer
+        trigger_type:
+          type: string
+          enum: [reference, expression]
+          default: reference
+        trigger_condition:
+          type: object
+          properties:
+            source_field:
+              type: string
+            target_field:
+              type: string
+        is_active:
+          type: boolean
+          default: true
+        description:
+          type: string
+
+    TriggerUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 100
+        trigger_condition:
+          type: object
+          properties:
+            source_field:
+              type: string
+            target_field:
+              type: string
+        is_active:
+          type: boolean
+        description:
+          type: string
+
+    TriggerExecutionLog:
+      type: object
+      properties:
+        id:
+          type: integer
+        trigger_id:
+          type: integer
+        trigger_name:
+          type: string
+        source_ci_id:
+          type: integer
+        source_ci_name:
+          type: string
+        target_ci_id:
+          type: integer
+        target_ci_name:
+          type: string
+        status:
+          type: string
+          enum: [success, failed, skipped]
+        message:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    BatchScanTask:
+      type: object
+      properties:
+        id:
+          type: integer
+        model_id:
+          type: integer
+        model_name:
+          type: string
+        status:
+          type: string
+          enum: [pending, running, completed, failed]
+        total_count:
+          type: integer
+        processed_count:
+          type: integer
+        created_count:
+          type: integer
+        skipped_count:
+          type: integer
+        failed_count:
+          type: integer
+        error_message:
+          type: string
+        trigger_source:
+          type: string
+          enum: [manual, scheduled]
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+        duration_seconds:
+          type: integer
+          description: 执行耗时（秒）
+        created_at:
+          type: string
+          format: date-time
+        created_by:
+          type: integer
+        created_by_name:
+          type: string
+
+    BatchScanConfig:
+      type: object
+      properties:
+        model_id:
+          type: integer
+        model_name:
+          type: string
+        batch_scan_enabled:
+          type: boolean
+        batch_scan_cron:
+          type: string
+          description: Cron 表达式
+        cron_description:
+          type: string
+          description: Cron 表达式的可读描述
+        next_run_at:
+          type: string
+          format: date-time
+          description: 下次执行时间
+        last_run_at:
+          type: string
+          format: date-time
+          description: 上次执行时间
+        last_run_status:
+          type: string
+          enum: [success, failed, none]
+          description: 上次执行状态
+
+    BatchScanConfigUpdate:
+      type: object
+      properties:
+        batch_scan_enabled:
+          type: boolean
+        batch_scan_cron:
+          type: string
+          description: Cron 表达式（如 "0 2 * * *" 表示每天凌晨2点）
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+security:
+  - bearerAuth: []

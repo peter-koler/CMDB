@@ -370,6 +370,15 @@ def get_menu_tree():
                     'actions': [
                         {'key': 'cmdb:topology:view', 'title': '查看'}
                     ]
+                },
+                {
+                    'key': 'cmdb:batch-scan',
+                    'title': '批量扫描',
+                    'actions': [
+                        {'key': 'cmdb:batch-scan:view', 'title': '查看'},
+                        {'key': 'cmdb:batch-scan:config', 'title': '配置'},
+                        {'key': 'cmdb:batch-scan:trigger', 'title': '触发执行'}
+                    ]
                 }
             ]
         }

@@ -1,14 +1,12 @@
 """通知模块模型单元测试"""
 
 import pytest
-from datetime import datetime, timedelta
+from datetime import datetime
 from app.notifications.models import (
     NotificationType,
     Notification,
     NotificationRecipient,
     NotificationTemplate,
-    ALLOWED_TAGS,
-    ALLOWED_ATTRIBUTES
 )
 
 
