@@ -124,9 +124,9 @@
         <a-descriptions-item label="创建关系">{{ currentTask.created_count || 0 }}</a-descriptions-item>
         <a-descriptions-item label="跳过">{{ currentTask.skipped_count || 0 }}</a-descriptions-item>
         <a-descriptions-item label="失败">{{ currentTask.failed_count || 0 }}</a-descriptions-item>
-        <a-descriptions-item label="开始时间">{{ currentTask.started_at || '-' }}</a-descriptions-item>
-        <a-descriptions-item label="完成时间">{{ currentTask.completed_at || '-' }}</a-descriptions-item>
-        <a-descriptions-item label="创建时间">{{ currentTask.created_at }}</a-descriptions-item>
+        <a-descriptions-item label="开始时间">{{ formatDateTime(currentTask.started_at) }}</a-descriptions-item>
+        <a-descriptions-item label="完成时间">{{ formatDateTime(currentTask.completed_at) }}</a-descriptions-item>
+        <a-descriptions-item label="创建时间">{{ formatDateTime(currentTask.created_at) }}</a-descriptions-item>
         <a-descriptions-item label="错误信息" :span="2">
           <a-alert v-if="currentTask.error_message" type="error" :message="currentTask.error_message" />
           <span v-else>-</span>
