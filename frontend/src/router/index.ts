@@ -100,8 +100,20 @@ const routes = [
             name: 'TriggerConfig',
             component: () => import('@/views/cmdb/TriggerConfig.vue'),
             meta: { title: '触发器配置', icon: 'SettingOutlined', permission: 'cmdb:model' }
+          },
+          {
+            path: 'custom-view/view/:id',
+            name: 'CustomViewDisplay',
+            component: () => import('@/views/custom-view/view.vue'),
+            meta: { title: '视图展示', hideMenu: true }
           }
         ]
+      },
+      {
+        path: 'custom-view-design/:id',
+        name: 'CustomViewDesign',
+        component: () => import('@/views/system/custom-view/design.vue'),
+        meta: { title: '视图设计', hideMenu: true }
       },
       {
         path: 'system',
@@ -125,6 +137,12 @@ const routes = [
             name: 'Role',
             component: () => import('@/views/system/role/index.vue'),
             meta: { title: '角色管理', icon: 'SafetyOutlined', permission: 'system:role' }
+          },
+          {
+            path: 'custom-view',
+            name: 'CustomView',
+            component: () => import('@/views/system/custom-view/index.vue'),
+            meta: { title: '视图管理', icon: 'AppstoreOutlined', permission: 'custom-view:manage' }
           },
           {
             path: 'config',
@@ -204,6 +222,8 @@ router.beforeEach(async (to, from, next) => {
     if (!userStore.userInfo) {
       const success = await userStore.getUserInfo()
       if (!success) {
+        // getUserInfo 失败（可能是 401 或其他错误）
+        // 401 会在请求拦截器中处理跳转，这里也做保险处理
         userStore.clearToken()
         next('/login')
         return

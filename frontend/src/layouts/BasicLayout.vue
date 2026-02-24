@@ -29,7 +29,7 @@
           <span>{{ t('menu.dashboard') }}</span>
         </a-menu-item>
         
-        <a-sub-menu key="cmdb" v-if="hasAnyPermission(['cmdb:instance', 'cmdb:search', 'cmdb:model', 'cmdb:history', 'cmdb:topology'])">
+        <a-sub-menu key="cmdb" v-if="hasAnyPermission(['cmdb:instance', 'cmdb:search', 'cmdb:model', 'cmdb:history', 'cmdb:topology']) || customViews.length > 0">
           <template #icon><CloudServerOutlined /></template>
           <template #title>{{ t('menu.cmdb') }}</template>
           <a-menu-item key="instance" v-if="hasPermission('cmdb:instance')" @click="navigateTo('/cmdb/instance')">
@@ -47,6 +47,15 @@
           <a-menu-item key="topology" v-if="hasPermission('cmdb:topology')" @click="navigateTo('/cmdb/topology')">
             <template #icon><ShareAltOutlined /></template>
             <span>{{ t('menu.topology') }}</span>
+          </a-menu-item>
+          <!-- 动态自定义视图菜单 -->
+          <a-menu-item 
+            v-for="view in customViews" 
+            :key="`view-${view.id}`" 
+            @click="navigateTo(`/cmdb/custom-view/view/${view.id}`)"
+          >
+            <template #icon><AppstoreOutlined /></template>
+            <span>{{ view.name }}</span>
           </a-menu-item>
         </a-sub-menu>
         
@@ -79,7 +88,7 @@
           </a-menu-item>
         </a-sub-menu>
         
-        <a-sub-menu key="system" v-if="hasAnyPermission(['system:user', 'system:department', 'system:role', 'system:config', 'system:log'])">
+        <a-sub-menu key="system" v-if="hasAnyPermission(['system:user', 'system:department', 'system:role', 'system:config', 'system:log', 'custom-view:manage'])">
           <template #icon><SettingOutlined /></template>
           <template #title>{{ t('menu.system') }}</template>
           <a-menu-item key="user" v-if="hasPermission('system:user')" @click="navigateTo('/system/user')">
@@ -93,6 +102,10 @@
           <a-menu-item key="role" v-if="hasPermission('system:role')" @click="navigateTo('/system/role')">
             <template #icon><SafetyOutlined /></template>
             <span>{{ t('menu.role') }}</span>
+          </a-menu-item>
+          <a-menu-item key="custom-view" v-if="hasPermission('custom-view:manage')" @click="navigateTo('/system/custom-view')">
+            <template #icon><AppstoreOutlined /></template>
+            <span>视图管理</span>
           </a-menu-item>
           <a-menu-item key="system-config" v-if="hasPermission('system:config')" @click="navigateTo('/system/config')">
             <template #icon><ToolOutlined /></template>
@@ -204,6 +217,7 @@ import { useAppStore } from '@/stores/app'
 import { useNotificationStore } from '@/stores/notifications'
 import { getConfigs } from '@/api/config'
 import { getBaseURL } from '@/utils/request'
+import { getMyViews } from '@/api/custom-view'
 import NotificationBadge from '@/components/notifications/NotificationBadge.vue'
 import NotificationCenter from '@/components/notifications/NotificationCenter.vue'
 import {
@@ -248,6 +262,7 @@ const openKeys = ref<string[]>([])
 const siteLogo = ref('')
 const siteName = ref('Arco CMDB')
 const notificationVisible = ref(false)
+const customViews = ref<any[]>([])
 
 const userInfo = computed(() => userStore.userInfo)
 const unreadCount = computed(() => notificationStore.unreadCount)
@@ -278,6 +293,23 @@ onMounted(async () => {
     console.error('加载站点配置失败:', error)
   }
 
+  // 加载用户的自定义视图
+  try {
+    const res = await getMyViews()
+    if (res.code === 200) {
+      customViews.value = res.data || []
+    } else if (res.code === 401) {
+      // Token 失效，不继续执行
+      return
+    }
+  } catch (error: any) {
+    console.error('加载自定义视图失败:', error)
+    // 如果是 401 错误，拦截器会处理跳转
+    if (error?.response?.status === 401) {
+      return
+    }
+  }
+
   // 初始化通知模块
   try {
     await notificationStore.initialize()
@@ -286,8 +318,12 @@ onMounted(async () => {
     if (token) {
       notificationStore.connectWebSocket(token)
     }
-  } catch (error) {
+  } catch (error: any) {
     console.error('初始化通知模块失败:', error)
+    // 如果是 401 错误，不显示错误，因为拦截器会处理跳转
+    if (error?.response?.status === 401) {
+      return
+    }
   }
 })
 

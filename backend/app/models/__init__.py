@@ -11,6 +11,7 @@ from app.models.role import Role, UserRole
 from app.models.ci_instance import CiInstance, CiHistory, CodeSequence
 from app.models.cmdb_relation import RelationType, CmdbRelation, RelationTrigger
 from app.models.cmdb_dict import CmdbDictType, CmdbDictItem
+from app.models.custom_view import CustomView, CustomViewNode, CustomViewNodePermission
 from app.notifications.models import (
     Notification,
     NotificationRecipient,
@@ -42,6 +43,9 @@ __all__ = [
     "RelationTrigger",
     "CmdbDictType",
     "CmdbDictItem",
+    "CustomView",
+    "CustomViewNode",
+    "CustomViewNodePermission",
     "Notification",
     "NotificationRecipient",
     "NotificationType",

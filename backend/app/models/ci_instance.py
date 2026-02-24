@@ -115,6 +115,25 @@ class CiInstance(db.Model):
 
         return data
 
+    def to_simple_dict(self):
+        """简单字典，用于自定义视图等场景"""
+        return {
+            "id": self.id,
+            "code": self.code,
+            "name": self.name,
+            "model_id": self.model_id,
+            "model_name": self.model.name if self.model else None,
+            "model_code": self.model.code if self.model else None,
+            "department_id": self.department_id,
+            "department_name": self.department.name if self.department else None,
+            "created_by": self.created_by,
+            "updated_by": self.updated_by,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "creator_name": self.creator.username if self.creator else None,
+            "attributes": self.get_attribute_values(),
+        }
+
     def save(self, process_triggers=True):
         db.session.add(self)
         db.session.commit()

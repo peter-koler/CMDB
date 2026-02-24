@@ -13,8 +13,8 @@ const request: AxiosInstance = axios.create({
   timeout: 30000
 })
 
-let isRefreshing = false
-let refreshingPromise: Promise<boolean> | null = null
+// 用于存储刷新 token 的 Promise
+let refreshPromise: Promise<boolean> | null = null
 
 request.interceptors.request.use(
   (config) => {
@@ -37,32 +37,50 @@ request.interceptors.response.use(
     return response.data as any
   },
   async (error) => {
-    const userStore = useUserStore()
+    const originalRequest = error.config
     
-    if (error.response?.status === 401) {
-      const refreshToken = localStorage.getItem('refreshToken')
-      
-      if (refreshToken) {
-        if (!isRefreshing) {
-          isRefreshing = true
-          refreshingPromise = userStore.refreshTokenAction().then(success => {
-            isRefreshing = false
-            return success
-          })
-        }
-        
-        const success = await refreshingPromise
-        if (success) {
-          error.config.headers.Authorization = `Bearer ${localStorage.getItem('token')}`
-          return request(error.config)
-        }
-      }
-      
-      userStore.clearToken()
-      window.location.href = '/login'
+    // 如果不是 401 错误，直接返回错误
+    if (error.response?.status !== 401) {
+      return Promise.reject(error)
     }
     
-    return Promise.reject(error)
+    // 如果是刷新 token 的请求返回 401，说明 token 已失效，直接跳转登录
+    if (originalRequest.url === '/auth/refresh') {
+      const userStore = useUserStore()
+      userStore.clearToken()
+      window.location.href = '/login'
+      return Promise.reject(error)
+    }
+    
+    const userStore = useUserStore()
+    const refreshTokenValue = localStorage.getItem('refreshToken')
+    
+    // 如果没有 refresh token，直接跳转登录
+    if (!refreshTokenValue) {
+      userStore.clearToken()
+      window.location.href = '/login'
+      return Promise.reject(error)
+    }
+    
+    // 如果有正在进行的刷新请求，等待它完成
+    if (!refreshPromise) {
+      refreshPromise = userStore.refreshTokenAction().finally(() => {
+        refreshPromise = null
+      })
+    }
+    
+    const success = await refreshPromise
+    
+    if (success) {
+      // 刷新成功，重试原请求
+      originalRequest.headers.Authorization = `Bearer ${localStorage.getItem('token')}`
+      return request(originalRequest)
+    } else {
+      // 刷新失败，跳转登录
+      userStore.clearToken()
+      window.location.href = '/login'
+      return Promise.reject(error)
+    }
   }
 )
 
