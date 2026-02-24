@@ -95,62 +95,25 @@
       </a-form>
     </a-card>
 
-    <a-row :gutter="16">
-      <a-col :xs="24" :sm="8" :md="6">
-        <a-card title="节点列表" :bordered="false" class="nodes-card">
-          <a-list
-            :data-source="nodes"
-            :loading="loading"
-            size="small"
-          >
-            <template #renderItem="{ item }">
-              <a-list-item @click="focusNode(item)" :class="{ selected: selectedNodeId === item.id }">
-                <a-space>
-                  <img
-                    v-if="getNodeIconUrl(item) && iconUrlStatus[getNodeIconUrl(item)] !== 'fail'"
-                    :src="getNodeIconUrl(item)"
-                    @error="markIconUrlFailed(getNodeIconUrl(item))"
-                    style="width: 16px; height: 16px; object-fit: contain;"
-                  />
-                  <component
-                    v-else
-                    :is="getNodeIconComponent(item)"
-                    style="font-size: 14px;"
-                  />
-                  <div
-                    class="node-color-dot"
-                    :style="{ backgroundColor: getNodeColor(item) }"
-                  ></div>
-                  <span class="node-name">{{ getNodePrimaryText(item) }}</span>
-                </a-space>
-              </a-list-item>
-            </template>
-          </a-list>
-        </a-card>
-      </a-col>
-
-      <a-col :xs="24" :sm="16" :md="18">
-        <a-card :bordered="false" class="graph-card">
-          <template #extra>
-            <a-space>
-              <a-button size="small" @click="zoomIn">
-                <template #icon><ZoomInOutlined /></template>
-                放大
-              </a-button>
-              <a-button size="small" @click="zoomOut">
-                <template #icon><ZoomOutOutlined /></template>
-                缩小
-              </a-button>
-              <a-button size="small" @click="fitView">
-                <template #icon><FullscreenOutlined /></template>
-                自适应
-              </a-button>
-            </a-space>
-          </template>
-          <div ref="graphContainer" class="graph-container"></div>
-        </a-card>
-      </a-col>
-    </a-row>
+    <a-card :bordered="false" class="graph-card">
+      <template #extra>
+        <a-space>
+          <a-button size="small" @click="zoomIn">
+            <template #icon><ZoomInOutlined /></template>
+            放大
+          </a-button>
+          <a-button size="small" @click="zoomOut">
+            <template #icon><ZoomOutOutlined /></template>
+            缩小
+          </a-button>
+          <a-button size="small" @click="fitView">
+            <template #icon><FullscreenOutlined /></template>
+            自适应
+          </a-button>
+        </a-space>
+      </template>
+      <div ref="graphContainer" class="graph-container"></div>
+    </a-card>
 
     <CiDetailDrawer
       v-model:visible="detailDrawerVisible"
@@ -199,7 +162,6 @@ const nodes = ref<any[]>([])
 const edges = ref<any[]>([])
 const models = ref<any[]>([])
 const candidateCis = ref<any[]>([])
-const selectedNodeId = ref<number | null>(null)
 const detailDrawerVisible = ref(false)
 const currentInstanceId = ref<number | null>(null)
 const graphContainer = ref<HTMLElement>()
@@ -447,14 +409,9 @@ const initGraph = () => {
     const node = evt?.item || evt?.target
     if (node) {
       const model = typeof node.getModel === 'function' ? node.getModel() : node
-      selectedNodeId.value = model?.id
       currentInstanceId.value = Number(model?.id)
       detailDrawerVisible.value = true
     }
-  })
-
-  graph.on('canvas:click', () => {
-    selectedNodeId.value = null
   })
 
   renderGraph()
@@ -547,26 +504,7 @@ const fetchCandidateCis = async () => {
   }
 }
 
-const focusNode = (node: any) => {
-  selectedNodeId.value = node.id
-  currentInstanceId.value = Number(node.id)
-  detailDrawerVisible.value = true
-  if (!graph) return
 
-  const nodeId = String(node.id)
-  try {
-    if (typeof graph.focusElement === 'function') {
-      graph.focusElement(nodeId, { animation: true })
-      return
-    }
-    if (typeof graph.focusItem === 'function') {
-      graph.focusItem(nodeId, true)
-      return
-    }
-  } catch (error) {
-    console.error('focus node failed:', error)
-  }
-}
 
 const handleNodeDeleted = () => {
   detailDrawerVisible.value = false
@@ -747,39 +685,6 @@ onUnmounted(() => {
   .search-buttons {
     justify-content: flex-start;
   }
-}
-
-.nodes-card {
-  height: 100%;
-  overflow: auto;
-}
-
-.nodes-card :deep(.ant-list-item) {
-  cursor: pointer;
-  transition: all 0.3s;
-}
-
-.nodes-card :deep(.ant-list-item:hover) {
-  background: #f5f5f5;
-}
-
-.nodes-card :deep(.ant-list-item.selected) {
-  background: #e6f7ff;
-  border-left: 3px solid #1890ff;
-}
-
-.node-color-dot {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.node-name {
-  font-size: 13px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .graph-card {
