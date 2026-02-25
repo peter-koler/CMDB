@@ -127,6 +127,104 @@ class TestTriggerIntegration:
 
             assert len(relations) > 0, "应该自动创建关系"
 
+    def test_update_ci_attribute_should_cleanup_stale_rule_relations(self, client, auth_headers):
+        """测试 CI 属性变更后，旧的规则关系会被清理"""
+        with client.application.app_context():
+            category = ModelCategory(name="测试分类", code="test-category-cleanup")
+            db.session.add(category)
+            db.session.commit()
+
+            server_model = CmdbModel(
+                name="服务器",
+                code="server-cleanup",
+                category_id=category.id
+            )
+            db.session.add(server_model)
+
+            app_model = CmdbModel(
+                name="应用",
+                code="application-cleanup",
+                category_id=category.id
+            )
+            db.session.add(app_model)
+            db.session.commit()
+
+            relation_type = RelationType(
+                code="runs_on_cleanup",
+                name="运行在",
+                source_label="运行",
+                target_label="承载"
+            )
+            db.session.add(relation_type)
+            db.session.commit()
+
+            trigger = RelationTrigger(
+                name="应用-服务器关联-清理",
+                source_model_id=app_model.id,
+                target_model_id=server_model.id,
+                relation_type_id=relation_type.id,
+                trigger_type="reference",
+                trigger_condition='{"source_field": "deploy_ip", "target_field": "ip"}',
+                is_active=True
+            )
+            db.session.add(trigger)
+            db.session.commit()
+
+            user = User.query.first()
+            server_ci_1 = CiInstance(
+                name="server-cleanup-1",
+                code="server-cleanup-1",
+                model_id=server_model.id,
+                created_by=user.id
+            )
+            server_ci_1.set_attribute_values({"ip": "192.168.2.1"})
+            db.session.add(server_ci_1)
+
+            server_ci_2 = CiInstance(
+                name="server-cleanup-2",
+                code="server-cleanup-2",
+                model_id=server_model.id,
+                created_by=user.id
+            )
+            server_ci_2.set_attribute_values({"ip": "192.168.1.1"})
+            db.session.add(server_ci_2)
+            db.session.commit()
+
+            app_ci = CiInstance(
+                name="app-cleanup",
+                code="app-cleanup",
+                model_id=app_model.id,
+                created_by=user.id
+            )
+            app_ci.set_attribute_values({"deploy_ip": "192.168.2.1"})
+            db.session.add(app_ci)
+            db.session.commit()
+
+            from app.services.trigger_service import process_ci_triggers
+            process_ci_triggers(app_ci)
+
+            from app.models.cmdb_relation import CmdbRelation
+            relations_before = CmdbRelation.query.filter_by(
+                source_ci_id=app_ci.id,
+                relation_type_id=relation_type.id,
+                source_type="rule",
+            ).all()
+            assert len(relations_before) == 1
+            assert relations_before[0].target_ci_id == server_ci_1.id
+
+            app_ci.set_attribute_values({"deploy_ip": "192.168.1.1"})
+            db.session.add(app_ci)
+            db.session.commit()
+            process_ci_triggers(app_ci)
+
+            relations_after = CmdbRelation.query.filter_by(
+                source_ci_id=app_ci.id,
+                relation_type_id=relation_type.id,
+                source_type="rule",
+            ).all()
+            assert len(relations_after) == 1
+            assert relations_after[0].target_ci_id == server_ci_2.id
+
 
 class TestBatchScanIntegration:
     """批量扫描集成测试"""
@@ -209,6 +307,104 @@ class TestBatchScanIntegration:
             ).all()
 
             assert len(relations) >= 3, "应该创建至少3个关系"
+
+    def test_batch_scan_should_cleanup_stale_rule_relations(self, client, auth_headers):
+        """测试批量扫描会清理失效的规则关系"""
+        with client.application.app_context():
+            category = ModelCategory(name="测试分类", code="test-category-batch-cleanup")
+            db.session.add(category)
+            db.session.commit()
+
+            server_model = CmdbModel(
+                name="服务器",
+                code="server-batch-cleanup",
+                category_id=category.id
+            )
+            db.session.add(server_model)
+
+            app_model = CmdbModel(
+                name="应用",
+                code="application-batch-cleanup",
+                category_id=category.id
+            )
+            db.session.add(app_model)
+            db.session.commit()
+
+            relation_type = RelationType(
+                code="runs_on_batch_cleanup",
+                name="运行在",
+                source_label="运行",
+                target_label="承载"
+            )
+            db.session.add(relation_type)
+            db.session.commit()
+
+            trigger = RelationTrigger(
+                name="应用-服务器关联-批量清理",
+                source_model_id=app_model.id,
+                target_model_id=server_model.id,
+                relation_type_id=relation_type.id,
+                trigger_type="reference",
+                trigger_condition='{"source_field": "deploy_ip", "target_field": "ip"}',
+                is_active=True
+            )
+            db.session.add(trigger)
+            db.session.commit()
+
+            user = User.query.first()
+            server_ci_1 = CiInstance(
+                name="server-batch-cleanup-1",
+                code="server-batch-cleanup-1",
+                model_id=server_model.id,
+                created_by=user.id
+            )
+            server_ci_1.set_attribute_values({"ip": "192.168.2.1"})
+            db.session.add(server_ci_1)
+
+            server_ci_2 = CiInstance(
+                name="server-batch-cleanup-2",
+                code="server-batch-cleanup-2",
+                model_id=server_model.id,
+                created_by=user.id
+            )
+            server_ci_2.set_attribute_values({"ip": "192.168.1.1"})
+            db.session.add(server_ci_2)
+            db.session.commit()
+
+            app_ci = CiInstance(
+                name="app-batch-cleanup",
+                code="app-batch-cleanup",
+                model_id=app_model.id,
+                created_by=user.id
+            )
+            app_ci.set_attribute_values({"deploy_ip": "192.168.2.1"})
+            db.session.add(app_ci)
+            db.session.commit()
+
+            from app.tasks.batch_scan import batch_scan_model
+            from app.models.cmdb_relation import CmdbRelation
+
+            batch_scan_model(app_model.id, "manual")
+            relations_before = CmdbRelation.query.filter_by(
+                source_ci_id=app_ci.id,
+                relation_type_id=relation_type.id,
+                source_type="rule",
+            ).all()
+            assert len(relations_before) == 1
+            assert relations_before[0].target_ci_id == server_ci_1.id
+
+            app_ci.set_attribute_values({"deploy_ip": "192.168.1.1"})
+            db.session.add(app_ci)
+            db.session.commit()
+
+            batch_scan_model(app_model.id, "manual")
+            relations_after = CmdbRelation.query.filter_by(
+                source_ci_id=app_ci.id,
+                relation_type_id=relation_type.id,
+                source_type="rule",
+            ).all()
+            assert len(relations_after) == 1
+            assert relations_after[0].target_ci_id == server_ci_2.id
 
 
 class TestTriggerModelDelete:

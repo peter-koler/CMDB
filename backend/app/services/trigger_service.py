@@ -7,6 +7,7 @@ import json
 import logging
 from typing import Optional
 from threading import Thread
+from collections import defaultdict
 from flask import current_app
 
 from app import db
@@ -174,9 +175,47 @@ def process_ci_triggers(ci: CiInstance) -> dict:
     triggers = get_matching_triggers(ci)
     result["total_triggers"] = len(triggers)
 
+    # 先计算当前 CI 在每个(关系类型, 目标模型)维度下应存在的目标集合，
+    # 用于清理不再匹配的旧规则关系（source_type=rule）。
+    expected_targets_by_key = defaultdict(set)
+    matched_targets_by_trigger = {}
+
     for trigger in triggers:
         try:
             target_cis = match_trigger_condition(ci, trigger)
+            matched_targets_by_trigger[trigger.id] = target_cis
+
+            key = (trigger.relation_type_id, trigger.target_model_id)
+            for target_ci in target_cis:
+                expected_targets_by_key[key].add(target_ci.id)
+        except Exception as e:
+            logger.error(f"预计算触发器 {trigger.id} 匹配目标失败: {e}")
+            matched_targets_by_trigger[trigger.id] = []
+
+    for relation_type_id, target_model_id in {
+        (t.relation_type_id, t.target_model_id) for t in triggers
+    }:
+        existing_relations = (
+            CmdbRelation.query.join(CiInstance, CmdbRelation.target_ci_id == CiInstance.id)
+            .filter(
+                CmdbRelation.source_ci_id == ci.id,
+                CmdbRelation.relation_type_id == relation_type_id,
+                CmdbRelation.source_type == "rule",
+                CiInstance.model_id == target_model_id,
+            )
+            .all()
+        )
+        expected_target_ids = expected_targets_by_key.get(
+            (relation_type_id, target_model_id), set()
+        )
+        for relation in existing_relations:
+            if relation.target_ci_id not in expected_target_ids:
+                db.session.delete(relation)
+    db.session.commit()
+
+    for trigger in triggers:
+        try:
+            target_cis = matched_targets_by_trigger.get(trigger.id, [])
 
             if not target_cis:
                 log_trigger_execution(

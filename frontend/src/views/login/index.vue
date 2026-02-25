@@ -116,7 +116,7 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, onMounted } from 'vue'
+import { reactive, ref, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
@@ -170,9 +170,13 @@ const handleLogin = async () => {
 
 onMounted(() => {
   const rememberMe = localStorage.getItem('rememberMe')
-  if (rememberMe === 'true') {
+  const savedUsername = localStorage.getItem('savedUsername')
+  if (rememberMe === 'true' && savedUsername) {
     formState.remember = true
-    formState.username = localStorage.getItem('savedUsername') || ''
+    // 使用 nextTick 确保 DOM 更新后再设置值
+    nextTick(() => {
+      formState.username = savedUsername
+    })
   }
 })
 </script>

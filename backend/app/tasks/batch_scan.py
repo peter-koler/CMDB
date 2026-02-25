@@ -6,9 +6,10 @@
 import logging
 from datetime import datetime
 from threading import Lock
+from collections import defaultdict
 
 from app import db
-from app.models.cmdb_relation import BatchScanTask, RelationTrigger
+from app.models.cmdb_relation import BatchScanTask, RelationTrigger, CmdbRelation
 from app.models.ci_instance import CiInstance
 from app.services.trigger_service import (
     match_trigger_condition,
@@ -125,8 +126,42 @@ def batch_scan_model(
 
             for ci in batch:
                 try:
+                    expected_targets_by_key = defaultdict(set)
+                    matched_targets_by_trigger = {}
+
                     for trigger in triggers:
                         target_cis = match_trigger_condition(ci, trigger)
+                        matched_targets_by_trigger[trigger.id] = target_cis
+                        key = (trigger.relation_type_id, trigger.target_model_id)
+                        for target_ci in target_cis:
+                            expected_targets_by_key[key].add(target_ci.id)
+
+                    for relation_type_id, target_model_id in {
+                        (t.relation_type_id, t.target_model_id) for t in triggers
+                    }:
+                        existing_relations = (
+                            CmdbRelation.query.join(
+                                CiInstance, CmdbRelation.target_ci_id == CiInstance.id
+                            )
+                            .filter(
+                                CmdbRelation.source_ci_id == ci.id,
+                                CmdbRelation.relation_type_id == relation_type_id,
+                                CmdbRelation.source_type == "rule",
+                                CiInstance.model_id == target_model_id,
+                            )
+                            .all()
+                        )
+                        expected_target_ids = expected_targets_by_key.get(
+                            (relation_type_id, target_model_id), set()
+                        )
+                        for relation in existing_relations:
+                            if relation.target_ci_id not in expected_target_ids:
+                                db.session.delete(relation)
+
+                    db.session.commit()
+
+                    for trigger in triggers:
+                        target_cis = matched_targets_by_trigger.get(trigger.id, [])
 
                         if not target_cis:
                             continue

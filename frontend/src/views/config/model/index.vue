@@ -275,7 +275,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, h, computed } from 'vue'
+import { ref, reactive, onMounted, h, computed, watch } from 'vue'
 import { message } from 'ant-design-vue'
 import {
   ApiOutlined,
@@ -456,6 +456,12 @@ const selectBuiltinIcon = (icon: string) => {
 // 设计器
 const designerVisible = ref(false)
 const currentModel = ref<any>(null)
+
+watch(designerVisible, (visible) => {
+  if (!visible) {
+    currentModel.value = null
+  }
+})
 
 // 初始化
 onMounted(() => {
@@ -860,19 +866,20 @@ const exportModelData = async (id: number) => {
 }
 
 // 打开设计器
-const openDesigner = (model: any) => {
-  currentModel.value = model
+const openDesigner = (model?: any) => {
+  currentModel.value = model || null
   designerVisible.value = true
 }
 
 const handleDesignerSave = async (data: any) => {
+  const modelSnapshot = currentModel.value
   try {
     await updateModel(data.id, {
       name: data.name,
       code: data.code,
       icon: data.icon,
-      icon_url: data.icon_url ?? currentModel.value?.icon_url ?? '',
-      key_field_codes: data.key_field_codes ?? currentModel.value?.key_field_codes ?? [],
+      icon_url: data.icon_url ?? modelSnapshot?.icon_url ?? '',
+      key_field_codes: data.key_field_codes ?? modelSnapshot?.key_field_codes ?? [],
       category_id: data.category_id,
       model_type_id: data.model_type_id,
       description: data.description,
