@@ -324,6 +324,49 @@ def get_menu_tree():
             ]
         },
         {
+            'key': 'monitoring',
+            'title': '监控管理',
+            'children': [
+                {
+                    'key': 'monitoring:template',
+                    'title': '监控模板',
+                    'actions': [
+                        {'key': 'monitoring:template:view', 'title': '查看'},
+                        {'key': 'monitoring:template:create', 'title': '创建'},
+                        {'key': 'monitoring:template:update', 'title': '编辑'},
+                        {'key': 'monitoring:template:delete', 'title': '删除'}
+                    ]
+                },
+                {
+                    'key': 'monitoring:target',
+                    'title': '监控目标',
+                    'actions': [
+                        {'key': 'monitoring:target:view', 'title': '查看'},
+                        {'key': 'monitoring:target:create', 'title': '创建'},
+                        {'key': 'monitoring:target:update', 'title': '编辑'},
+                        {'key': 'monitoring:target:delete', 'title': '删除'}
+                    ]
+                },
+                {
+                    'key': 'monitoring:alert',
+                    'title': '告警管理',
+                    'actions': [
+                        {'key': 'monitoring:alert:view', 'title': '查看'},
+                        {'key': 'monitoring:alert:create', 'title': '创建'},
+                        {'key': 'monitoring:alert:update', 'title': '编辑'},
+                        {'key': 'monitoring:alert:delete', 'title': '删除'}
+                    ]
+                },
+                {
+                    'key': 'monitoring:dashboard',
+                    'title': '监控大盘',
+                    'actions': [
+                        {'key': 'monitoring:dashboard:view', 'title': '查看'}
+                    ]
+                }
+            ]
+        },
+        {
             'key': 'cmdb',
             'title': 'CMDB',
             'children': [

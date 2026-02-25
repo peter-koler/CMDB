@@ -1,5 +1,6 @@
 from app.models.user import User
 from app.models.config import SystemConfig
+from app.models.monitor_template import MonitorTemplate, MonitorCategory
 from app.models.operation_log import OperationLog
 from app.models.password_history import PasswordHistory
 from app.models.model_category import ModelCategory
@@ -23,6 +24,8 @@ from app.notifications.models import (
 __all__ = [
     "User",
     "SystemConfig",
+    "MonitorTemplate",
+    "MonitorCategory",
     "OperationLog",
     "PasswordHistory",
     "ModelCategory",

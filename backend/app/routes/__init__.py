@@ -10,6 +10,7 @@ from app.routes.cmdb_relation import cmdb_relation_bp
 from app.notifications.api import notifications_bp
 from app.routes.trigger import trigger_bp
 from app.routes.custom_view import custom_view_bp
+from app.routes.template import template_bp
 
 
 def register_routes(app):
@@ -25,3 +26,4 @@ def register_routes(app):
     app.register_blueprint(notifications_bp)
     app.register_blueprint(trigger_bp)
     app.register_blueprint(custom_view_bp)
+    app.register_blueprint(template_bp)

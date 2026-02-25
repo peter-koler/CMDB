@@ -87,6 +87,28 @@
             <span>{{ t('menu.dictionary') }}</span>
           </a-menu-item>
         </a-sub-menu>
+
+        <!-- 监控管理菜单 -->
+        <a-sub-menu key="monitoring" v-if="hasAnyPermission(['monitoring:template', 'monitoring:target', 'monitoring:alert', 'monitoring:dashboard'])">
+          <template #icon><LineChartOutlined /></template>
+          <template #title>{{ t('menu.monitoring') }}</template>
+          <a-menu-item key="monitoring-template" v-if="hasPermission('monitoring:template')" @click="navigateTo('/monitoring/template')">
+            <template #icon><FileTextOutlined /></template>
+            <span>{{ t('menu.monitoringTemplate') }}</span>
+          </a-menu-item>
+          <a-menu-item key="monitoring-target" v-if="hasPermission('monitoring:target')" @click="navigateTo('/monitoring/target')">
+            <template #icon><AimOutlined /></template>
+            <span>{{ t('menu.monitoringTarget') }}</span>
+          </a-menu-item>
+          <a-menu-item key="monitoring-alert" v-if="hasPermission('monitoring:alert')" @click="navigateTo('/monitoring/alert')">
+            <template #icon><BellOutlined /></template>
+            <span>{{ t('menu.monitoringAlert') }}</span>
+          </a-menu-item>
+          <a-menu-item key="monitoring-dashboard" v-if="hasPermission('monitoring:dashboard')" @click="navigateTo('/monitoring/dashboard')">
+            <template #icon><DashboardOutlined /></template>
+            <span>{{ t('menu.monitoringDashboard') }}</span>
+          </a-menu-item>
+        </a-sub-menu>
         
         <a-sub-menu key="system" v-if="hasAnyPermission(['system:user', 'system:department', 'system:role', 'system:config', 'system:log', 'custom-view:manage'])">
           <template #icon><SettingOutlined /></template>
@@ -246,7 +268,10 @@ import {
   HddOutlined,
   CloudServerOutlined,
   BellOutlined,
-  ScanOutlined
+  ScanOutlined,
+  LineChartOutlined,
+  FileTextOutlined,
+  AimOutlined
 } from '@ant-design/icons-vue'
 
 const { t } = useI18n()

@@ -60,6 +60,7 @@ def create_app(config_name="default"):
     with app.app_context():
         db.create_all()
         init_default_data(app)
+        init_monitoring_templates(app)
 
     return app
 
@@ -105,3 +106,60 @@ def init_default_data(app):
 
     # 初始化调度器
     init_scheduler(app)
+
+
+def init_monitoring_templates(app):
+    from app.services.template_service import template_service
+    from app.models.monitor_template import MonitorCategory, MonitorTemplate
+    
+    template_service.initialize()
+    
+    # 如果数据库中没有分类，则初始化默认分类
+    if MonitorCategory.query.count() == 0:
+        default_categories = [
+            {"name": "数据库", "code": "db", "icon": "database"},
+            {"name": "操作系统", "code": "os", "icon": "desktop"},
+            {"name": "中间件", "code": "middleware", "icon": "cluster"},
+            {"name": "云服务", "code": "cloud", "icon": "cloud"},
+            {"name": "网络设备", "code": "network", "icon": "global"},
+            {"name": "自定义", "code": "custom", "icon": "code"},
+        ]
+        for cat in default_categories:
+            template_service.save_category(cat["name"], cat["code"], cat["icon"])
+    
+    # 如果数据库中没有模板，则从 HertzBeat 导入默认模板
+    if MonitorTemplate.query.count() == 0:
+        import os
+        template_dir = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 
+            'templates'
+        )
+        if os.path.exists(template_dir):
+            for filename in os.listdir(template_dir):
+                if filename.endswith('.yml'):
+                    filepath = os.path.join(template_dir, filename)
+                    with open(filepath, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                    
+                    # 从文件名解析 app 名称
+                    app_name = filename[4:-4]  # 去掉 "app-" 前缀和 ".yml" 后缀
+                    
+                    # 简单解析 YAML 获取分类（使用字符串匹配）
+                    category = 'custom'
+                    name = app_name
+                    
+                    if 'category:' in content:
+                        import re
+                        cat_match = re.search(r'category:\s*(\w+)', content)
+                        if cat_match:
+                            category = cat_match.group(1)
+                    
+                    if 'zh-CN:' in content:
+                        import re
+                        name_match = re.search(r'zh-CN:\s*([^\n]+)', content)
+                        if name_match:
+                            name = name_match.group(1).strip()
+                    
+                    template_service.save_template(app_name, name, category, content)
+    
+    print("Monitoring templates initialized successfully!")

@@ -116,6 +116,19 @@ const routes = [
         meta: { title: '视图设计', hideMenu: true }
       },
       {
+        path: 'monitoring',
+        name: 'Monitoring',
+        meta: { title: '监控管理', icon: 'LineChartOutlined' },
+        children: [
+          {
+            path: 'template',
+            name: 'MonitoringTemplate',
+            component: () => import('@/views/monitoring/template/index.vue'),
+            meta: { title: '监控模板', icon: 'FileTextOutlined', permission: 'monitoring:template' }
+          }
+        ]
+      },
+      {
         path: 'system',
         name: 'System',
         meta: { title: '系统管理', icon: 'SettingOutlined' },
