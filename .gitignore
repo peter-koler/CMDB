@@ -71,3 +71,12 @@ tools/
 
 # Word documents
 *.docx
+
+# IDE & Tool files
+.opencode/
+.specify/
+.ruff_cache/
+.pytest_cache/
+
+# Docs
+docs/
