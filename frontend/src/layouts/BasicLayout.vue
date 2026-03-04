@@ -48,6 +48,14 @@
             <template #icon><ShareAltOutlined /></template>
             <span>{{ t('menu.topology') }}</span>
           </a-menu-item>
+          <a-menu-item key="topology-template" v-if="hasPermission('cmdb:topology')" @click="navigateTo('/cmdb/topology-template')">
+            <template #icon><ApartmentOutlined /></template>
+            <span>{{ t('menu.topologyTemplate') }}</span>
+          </a-menu-item>
+          <a-menu-item key="topology-manage" v-if="hasPermission('cmdb:topology')" @click="navigateTo('/cmdb/topology-manage')">
+            <template #icon><ClusterOutlined /></template>
+            <span>{{ t('menu.topologyManage') }}</span>
+          </a-menu-item>
           <!-- 动态自定义视图菜单 -->
           <a-menu-item 
             v-for="view in customViews" 
@@ -265,6 +273,7 @@ import {
   NodeIndexOutlined,
   ThunderboltOutlined,
   ShareAltOutlined,
+  ClusterOutlined,
   HddOutlined,
   CloudServerOutlined,
   BellOutlined,
@@ -369,6 +378,12 @@ const updateSelectedKeys = () => {
     openKeys.value = ['cmdb']
   } else if (path.includes('/cmdb/history')) {
     selectedKeys.value = ['history']
+    openKeys.value = ['cmdb']
+  } else if (path.includes('/cmdb/topology-template')) {
+    selectedKeys.value = ['topology-template']
+    openKeys.value = ['cmdb']
+  } else if (path.includes('/cmdb/topology-manage')) {
+    selectedKeys.value = ['topology-manage']
     openKeys.value = ['cmdb']
   } else if (path.includes('/cmdb/topology')) {
     selectedKeys.value = ['topology']

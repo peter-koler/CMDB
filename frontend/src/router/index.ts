@@ -96,6 +96,24 @@ const routes = [
             meta: { title: '拓扑视图', icon: 'BranchOutlined', permission: 'cmdb:topology' }
           },
           {
+            path: 'topology-manage',
+            name: 'TopologyManage',
+            component: () => import('@/views/cmdb/topology-manage/index.vue'),
+            meta: { title: '拓扑图', icon: 'ClusterOutlined', permission: 'cmdb:topology' }
+          },
+          {
+            path: 'topology-template',
+            name: 'TopologyTemplate',
+            component: () => import('@/views/cmdb/topology-template/index.vue'),
+            meta: { title: '拓扑模板', icon: 'ApartmentOutlined', permission: 'cmdb:topology' }
+          },
+          {
+            path: 'topology-template/edit/:id',
+            name: 'TopologyTemplateEdit',
+            component: () => import('@/views/cmdb/topology-template/edit.vue'),
+            meta: { title: '编辑拓扑模板', icon: 'EditOutlined', permission: 'cmdb:topology', hideInMenu: true }
+          },
+          {
             path: 'trigger-config',
             name: 'TriggerConfig',
             component: () => import('@/views/cmdb/TriggerConfig.vue'),

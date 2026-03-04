@@ -46,6 +46,8 @@ export default {
     search: '全文搜索',
     history: '变更历史',
     topology: '拓扑视图',
+    topologyTemplate: '拓扑模板',
+    topologyManage: '拓扑图',
     config: '配置管理',
     model: '模型管理',
     dictionary: '字典管理',

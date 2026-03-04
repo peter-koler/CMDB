@@ -43,6 +43,8 @@ export default {
     search: 'Global Search',
     history: 'Change History',
     topology: 'Topology View',
+    topologyTemplate: 'Topology Templates',
+    topologyManage: 'Topology Graph',
     config: 'Config Management',
     model: 'Model Management',
     dictionary: 'Dictionary Management',
