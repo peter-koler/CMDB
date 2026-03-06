@@ -5,12 +5,25 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, onUnmounted } from 'vue'
 import { useAppStore } from '@/stores/app'
+import { useUserStore } from '@/stores/user'
+import { startTokenExpirationCheck, stopTokenExpirationCheck } from '@/utils/tokenManager'
 import zhCN from 'ant-design-vue/es/locale/zh_CN'
 import enUS from 'ant-design-vue/es/locale/en_US'
 
 const appStore = useAppStore()
+const userStore = useUserStore()
+
+onMounted(() => {
+  if (userStore.token) {
+    startTokenExpirationCheck()
+  }
+})
+
+onUnmounted(() => {
+  stopTokenExpirationCheck()
+})
 
 const themeConfig = computed(() => ({
   algorithm: appStore.theme === 'dark' ? undefined : undefined,

@@ -1,10 +1,25 @@
 import request from '@/utils/request'
 
-export const login = (username: string, password: string) => {
+export const login = (username: string, password: string, captcha?: string) => {
   return request({
     url: '/auth/login',
     method: 'POST',
-    data: { username, password }
+    data: { username, password, captcha }
+  })
+}
+
+export const getCaptcha = () => {
+  return request({
+    url: '/auth/captcha',
+    method: 'GET'
+  })
+}
+
+export const verifyCaptcha = (answer: string) => {
+  return request({
+    url: '/auth/captcha/verify',
+    method: 'POST',
+    data: { answer }
   })
 }
 

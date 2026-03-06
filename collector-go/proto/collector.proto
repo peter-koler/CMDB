@@ -1,0 +1,63 @@
+syntax = "proto3";
+
+package collector.v1;
+
+option go_package = "collector-go/internal/pb;pb";
+
+message CollectTask {
+  int64 job_id = 1;
+  int64 monitor_id = 2;
+  string app = 3;
+  int64 interval_ms = 4;
+  repeated MetricsTask tasks = 5;
+}
+
+message MetricsTask {
+  string name = 1;
+  string protocol = 2;
+  int64 timeout_ms = 3;
+  int32 priority = 4;
+  map<string, string> params = 5;
+  repeated Transform transform = 6;
+}
+
+message Transform {
+  string field = 1;
+  string op = 2;
+}
+
+message CollectRep {
+  int64 job_id = 1;
+  int64 monitor_id = 2;
+  string app = 3;
+  string metrics = 4;
+  string protocol = 5;
+  int64 time_unix_ms = 6;
+  bool success = 7;
+  string message = 8;
+  map<string, string> fields = 9;
+  int64 raw_latency_ms = 10;
+}
+
+message Heartbeat {
+  int64 unix_ms = 1;
+}
+
+message ManagerFrame {
+  oneof payload {
+    CollectRep report = 1;
+    Heartbeat heartbeat = 3;
+  }
+}
+
+message CollectorFrame {
+  oneof payload {
+    CollectTask upsert = 1;
+    int64 delete_job_id = 2;
+    Heartbeat heartbeat = 3;
+  }
+}
+
+service CollectorService {
+  rpc Connect(stream CollectorFrame) returns (stream ManagerFrame);
+}

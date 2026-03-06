@@ -3,6 +3,7 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_jwt_extended import JWTManager
 from flask_cors import CORS
 from flask_migrate import Migrate
+from flask_session import Session
 from config import config
 import os
 
@@ -10,6 +11,7 @@ db = SQLAlchemy()
 jwt = JWTManager()
 migrate = Migrate()
 socketio = None
+session = Session()
 
 
 def create_app(config_name="default"):
@@ -21,7 +23,8 @@ def create_app(config_name="default"):
     db.init_app(app)
     jwt.init_app(app)
     migrate.init_app(app, db)
-    CORS(app, resources={r"/api/*": {"origins": app.config["CORS_ORIGINS"]}})
+    session.init_app(app)
+    CORS(app, resources={r"/api/*": {"origins": app.config["CORS_ORIGINS"]}}, supports_credentials=True)
 
     # 初始化WebSocket
     from app.notifications.websocket import init_socketio

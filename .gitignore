@@ -80,3 +80,4 @@ tools/
 
 # Docs
 docs/
+backend/flask_session/

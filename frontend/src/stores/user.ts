@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { login, logout, getCurrentUser, refreshToken } from '@/api/auth'
+import { startTokenExpirationCheck, stopTokenExpirationCheck } from '@/utils/tokenManager'
 
 interface UserInfo {
   id: number
@@ -25,6 +26,7 @@ export const useUserStore = defineStore('user', () => {
     refreshTokenValue.value = newRefreshToken
     localStorage.setItem('token', newToken)
     localStorage.setItem('refreshToken', newRefreshToken)
+    startTokenExpirationCheck()
   }
 
   const clearToken = () => {
@@ -33,6 +35,7 @@ export const useUserStore = defineStore('user', () => {
     userInfo.value = null
     localStorage.removeItem('token')
     localStorage.removeItem('refreshToken')
+    stopTokenExpirationCheck()
   }
 
   const loginAction = async (username: string, password: string) => {
@@ -103,11 +106,12 @@ export const useUserStore = defineStore('user', () => {
   return {
     token,
     userInfo,
+    setToken,
+    clearToken,
     loginAction,
     logoutAction,
     getUserInfo,
     refreshTokenAction,
-    hasPermission,
-    clearToken
+    hasPermission
   }
 })

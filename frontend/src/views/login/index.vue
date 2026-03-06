@@ -52,6 +52,8 @@
           <p>请登录您的账户以继续</p>
         </div>
 
+
+
         <a-form
           :model="formState"
           :rules="rules"
@@ -84,6 +86,41 @@
             </a-input-password>
           </a-form-item>
 
+          <!-- 验证码 -->
+          <a-form-item name="captcha">
+            <a-row :gutter="12">
+              <a-col :span="12">
+                <a-input
+                  v-model:value="formState.captcha"
+                  placeholder="请输入验证码"
+                  size="large"
+                  class="custom-input"
+                >
+                  <template #prefix>
+                    <SafetyOutlined class="input-icon" />
+                  </template>
+                </a-input>
+              </a-col>
+              <a-col :span="12">
+                <div
+                  class="captcha-image"
+                  @click="refreshCaptcha"
+                  :style="{ backgroundImage: `url(${captchaImage})` }"
+                  v-if="captchaImage"
+                />
+                <a-button
+                  v-else
+                  size="large"
+                  block
+                  @click="refreshCaptcha"
+                  :loading="captchaLoading"
+                >
+                  获取验证码
+                </a-button>
+              </a-col>
+            </a-row>
+          </a-form-item>
+
           <a-form-item>
             <div class="login-options">
               <a-checkbox v-model:checked="formState.remember" class="custom-checkbox">
@@ -112,6 +149,44 @@
         </div>
       </div>
     </div>
+
+    <!-- 锁定提示对话框 -->
+    <a-modal
+      v-model:open="lockModalVisible"
+      :closable="false"
+      :maskClosable="false"
+      :footer="null"
+      centered
+      width="420px"
+      class="lock-modal"
+    >
+      <a-result
+        status="error"
+        title="账户已被锁定"
+        :sub-title="lockModalMessage"
+        class="lock-result"
+      >
+        <template #icon>
+          <a-avatar :size="72" style="background-color: #fff2f0; color: #ff4d4f;">
+            <LockOutlined style="font-size: 32px;" />
+          </a-avatar>
+        </template>
+        <template #extra>
+          <a-space direction="vertical" style="width: 100%;">
+            <a-statistic-countdown
+              v-if="remainingSeconds > 0"
+              title="剩余锁定时间"
+              :value="Date.now() + remainingSeconds * 1000"
+              format="mm:ss"
+              :value-style="{ color: '#ff4d4f', fontSize: '24px', fontWeight: 600 }"
+            />
+            <a-button type="primary" size="large" block @click="handleLockModalOk" style="margin-top: 16px;">
+              我知道了
+            </a-button>
+          </a-space>
+        </template>
+      </a-result>
+    </a-modal>
   </div>
 </template>
 
@@ -120,12 +195,14 @@ import { reactive, ref, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
-import { 
-  UserOutlined, 
-  LockOutlined, 
-  CloudServerOutlined
+import {
+  UserOutlined,
+  LockOutlined,
+  CloudServerOutlined,
+  SafetyOutlined
 } from '@ant-design/icons-vue'
 import { useUserStore } from '@/stores/user'
+import { login, getCaptcha } from '@/api/auth'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -134,21 +211,82 @@ const userStore = useUserStore()
 const formState = reactive({
   username: '',
   password: '',
+  captcha: '',
   remember: false
 })
 
 const loading = ref(false)
+const lockModalVisible = ref(false)
+const lockModalMessage = ref('')
+const remainingSeconds = ref(0)
+const captchaImage = ref('')
+const captchaLoading = ref(false)
+let countdownTimer: number | null = null
 
 const rules = {
   username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
-  password: [{ required: true, message: '请输入密码', trigger: 'blur' }]
+  password: [{ required: true, message: '请输入密码', trigger: 'blur' }],
+  captcha: [{ required: true, message: '请输入验证码', trigger: 'blur' }]
+}
+
+const refreshCaptcha = async () => {
+  captchaLoading.value = true
+  try {
+    const res = await getCaptcha()
+    if (res.code === 200) {
+      captchaImage.value = res.data.image
+      formState.captcha = ''
+    }
+  } catch (error) {
+    message.error('获取验证码失败')
+  } finally {
+    captchaLoading.value = false
+  }
+}
+
+const formatRemainingTime = (seconds: number): string => {
+  const minutes = Math.floor(seconds / 60)
+  const secs = seconds % 60
+  if (minutes > 0) {
+    return `${minutes}分${secs}秒`
+  }
+  return `${secs}秒`
+}
+
+const startCountdown = (seconds: number) => {
+  remainingSeconds.value = seconds
+  if (countdownTimer) {
+    clearInterval(countdownTimer)
+  }
+  countdownTimer = window.setInterval(() => {
+    remainingSeconds.value--
+    if (remainingSeconds.value <= 0) {
+      if (countdownTimer) {
+        clearInterval(countdownTimer)
+        countdownTimer = null
+      }
+    }
+  }, 1000)
+}
+
+const handleLockModalOk = () => {
+  lockModalVisible.value = false
+  if (countdownTimer) {
+    clearInterval(countdownTimer)
+    countdownTimer = null
+  }
+  // 清空密码输入框
+  formState.password = ''
 }
 
 const handleLogin = async () => {
   loading.value = true
   try {
-    const success = await userStore.loginAction(formState.username, formState.password)
-    if (success) {
+    const res = await login(formState.username, formState.password, formState.captcha)
+    if (res.code === 200) {
+      userStore.setToken(res.data.access_token, res.data.refresh_token)
+      userStore.userInfo = res.data.user
+
       if (formState.remember) {
         localStorage.setItem('rememberMe', 'true')
         localStorage.setItem('savedUsername', formState.username)
@@ -158,11 +296,34 @@ const handleLogin = async () => {
       }
       message.success('登录成功')
       router.push('/')
-    } else {
-      message.error('用户名或密码错误')
     }
   } catch (error: any) {
-    message.error(error.response?.data?.message || '登录失败')
+    const response = error.response
+    if (response?.status === 400) {
+      // 验证码错误或过期
+      message.error(response.data?.message || '验证码错误')
+      refreshCaptcha()
+    } else if (response?.status === 401) {
+      const data = response.data
+
+      if (data?.data?.locked) {
+        // 账户被锁定，显示对话框
+        const seconds = data.data.remaining_seconds || 0
+        lockModalMessage.value = data?.message || '账户已被锁定，请稍后再试'
+        lockModalVisible.value = true
+        startCountdown(seconds)
+      } else if (data?.data?.failed_attempts !== undefined) {
+        // 密码错误，显示错误次数
+        message.error(data?.message || `用户名或密码错误，还剩 ${data.data.remaining_attempts} 次尝试机会`)
+        refreshCaptcha()
+      } else {
+        message.error(data?.message || '用户名或密码错误')
+        refreshCaptcha()
+      }
+    } else {
+      message.error(error.response?.data?.message || '登录失败')
+      refreshCaptcha()
+    }
   } finally {
     loading.value = false
   }
@@ -178,6 +339,8 @@ onMounted(() => {
       formState.username = savedUsername
     })
   }
+  // 页面加载时获取验证码
+  refreshCaptcha()
 })
 </script>
 
@@ -615,5 +778,60 @@ onMounted(() => {
   .login-button:hover {
     transform: none;
   }
+}
+
+/* 锁定对话框样式 */
+.lock-modal :deep(.ant-modal-content) {
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.lock-modal :deep(.ant-modal-body) {
+  padding: 32px 24px;
+}
+
+.lock-result :deep(.ant-result-icon) {
+  margin-bottom: 24px;
+}
+
+.lock-result :deep(.ant-result-title) {
+  font-size: 20px;
+  font-weight: 600;
+  color: #262626;
+  margin-bottom: 8px;
+}
+
+.lock-result :deep(.ant-result-subtitle) {
+  font-size: 14px;
+  color: #595959;
+  line-height: 1.6;
+}
+
+.lock-result :deep(.ant-result-extra) {
+  margin-top: 24px;
+}
+
+.lock-result :deep(.ant-statistic-title) {
+  font-size: 12px;
+  color: #8c8c8c;
+  margin-bottom: 4px;
+}
+
+/* 验证码图片样式 */
+.captcha-image {
+  width: 100%;
+  height: 40px;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  border-radius: 8px;
+  cursor: pointer;
+  border: 1px solid #d9d9d9;
+  transition: all 0.3s ease;
+}
+
+.captcha-image:hover {
+  border-color: #1890ff;
+  box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.2);
 }
 </style>

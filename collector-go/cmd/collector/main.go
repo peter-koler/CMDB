@@ -1,0 +1,47 @@
+package main
+
+import (
+	"context"
+	"flag"
+	"log"
+	"os/signal"
+	"syscall"
+
+	_ "collector-go/internal/bootstrap"
+	"collector-go/internal/config"
+	"collector-go/internal/dispatcher"
+	"collector-go/internal/queue"
+	"collector-go/internal/scheduler"
+	"collector-go/internal/transport"
+	"collector-go/internal/worker"
+)
+
+func main() {
+	configPath := flag.String("config", "config/collector.json", "collector config path")
+	flag.Parse()
+
+	cfg, err := config.Load(*configPath)
+	if err != nil {
+		log.Fatalf("load config failed: %v", err)
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	resultQueue, err := queue.NewFromConfig(cfg)
+	if err != nil {
+		log.Fatalf("create queue failed: %v", err)
+	}
+	pool := worker.New(cfg.Worker.Size, cfg.Worker.QueueSize)
+	wheel := scheduler.NewWheel(cfg.TickDuration(), cfg.Scheduler.WheelSize)
+	d := dispatcher.New(wheel, pool, resultQueue)
+	server := transport.NewGRPCServer(cfg.Server.Addr, d, resultQueue, cfg.HeartbeatDuration())
+
+	pool.Start(ctx)
+	go wheel.Start(ctx)
+
+	log.Printf("collector start on %s, queue=%s", cfg.Server.Addr, cfg.Queue.Backend)
+	if err := server.Serve(ctx); err != nil {
+		log.Fatalf("collector stopped with error: %v", err)
+	}
+}

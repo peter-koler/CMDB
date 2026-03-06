@@ -16,6 +16,12 @@ class Config:
 
     CORS_HEADERS = "Content-Type"
     CORS_ORIGINS = ["http://localhost:3000", "http://localhost:5173"]
+    
+    # Session configuration for cross-origin requests
+    SESSION_TYPE = "filesystem"
+    SESSION_COOKIE_SAMESITE = "Lax"
+    SESSION_COOKIE_SECURE = False  # Set to True in production with HTTPS
+    SESSION_COOKIE_HTTPONLY = True
 
     PAGE_DEFAULT_SIZE = 20
     PAGE_MAX_SIZE = 100

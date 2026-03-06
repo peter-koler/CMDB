@@ -81,9 +81,14 @@
           <span v-else>-</span>
         </template>
         <template v-else-if="column.key === 'status'">
-          <a-tag :color="getStatusColor(record.status)">
-            {{ getStatusText(record.status) }}
-          </a-tag>
+          <a-space direction="vertical" size="small">
+            <a-tag :color="getStatusColor(record.status)">
+              {{ getStatusText(record.status) }}
+            </a-tag>
+            <a-tag v-if="isUserLocked(record)" color="red" size="small">
+              登录锁定
+            </a-tag>
+          </a-space>
         </template>
         <template v-else-if="column.key === 'created_at'">
           {{ formatDate(record.created_at) }}
@@ -94,6 +99,13 @@
             <a-button type="link" size="small" @click="handleResetPassword(record)">重置密码</a-button>
             <a-button type="link" size="small" @click="handleSetDept(record)">设置部门</a-button>
             <a-button type="link" size="small" @click="handleSetRole(record)">设置角色</a-button>
+            <a-popconfirm
+              v-if="isUserLocked(record)"
+              title="确定解锁该用户吗？"
+              @confirm="handleUnlock(record)"
+            >
+              <a-button type="link" size="small" style="color: #faad14">解锁</a-button>
+            </a-popconfirm>
             <a-popconfirm
               v-if="record.username !== 'admin'"
               title="确定删除该用户吗？"
@@ -198,7 +210,7 @@
 import { ref, reactive, onMounted, computed } from 'vue'
 import { message } from 'ant-design-vue'
 import { SearchOutlined, PlusOutlined } from '@ant-design/icons-vue'
-import { getUsers, createUser, updateUser, deleteUser, resetPassword as resetUserPassword } from '@/api/user'
+import { getUsers, createUser, updateUser, deleteUser, resetPassword as resetUserPassword, unlockUser } from '@/api/user'
 import { getDepartments } from '@/api/department'
 import { getRoles } from '@/api/role'
 import { addDepartmentUsers, removeDepartmentUser } from '@/api/department'
@@ -531,6 +543,22 @@ const getStatusText = (status: string) => {
 const formatDate = (date: string) => {
   if (!date) return '-'
   return new Date(date).toLocaleString()
+}
+
+const isUserLocked = (record: any) => {
+  if (!record.locked_until) return false
+  const lockTime = new Date(record.locked_until).getTime()
+  return lockTime > Date.now()
+}
+
+const handleUnlock = async (record: any) => {
+  try {
+    await unlockUser(record.id)
+    message.success('用户已解锁')
+    fetchUsers()
+  } catch (error: any) {
+    message.error(error.response?.data?.message || '解锁失败')
+  }
 }
 </script>
 

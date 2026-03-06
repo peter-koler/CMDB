@@ -10,6 +10,13 @@ from app.models.user import User
 from app.models.config import SystemConfig
 from app.models.operation_log import OperationLog
 from app.models.password_history import PasswordHistory
+from app.utils.captcha import (
+    generate_math_captcha,
+    generate_captcha_image,
+    save_captcha_to_session,
+    verify_captcha,
+    clear_captcha
+)
 from datetime import datetime, timedelta
 import bcrypt
 import re
@@ -66,14 +73,25 @@ def log_operation(
 
 def check_and_update_lockout(user):
     if user.locked_until and user.locked_until > datetime.now():
-        return False, "账户已被锁定，请稍后再试"
+        remaining_seconds = int((user.locked_until - datetime.now()).total_seconds())
+        remaining_minutes = remaining_seconds // 60
+        remaining_hours = remaining_minutes // 60
+        if remaining_hours > 0:
+            time_str = f"{remaining_hours}小时{remaining_minutes % 60}分钟"
+        else:
+            time_str = f"{remaining_minutes}分钟"
+        return False, f"账户已被锁定，请在{time_str}后再试", {
+            "locked": True,
+            "locked_until": user.locked_until.isoformat(),
+            "remaining_seconds": remaining_seconds
+        }
 
     if user.locked_until and user.locked_until <= datetime.now():
         user.locked_until = None
         user.failed_login_attempts = 0
         user.save()
 
-    return True, "OK"
+    return True, "OK", None
 
 
 @auth_bp.route("/login", methods=["POST"])
@@ -81,9 +99,18 @@ def login():
     data = request.get_json()
     username = data.get("username")
     password = data.get("password")
+    captcha_answer = data.get("captcha")
 
     if not username or not password:
         return jsonify({"code": 400, "message": "用户名和密码不能为空"}), 400
+
+    # 验证验证码
+    if not captcha_answer:
+        return jsonify({"code": 400, "message": "请输入验证码"}), 400
+
+    success, msg = verify_captcha(captcha_answer)
+    if not success:
+        return jsonify({"code": 400, "message": msg}), 400
 
     user = User.query.filter_by(username=username).first()
 
@@ -119,17 +146,20 @@ def login():
         )
         return jsonify({"code": 401, "message": "账户已被禁用"}), 401
 
-    ok, msg = check_and_update_lockout(user)
+    ok, msg, lock_info = check_and_update_lockout(user)
     if not ok:
-        return jsonify({"code": 401, "message": msg}), 401
+        return jsonify({"code": 401, "message": msg, "data": lock_info}), 401
 
     if not user.check_password(password):
         user.failed_login_attempts += 1
         max_failures = int(SystemConfig.get_value("max_login_failures", "5"))
+        remaining_attempts = max(0, max_failures - user.failed_login_attempts)
 
+        is_locked = False
         if user.failed_login_attempts >= max_failures:
             lock_duration = int(SystemConfig.get_value("lock_duration_hours", "24"))
             user.locked_until = datetime.now() + timedelta(hours=lock_duration)
+            is_locked = True
 
         user.save()
         log_operation(
@@ -142,7 +172,29 @@ def login():
             "failed",
             "密码错误",
         )
-        return jsonify({"code": 401, "message": "用户名或密码错误"}), 401
+
+        error_data = {
+            "failed_attempts": user.failed_login_attempts,
+            "max_attempts": max_failures,
+            "remaining_attempts": remaining_attempts,
+            "locked": is_locked
+        }
+
+        if is_locked:
+            # 计算锁定的剩余秒数
+            remaining_seconds = int((user.locked_until - datetime.now()).total_seconds())
+            error_data["remaining_seconds"] = remaining_seconds
+            return jsonify({
+                "code": 401,
+                "message": f"密码错误次数过多，账户已被锁定{lock_duration}小时",
+                "data": error_data
+            }), 401
+        else:
+            return jsonify({
+                "code": 401,
+                "message": f"用户名或密码错误，还剩 {remaining_attempts} 次尝试机会",
+                "data": error_data
+            }), 401
 
     user.failed_login_attempts = 0
     user.locked_until = None
@@ -433,3 +485,38 @@ def change_password():
     log_operation(user.id, user.username, "UPDATE", "password", user.id, "修改密码成功")
 
     return jsonify({"code": 200, "message": "密码修改成功"})
+
+
+@auth_bp.route("/captcha", methods=["GET"])
+def get_captcha():
+    """获取验证码"""
+    # 生成数学验证码
+    captcha_data = generate_math_captcha()
+
+    # 生成验证码图片
+    image_base64 = generate_captcha_image(captcha_data['formula'])
+
+    # 保存到session
+    save_captcha_to_session(captcha_data)
+
+    return jsonify({
+        "code": 200,
+        "data": {
+            "image": image_base64,
+            "formula": captcha_data['formula']
+        }
+    })
+
+
+@auth_bp.route("/captcha/verify", methods=["POST"])
+def verify_captcha_code():
+    """验证验证码"""
+    data = request.get_json()
+    user_answer = data.get('answer', '')
+
+    success, message = verify_captcha(user_answer)
+
+    if success:
+        return jsonify({"code": 200, "message": message})
+    else:
+        return jsonify({"code": 400, "message": message}), 400
