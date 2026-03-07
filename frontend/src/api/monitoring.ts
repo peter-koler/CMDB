@@ -96,3 +96,112 @@ export const getTemplateHierarchy = (lang: string = 'zh-CN') => {
     params: { lang }
   })
 }
+
+export interface AlertItem {
+  id: number
+  name?: string
+  level: 'critical' | 'warning' | 'info' | string
+  status?: string
+  monitor_name?: string
+  monitor_id?: number
+  metric?: string
+  metric_value?: number | string
+  threshold?: number | string
+  triggered_at?: string
+  recovered_at?: string
+  duration_seconds?: number
+  assignee?: string
+  note?: string
+}
+
+export interface AlertRule {
+  id: number
+  name: string
+  monitor_type?: string
+  metric: string
+  operator?: string
+  threshold: number | string
+  level: 'critical' | 'warning' | 'info' | string
+  enabled: boolean
+  updated_at?: string
+}
+
+export const getCurrentAlerts = (params?: Record<string, any>) => {
+  return request({
+    url: '/monitoring/alerts/current',
+    method: 'GET',
+    params
+  })
+}
+
+export const getAlertHistory = (params?: Record<string, any>) => {
+  return request({
+    url: '/monitoring/alerts/history',
+    method: 'GET',
+    params
+  })
+}
+
+export const claimAlert = (alertId: number, data?: Record<string, any>) => {
+  return request({
+    url: `/monitoring/alerts/${alertId}/claim`,
+    method: 'POST',
+    data
+  })
+}
+
+export const closeAlert = (alertId: number, data?: Record<string, any>) => {
+  return request({
+    url: `/monitoring/alerts/${alertId}/close`,
+    method: 'POST',
+    data
+  })
+}
+
+export const getAlertRules = (params?: Record<string, any>) => {
+  return request({
+    url: '/monitoring/alert-rules',
+    method: 'GET',
+    params
+  })
+}
+
+export const createAlertRule = (data: Partial<AlertRule>) => {
+  return request({
+    url: '/monitoring/alert-rules',
+    method: 'POST',
+    data
+  })
+}
+
+export const updateAlertRule = (ruleId: number, data: Partial<AlertRule>) => {
+  return request({
+    url: `/monitoring/alert-rules/${ruleId}`,
+    method: 'PUT',
+    data
+  })
+}
+
+export const deleteAlertRule = (ruleId: number, version?: number) => {
+  return request({
+    url: `/monitoring/alert-rules/${ruleId}`,
+    method: 'DELETE',
+    params: version ? { version } : undefined
+  })
+}
+
+export const enableAlertRule = (ruleId: number, version?: number) => {
+  return request({
+    url: `/monitoring/alert-rules/${ruleId}/enable`,
+    method: 'PATCH',
+    data: version ? { version } : {}
+  })
+}
+
+export const disableAlertRule = (ruleId: number, version?: number) => {
+  return request({
+    url: `/monitoring/alert-rules/${ruleId}/disable`,
+    method: 'PATCH',
+    data: version ? { version } : {}
+  })
+}

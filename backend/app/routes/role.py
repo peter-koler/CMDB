@@ -358,6 +358,29 @@ def get_menu_tree():
                     ]
                 },
                 {
+                    'key': 'monitoring:alert:center',
+                    'title': '告警中心',
+                    'actions': [
+                        {'key': 'monitoring:alert:current', 'title': '当前告警'},
+                        {'key': 'monitoring:alert:history', 'title': '告警历史'},
+                        {'key': 'monitoring:alert:rule', 'title': '告警规则'},
+                        {'key': 'monitoring:alert:claim', 'title': '认领'},
+                        {'key': 'monitoring:alert:close', 'title': '关闭'}
+                    ]
+                },
+                {
+                    'key': 'monitoring:alert:setting',
+                    'title': '告警配置',
+                    'actions': [
+                        {'key': 'monitoring:alert:setting:view', 'title': '查看'},
+                        {'key': 'monitoring:alert:setting:create', 'title': '创建'},
+                        {'key': 'monitoring:alert:setting:edit', 'title': '编辑'},
+                        {'key': 'monitoring:alert:setting:delete', 'title': '删除'},
+                        {'key': 'monitoring:alert:setting:enable', 'title': '启用'},
+                        {'key': 'monitoring:alert:setting:disable', 'title': '停用'}
+                    ]
+                },
+                {
                     'key': 'monitoring:dashboard',
                     'title': '监控大盘',
                     'actions': [

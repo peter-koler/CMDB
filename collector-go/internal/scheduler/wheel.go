@@ -13,8 +13,18 @@ type entry struct {
 	id        int64
 	interval  time.Duration
 	rounds    int64
+	nextDue   time.Time
 	cancelled atomic.Bool
 	f         TaskFunc
+}
+
+type Stats struct {
+	TotalRuns      int64
+	ActiveTasks    int64
+	MaxDriftMs     int64
+	AvgDriftMs     int64
+	LastDriftMs    int64
+	DroppedDueRuns int64
 }
 
 type Wheel struct {
@@ -27,6 +37,12 @@ type Wheel struct {
 	nextID int64
 	stopCh chan struct{}
 	doneCh chan struct{}
+
+	totalRuns   atomic.Int64
+	sumDriftNs  atomic.Int64
+	maxDriftNs  atomic.Int64
+	lastDriftNs atomic.Int64
+	lateRuns    atomic.Int64
 }
 
 func NewWheel(tick time.Duration, size int) *Wheel {
@@ -77,7 +93,8 @@ func (w *Wheel) ScheduleEvery(interval time.Duration, f TaskFunc) int64 {
 		interval = w.tick
 	}
 	id := atomic.AddInt64(&w.nextID, 1)
-	e := &entry{id: id, interval: interval, f: f}
+	now := time.Now()
+	e := &entry{id: id, interval: interval, nextDue: now.Add(interval), f: f}
 
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -110,6 +127,7 @@ func (w *Wheel) placeLocked(e *entry) {
 }
 
 func (w *Wheel) onTick(ctx context.Context) {
+	now := time.Now()
 	w.mu.Lock()
 	bucket := w.slots[w.cursor]
 	w.slots[w.cursor] = make(map[int64]*entry)
@@ -129,11 +147,59 @@ func (w *Wheel) onTick(ctx context.Context) {
 		}
 
 		e.f(ctx)
+		w.recordDrift(now.Sub(e.nextDue))
+		nextDue := e.nextDue.Add(e.interval)
+		if nextDue.Before(now) {
+			w.lateRuns.Add(1)
+			nextDue = now.Add(e.interval)
+		}
+		e.nextDue = nextDue
 
 		w.mu.Lock()
 		if !e.cancelled.Load() {
 			w.placeLocked(e)
 		}
 		w.mu.Unlock()
+	}
+}
+
+func (w *Wheel) recordDrift(d time.Duration) {
+	if d < 0 {
+		d = 0
+	}
+	ns := d.Nanoseconds()
+	w.totalRuns.Add(1)
+	w.sumDriftNs.Add(ns)
+	w.lastDriftNs.Store(ns)
+	for {
+		old := w.maxDriftNs.Load()
+		if ns <= old {
+			break
+		}
+		if w.maxDriftNs.CompareAndSwap(old, ns) {
+			break
+		}
+	}
+}
+
+func (w *Wheel) Stats() Stats {
+	total := w.totalRuns.Load()
+	sumNs := w.sumDriftNs.Load()
+	maxNs := w.maxDriftNs.Load()
+	lastNs := w.lastDriftNs.Load()
+	w.mu.Lock()
+	active := int64(len(w.tasks))
+	w.mu.Unlock()
+	avgMs := int64(0)
+	if total > 0 {
+		avgMs = (sumNs / total) / int64(time.Millisecond)
+	}
+	return Stats{
+		TotalRuns:      total,
+		ActiveTasks:    active,
+		MaxDriftMs:     maxNs / int64(time.Millisecond),
+		AvgDriftMs:     avgMs,
+		LastDriftMs:    lastNs / int64(time.Millisecond),
+		DroppedDueRuns: w.lateRuns.Load(),
 	}
 }

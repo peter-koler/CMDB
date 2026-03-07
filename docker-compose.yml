@@ -1,0 +1,51 @@
+services:
+  redis:
+    image: docker.io/redis:7.2-alpine
+    container_name: arco-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 5s  # 新增：启动后等待5秒再开始健康检查（适配Redis启动耗时）
+    volumes:
+      - redis-data:/data
+    # 新增：限制资源（可选，避免占用过多Mac资源）
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  victoria-metrics:
+    image: victoriametrics/victoria-metrics:latest
+    container_name: arco-victoria-metrics
+    restart: unless-stopped
+    command:
+      - "--storageDataPath=/victoria-metrics-data"
+      - "--retentionPeriod=${VM_RETENTION_PERIOD:-30d}"  # 优化：默认保留30天（d=天，h=小时，w=周）
+      - "--httpListenAddr=:8428"
+      - "--selfScrapeInterval=5s"  # 新增：开启自监控（便于查看VM自身状态）
+    ports:
+      - "${VM_PORT:-8428}:8428"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8428/health"]  # 优化：改用curl（镜像内置）
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s  # 新增：VM启动稍慢，等待10秒再检查
+    volumes:
+      - vm-data:/victoria-metrics-data
+    # 新增：限制资源（可选）
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+
+volumes:
+  redis-data:
+  vm-data:

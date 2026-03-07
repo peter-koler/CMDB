@@ -20,10 +20,13 @@ type Config struct {
 		QueueSize int `json:"queue_size"`
 	} `json:"worker"`
 	Queue struct {
-		Backend string `json:"backend"` // memory | kafka
+		Backend string `json:"backend"` // memory | kafka | disk
 		Memory  struct {
 			Size int `json:"size"`
 		} `json:"memory"`
+		Disk struct {
+			Path string `json:"path"`
+		} `json:"disk"`
 		Kafka struct {
 			Brokers []string `json:"brokers"`
 			Topic   string   `json:"topic"`
@@ -33,6 +36,17 @@ type Config struct {
 	Stream struct {
 		HeartbeatMs int `json:"heartbeat_ms"`
 	} `json:"stream"`
+	Precompute struct {
+		Enabled bool `json:"enabled"`
+		Rules   []struct {
+			Metrics   string  `json:"metrics"`
+			Protocol  string  `json:"protocol"`
+			Field     string  `json:"field"`
+			Op        string  `json:"op"`
+			Threshold float64 `json:"threshold"`
+			Summary   string  `json:"summary"`
+		} `json:"rules"`
+	} `json:"precompute"`
 }
 
 func Default() Config {
@@ -44,9 +58,11 @@ func Default() Config {
 	c.Worker.QueueSize = 2048
 	c.Queue.Backend = "memory"
 	c.Queue.Memory.Size = 2048
+	c.Queue.Disk.Path = "data/result-queue.jsonl"
 	c.Queue.Kafka.Topic = "collector.metrics"
 	c.Queue.Kafka.Bin = "kcat"
 	c.Stream.HeartbeatMs = 10000
+	c.Precompute.Enabled = false
 	return c
 }
 

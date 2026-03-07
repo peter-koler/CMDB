@@ -10,6 +10,7 @@ import (
 	_ "collector-go/internal/bootstrap"
 	"collector-go/internal/config"
 	"collector-go/internal/dispatcher"
+	"collector-go/internal/precompute"
 	"collector-go/internal/queue"
 	"collector-go/internal/scheduler"
 	"collector-go/internal/transport"
@@ -35,6 +36,18 @@ func main() {
 	pool := worker.New(cfg.Worker.Size, cfg.Worker.QueueSize)
 	wheel := scheduler.NewWheel(cfg.TickDuration(), cfg.Scheduler.WheelSize)
 	d := dispatcher.New(wheel, pool, resultQueue)
+	rules := make([]precompute.Rule, 0, len(cfg.Precompute.Rules))
+	for _, r := range cfg.Precompute.Rules {
+		rules = append(rules, precompute.Rule{
+			Metrics:   r.Metrics,
+			Protocol:  r.Protocol,
+			Field:     r.Field,
+			Op:        r.Op,
+			Threshold: r.Threshold,
+			Summary:   r.Summary,
+		})
+	}
+	d.SetPrecomputeEvaluator(precompute.New(cfg.Precompute.Enabled, rules))
 	server := transport.NewGRPCServer(cfg.Server.Addr, d, resultQueue, cfg.HeartbeatDuration())
 
 	pool.Start(ctx)

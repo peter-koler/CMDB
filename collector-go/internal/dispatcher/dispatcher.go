@@ -18,6 +18,11 @@ import (
 	"collector-go/internal/worker"
 )
 
+type PrecomputeEvaluator interface {
+	Enabled() bool
+	Evaluate(task model.MetricsTask, fields map[string]string) (bool, string)
+}
+
 type Dispatcher struct {
 	wheel *scheduler.Wheel
 	pool  *worker.Pool
@@ -28,6 +33,7 @@ type Dispatcher struct {
 	jobs        map[int64]model.Job
 	defaultWait time.Duration
 	dropped     atomic.Int64
+	precompute  PrecomputeEvaluator
 }
 
 func New(wheel *scheduler.Wheel, pool *worker.Pool, q queue.ResultQueue) *Dispatcher {
@@ -39,6 +45,10 @@ func New(wheel *scheduler.Wheel, pool *worker.Pool, q queue.ResultQueue) *Dispat
 		jobs:        map[int64]model.Job{},
 		defaultWait: 5 * time.Second,
 	}
+}
+
+func (d *Dispatcher) SetPrecomputeEvaluator(ev PrecomputeEvaluator) {
+	d.precompute = ev
 }
 
 func (d *Dispatcher) RegisterJob(job model.Job) {
@@ -155,6 +165,16 @@ func (d *Dispatcher) executeTask(ctx context.Context, job model.Job, task model.
 			res.Code = model.CodeTimeout
 		}
 		res.Message = fmt.Sprintf("%s: %v", msg, err)
+	}
+	if err == nil && d.precompute != nil && d.precompute.Enabled() {
+		triggered, summary := d.precompute.Evaluate(task, fields)
+		if triggered {
+			if res.Fields == nil {
+				res.Fields = map[string]string{}
+			}
+			res.Fields["__precompute_triggered__"] = "true"
+			res.Fields["__precompute_summary__"] = summary
+		}
 	}
 	d.pushResult(ctx, res)
 }

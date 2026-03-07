@@ -143,6 +143,12 @@ const routes = [
             name: 'MonitoringTemplate',
             component: () => import('@/views/monitoring/template/index.vue'),
             meta: { title: '监控模板', icon: 'FileTextOutlined', permission: 'monitoring:template' }
+          },
+          {
+            path: 'alert',
+            name: 'MonitoringAlertCenter',
+            component: () => import('@/views/monitoring/alert/index.vue'),
+            meta: { title: '告警中心', icon: 'BellOutlined', permission: 'monitoring:alert:center' }
           }
         ]
       },

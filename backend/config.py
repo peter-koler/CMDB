@@ -35,6 +35,13 @@ class Config:
     NOTIFICATION_MAX_RETRY_ATTEMPTS = 3
     NOTIFICATION_RETRY_DELAYS = [60, 300, 900]  # 1min, 5min, 15min
 
+    # Go Manager API integration
+    GO_MANAGER_URL = os.environ.get("GO_MANAGER_URL", "http://127.0.0.1:8080")
+    GO_MANAGER_TIMEOUT_SECONDS = float(os.environ.get("GO_MANAGER_TIMEOUT_SECONDS", "3"))
+    GO_MANAGER_MAX_RETRIES = int(os.environ.get("GO_MANAGER_MAX_RETRIES", "2"))
+    GO_MANAGER_CB_FAILURE_THRESHOLD = int(os.environ.get("GO_MANAGER_CB_FAILURE_THRESHOLD", "3"))
+    GO_MANAGER_CB_RECOVERY_SECONDS = int(os.environ.get("GO_MANAGER_CB_RECOVERY_SECONDS", "30"))
+
 
 class DevelopmentConfig(Config):
     DEBUG = True

@@ -105,6 +105,10 @@ func (s *GRPCServer) Connect(stream grpc.BidiStreamingServer[pb.CollectorFrame, 
 				return err
 			}
 			if err := stream.Send(&pb.ManagerFrame{Payload: &pb.ManagerFrame_Report{Report: toCollectRep(res)}}); err != nil {
+				// Best-effort requeue to avoid data loss on transient stream/network failures.
+				requeueCtx, requeueCancel := context.WithTimeout(ctx, 500*time.Millisecond)
+				_ = s.results.Push(requeueCtx, res)
+				requeueCancel()
 				return err
 			}
 		}
@@ -138,15 +142,15 @@ func toJob(task *pb.CollectTask) model.Job {
 
 func toCollectRep(res model.Result) *pb.CollectRep {
 	return &pb.CollectRep{
-		JobId:       res.JobID,
-		MonitorId:   res.MonitorID,
-		App:         res.App,
-		Metrics:     res.Metrics,
-		Protocol:    res.Protocol,
-		TimeUnixMs:  res.Time.UnixMilli(),
-		Success:     res.Success,
-		Message:     res.Message,
-		Fields:      res.Fields,
+		JobId:        res.JobID,
+		MonitorId:    res.MonitorID,
+		App:          res.App,
+		Metrics:      res.Metrics,
+		Protocol:     res.Protocol,
+		TimeUnixMs:   res.Time.UnixMilli(),
+		Success:      res.Success,
+		Message:      res.Message,
+		Fields:       res.Fields,
 		RawLatencyMs: res.RawLatency.Milliseconds(),
 	}
 }

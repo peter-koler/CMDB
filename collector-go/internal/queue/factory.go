@@ -11,6 +11,8 @@ func NewFromConfig(cfg config.Config) (ResultQueue, error) {
 	switch strings.ToLower(cfg.Queue.Backend) {
 	case "memory", "":
 		return NewMemoryQueue(cfg.Queue.Memory.Size), nil
+	case "disk":
+		return NewDiskQueue(cfg.Queue.Disk.Path)
 	case "kafka":
 		primary := NewMemoryQueue(cfg.Queue.Memory.Size)
 		kq := NewKafkaExecQueue(cfg.Queue.Kafka.Brokers, cfg.Queue.Kafka.Topic, cfg.Queue.Kafka.Bin)
