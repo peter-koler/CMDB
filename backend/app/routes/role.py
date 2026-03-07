@@ -338,13 +338,23 @@ def get_menu_tree():
                     ]
                 },
                 {
-                    'key': 'monitoring:target',
-                    'title': '监控目标',
+                    'key': 'monitoring:list',
+                    'title': '监控列表',
                     'actions': [
-                        {'key': 'monitoring:target:view', 'title': '查看'},
-                        {'key': 'monitoring:target:create', 'title': '创建'},
-                        {'key': 'monitoring:target:update', 'title': '编辑'},
-                        {'key': 'monitoring:target:delete', 'title': '删除'}
+                        {'key': 'monitoring:list:view', 'title': '查看'},
+                        {'key': 'monitoring:list:create', 'title': '创建'},
+                        {'key': 'monitoring:list:edit', 'title': '编辑'},
+                        {'key': 'monitoring:list:delete', 'title': '删除'},
+                        {'key': 'monitoring:list:enable', 'title': '启用'},
+                        {'key': 'monitoring:list:disable', 'title': '停用'}
+                    ]
+                },
+                {
+                    'key': 'monitoring:bulletin',
+                    'title': '监控简报',
+                    'actions': [
+                        {'key': 'monitoring:bulletin:view', 'title': '查看'},
+                        {'key': 'monitoring:bulletin:export', 'title': '导出'}
                     ]
                 },
                 {
@@ -381,10 +391,90 @@ def get_menu_tree():
                     ]
                 },
                 {
+                    'key': 'monitoring:alert:integration',
+                    'title': '告警集成',
+                    'actions': [
+                        {'key': 'monitoring:alert:integration:view', 'title': '查看'},
+                        {'key': 'monitoring:alert:integration:create', 'title': '创建'},
+                        {'key': 'monitoring:alert:integration:edit', 'title': '编辑'},
+                        {'key': 'monitoring:alert:integration:delete', 'title': '删除'},
+                        {'key': 'monitoring:alert:integration:test', 'title': '测试'}
+                    ]
+                },
+                {
+                    'key': 'monitoring:alert:group',
+                    'title': '告警分组',
+                    'actions': [
+                        {'key': 'monitoring:alert:group:view', 'title': '查看'},
+                        {'key': 'monitoring:alert:group:create', 'title': '创建'},
+                        {'key': 'monitoring:alert:group:edit', 'title': '编辑'},
+                        {'key': 'monitoring:alert:group:delete', 'title': '删除'}
+                    ]
+                },
+                {
+                    'key': 'monitoring:alert:inhibit',
+                    'title': '告警抑制',
+                    'actions': [
+                        {'key': 'monitoring:alert:inhibit:view', 'title': '查看'},
+                        {'key': 'monitoring:alert:inhibit:create', 'title': '创建'},
+                        {'key': 'monitoring:alert:inhibit:edit', 'title': '编辑'},
+                        {'key': 'monitoring:alert:inhibit:delete', 'title': '删除'}
+                    ]
+                },
+                {
+                    'key': 'monitoring:alert:silence',
+                    'title': '告警静默',
+                    'actions': [
+                        {'key': 'monitoring:alert:silence:view', 'title': '查看'},
+                        {'key': 'monitoring:alert:silence:create', 'title': '创建'},
+                        {'key': 'monitoring:alert:silence:edit', 'title': '编辑'},
+                        {'key': 'monitoring:alert:silence:delete', 'title': '删除'}
+                    ]
+                },
+                {
+                    'key': 'monitoring:alert:notice',
+                    'title': '通知配置',
+                    'actions': [
+                        {'key': 'monitoring:alert:notice:view', 'title': '查看'},
+                        {'key': 'monitoring:alert:notice:create', 'title': '创建'},
+                        {'key': 'monitoring:alert:notice:edit', 'title': '编辑'},
+                        {'key': 'monitoring:alert:notice:delete', 'title': '删除'},
+                        {'key': 'monitoring:alert:notice:test', 'title': '测试'}
+                    ]
+                },
+                {
                     'key': 'monitoring:dashboard',
                     'title': '监控大盘',
                     'actions': [
                         {'key': 'monitoring:dashboard:view', 'title': '查看'}
+                    ]
+                },
+                {
+                    'key': 'monitoring:collector',
+                    'title': '采集器管理',
+                    'actions': [
+                        {'key': 'monitoring:collector:view', 'title': '查看'},
+                        {'key': 'monitoring:collector:delete', 'title': '删除'}
+                    ]
+                },
+                {
+                    'key': 'monitoring:labels',
+                    'title': '标签管理',
+                    'actions': [
+                        {'key': 'monitoring:labels:view', 'title': '查看'},
+                        {'key': 'monitoring:labels:create', 'title': '创建'},
+                        {'key': 'monitoring:labels:edit', 'title': '编辑'},
+                        {'key': 'monitoring:labels:delete', 'title': '删除'}
+                    ]
+                },
+                {
+                    'key': 'monitoring:status',
+                    'title': '状态页',
+                    'actions': [
+                        {'key': 'monitoring:status:view', 'title': '查看'},
+                        {'key': 'monitoring:status:create', 'title': '创建'},
+                        {'key': 'monitoring:status:edit', 'title': '编辑'},
+                        {'key': 'monitoring:status:delete', 'title': '删除'}
                     ]
                 }
             ]

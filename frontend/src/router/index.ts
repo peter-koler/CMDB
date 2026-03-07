@@ -139,16 +139,102 @@ const routes = [
         meta: { title: '监控管理', icon: 'LineChartOutlined' },
         children: [
           {
+            path: 'dashboard',
+            name: 'MonitoringDashboard',
+            component: () => import('@/views/monitoring/dashboard/index.vue'),
+            meta: { title: '监控大盘', icon: 'DashboardOutlined', permission: 'monitoring:dashboard' }
+          },
+          {
+            path: 'list',
+            name: 'MonitoringList',
+            component: () => import('@/views/monitoring/target/index.vue'),
+            meta: { title: '监控列表', icon: 'DesktopOutlined', permission: 'monitoring:list' }
+          },
+          {
+            path: 'target',
+            redirect: '/monitoring/list'
+          },
+          {
+            path: 'bulletin',
+            name: 'MonitoringBulletin',
+            component: () => import('@/views/monitoring/bulletin/index.vue'),
+            meta: { title: '监控简报', icon: 'BookOutlined', permission: 'monitoring:bulletin' }
+          },
+          {
             path: 'template',
             name: 'MonitoringTemplate',
             component: () => import('@/views/monitoring/template/index.vue'),
             meta: { title: '监控模板', icon: 'FileTextOutlined', permission: 'monitoring:template' }
           },
           {
-            path: 'alert',
-            name: 'MonitoringAlertCenter',
+            path: 'alert/current',
+            name: 'MonitoringAlertCurrent',
             component: () => import('@/views/monitoring/alert/index.vue'),
-            meta: { title: '告警中心', icon: 'BellOutlined', permission: 'monitoring:alert:center' }
+            meta: { title: '当前告警', icon: 'BellOutlined', permission: 'monitoring:alert:current' }
+          },
+          {
+            path: 'alert/history',
+            name: 'MonitoringAlertHistory',
+            component: () => import('@/views/monitoring/alert/index.vue'),
+            meta: { title: '告警历史', icon: 'HistoryOutlined', permission: 'monitoring:alert:history' }
+          },
+          {
+            path: 'alert/rule',
+            name: 'MonitoringAlertRule',
+            component: () => import('@/views/monitoring/alert/index.vue'),
+            meta: { title: '告警规则', icon: 'FileProtectOutlined', permission: 'monitoring:alert:rule' }
+          },
+          {
+            path: 'alert/integration',
+            name: 'MonitoringAlertIntegration',
+            component: () => import('@/views/monitoring/alert/integration.vue'),
+            meta: { title: '告警集成', icon: 'ApiOutlined', permission: 'monitoring:alert:integration' }
+          },
+          {
+            path: 'alert/group',
+            name: 'MonitoringAlertGroup',
+            component: () => import('@/views/monitoring/alert/group.vue'),
+            meta: { title: '告警分组', icon: 'ClusterOutlined', permission: 'monitoring:alert:group' }
+          },
+          {
+            path: 'alert/inhibit',
+            name: 'MonitoringAlertInhibit',
+            component: () => import('@/views/monitoring/alert/inhibit.vue'),
+            meta: { title: '告警抑制', icon: 'StopOutlined', permission: 'monitoring:alert:inhibit' }
+          },
+          {
+            path: 'alert/silence',
+            name: 'MonitoringAlertSilence',
+            component: () => import('@/views/monitoring/alert/silence.vue'),
+            meta: { title: '告警静默', icon: 'SoundOutlined', permission: 'monitoring:alert:silence' }
+          },
+          {
+            path: 'alert/notice',
+            name: 'MonitoringAlertNotice',
+            component: () => import('@/views/monitoring/alert/notice.vue'),
+            meta: { title: '通知配置', icon: 'NotificationOutlined', permission: 'monitoring:alert:notice' }
+          },
+          {
+            path: 'alert',
+            redirect: '/monitoring/alert/current'
+          },
+          {
+            path: 'collector',
+            name: 'MonitoringCollector',
+            component: () => import('@/views/monitoring/collector/index.vue'),
+            meta: { title: '采集器管理', icon: 'ClusterOutlined', permission: 'monitoring:collector' }
+          },
+          {
+            path: 'labels',
+            name: 'MonitoringLabels',
+            component: () => import('@/views/monitoring/labels/index.vue'),
+            meta: { title: '标签管理', icon: 'TagsOutlined', permission: 'monitoring:labels' }
+          },
+          {
+            path: 'status',
+            name: 'MonitoringStatus',
+            component: () => import('@/views/monitoring/status/index.vue'),
+            meta: { title: '状态页', icon: 'MobileOutlined', permission: 'monitoring:status' }
           }
         ]
       },
@@ -246,6 +332,10 @@ const router = createRouter({
   routes
 })
 
+const routePermissionAliases: Record<string, string[]> = {
+  'monitoring:list': ['monitoring:target']
+}
+
 router.beforeEach(async (to, from, next) => {
   const userStore = useUserStore()
   
@@ -268,7 +358,11 @@ router.beforeEach(async (to, from, next) => {
     }
 
     // 检查权限
-    if (to.meta.permission && !userStore.hasPermission(to.meta.permission as string)) {
+    if (to.meta.permission) {
+      const required = to.meta.permission as string
+      const aliases = routePermissionAliases[required] || []
+      const allowed = userStore.hasPermission(required) || aliases.some((item) => userStore.hasPermission(item))
+      if (!allowed) {
       // 如果没有权限，且不是从首页来的，取消导航
       // 或者重定向到 403 (暂时没有) 或 Dashboard
       if (from.path === '/') {
@@ -281,6 +375,7 @@ router.beforeEach(async (to, from, next) => {
          next(false)
       }
       return
+      }
     }
     
     next()

@@ -126,6 +126,67 @@ export interface AlertRule {
   updated_at?: string
 }
 
+export interface MonitoringTarget {
+  id: number
+  name?: string
+  app?: string
+  target?: string
+  endpoint?: string
+  status?: string
+  enabled?: boolean
+  interval?: number
+  last_collected_at?: string
+  version?: number
+}
+
+export const getMonitoringTargets = (params?: Record<string, any>) => {
+  return request({
+    url: '/monitoring/targets',
+    method: 'GET',
+    params
+  })
+}
+
+export const createMonitoringTarget = (data: Partial<MonitoringTarget>) => {
+  return request({
+    url: '/monitoring/targets',
+    method: 'POST',
+    data
+  })
+}
+
+export const updateMonitoringTarget = (monitorId: number, data: Partial<MonitoringTarget>) => {
+  return request({
+    url: `/monitoring/targets/${monitorId}`,
+    method: 'PUT',
+    data
+  })
+}
+
+export const deleteMonitoringTarget = (monitorId: number, version?: number) => {
+  return request({
+    url: `/monitoring/targets/${monitorId}`,
+    method: 'DELETE',
+    params: version ? { version } : undefined
+  })
+}
+
+export const enableMonitoringTarget = (monitorId: number, data?: Record<string, any>) => {
+  return request({
+    url: `/monitoring/targets/${monitorId}/enable`,
+    method: 'PATCH',
+    data
+  })
+}
+
+export const disableMonitoringTarget = (monitorId: number, data?: Record<string, any>) => {
+  return request({
+    url: `/monitoring/targets/${monitorId}/disable`,
+    method: 'PATCH',
+    data
+  })
+}
+
 export const getCurrentAlerts = (params?: Record<string, any>) => {
   return request({
     url: '/monitoring/alerts/current',
@@ -203,5 +264,202 @@ export const disableAlertRule = (ruleId: number, version?: number) => {
     url: `/monitoring/alert-rules/${ruleId}/disable`,
     method: 'PATCH',
     data: version ? { version } : {}
+  })
+}
+
+export interface AlertIntegration {
+  id: string | number
+  name: string
+  type: string
+  endpoint?: string
+  status?: string
+}
+
+export const getAlertIntegrations = (params?: Record<string, any>) => request({ url: '/monitoring/alert-integrations', method: 'GET', params })
+export const createAlertIntegration = (data: Partial<AlertIntegration>) => request({ url: '/monitoring/alert-integrations', method: 'POST', data })
+export const updateAlertIntegration = (id: string | number, data: Partial<AlertIntegration>) => request({ url: `/monitoring/alert-integrations/${id}`, method: 'PUT', data })
+export const deleteAlertIntegration = (id: string | number) => request({ url: `/monitoring/alert-integrations/${id}`, method: 'DELETE' })
+export const testAlertIntegration = (id: string | number, data?: Record<string, any>) => request({ url: `/monitoring/alert-integrations/${id}/test`, method: 'POST', data })
+
+export interface AlertGroup {
+  id: string | number
+  name: string
+  matcher?: string
+  enabled?: boolean
+}
+
+export const getAlertGroups = (params?: Record<string, any>) => request({ url: '/monitoring/alert-groups', method: 'GET', params })
+export const createAlertGroup = (data: Partial<AlertGroup>) => request({ url: '/monitoring/alert-groups', method: 'POST', data })
+export const updateAlertGroup = (id: string | number, data: Partial<AlertGroup>) => request({ url: `/monitoring/alert-groups/${id}`, method: 'PUT', data })
+export const deleteAlertGroup = (id: string | number) => request({ url: `/monitoring/alert-groups/${id}`, method: 'DELETE' })
+
+export interface AlertInhibit {
+  id: string | number
+  name: string
+  source_matcher?: string
+  target_matcher?: string
+  enabled?: boolean
+}
+
+export const getAlertInhibits = (params?: Record<string, any>) => request({ url: '/monitoring/alert-inhibits', method: 'GET', params })
+export const createAlertInhibit = (data: Partial<AlertInhibit>) => request({ url: '/monitoring/alert-inhibits', method: 'POST', data })
+export const updateAlertInhibit = (id: string | number, data: Partial<AlertInhibit>) => request({ url: `/monitoring/alert-inhibits/${id}`, method: 'PUT', data })
+export const deleteAlertInhibit = (id: string | number) => request({ url: `/monitoring/alert-inhibits/${id}`, method: 'DELETE' })
+
+export interface AlertSilence {
+  id: string | number
+  name: string
+  matcher?: string
+  start_at?: string
+  end_at?: string
+  enabled?: boolean
+}
+
+export const getAlertSilences = (params?: Record<string, any>) => request({ url: '/monitoring/alert-silences', method: 'GET', params })
+export const createAlertSilence = (data: Partial<AlertSilence>) => request({ url: '/monitoring/alert-silences', method: 'POST', data })
+export const updateAlertSilence = (id: string | number, data: Partial<AlertSilence>) => request({ url: `/monitoring/alert-silences/${id}`, method: 'PUT', data })
+export const deleteAlertSilence = (id: string | number) => request({ url: `/monitoring/alert-silences/${id}`, method: 'DELETE' })
+
+export interface AlertNotice {
+  id: string | number
+  name: string
+  channel_type: string
+  target?: string
+  status?: string
+}
+
+export const getAlertNotices = (params?: Record<string, any>) => request({ url: '/monitoring/alert-notices', method: 'GET', params })
+export const createAlertNotice = (data: Partial<AlertNotice>) => request({ url: '/monitoring/alert-notices', method: 'POST', data })
+export const updateAlertNotice = (id: string | number, data: Partial<AlertNotice>) => request({ url: `/monitoring/alert-notices/${id}`, method: 'PUT', data })
+export const deleteAlertNotice = (id: string | number) => request({ url: `/monitoring/alert-notices/${id}`, method: 'DELETE' })
+export const testAlertNotice = (id: string | number, data?: Record<string, any>) => request({ url: `/monitoring/alert-notices/${id}/test`, method: 'POST', data })
+
+export interface MonitoringDashboardPoint {
+  time: string
+  value: number
+}
+
+export interface MonitoringDashboardData {
+  overview: {
+    total_monitors: number
+    healthy_monitors: number
+    unhealthy_monitors: number
+    open_alerts: number
+  }
+  status_distribution: Array<{ name: string; value: number }>
+  alert_trend: MonitoringDashboardPoint[]
+  success_rate_trend: MonitoringDashboardPoint[]
+  top_alert_monitors: Array<{ name: string; value: number }>
+  recent_alerts: AlertItem[]
+}
+
+export const getMonitoringDashboard = () => {
+  return request<MonitoringDashboardData>({
+    url: '/monitoring/dashboard',
+    method: 'GET'
+  })
+}
+
+export interface CollectorItem {
+  id: string
+  name?: string
+  host?: string
+  status?: string
+  version?: string
+  heartbeat_at?: string
+  task_count?: number
+}
+
+export const getCollectors = (params?: Record<string, any>) => {
+  return request({
+    url: '/monitoring/collectors',
+    method: 'GET',
+    params
+  })
+}
+
+export const deleteCollector = (collectorId: string) => {
+  return request({
+    url: `/monitoring/collectors/${collectorId}`,
+    method: 'DELETE'
+  })
+}
+
+export interface MonitoringLabel {
+  id: string | number
+  name: string
+  value?: string
+  color?: string
+  monitor_count?: number
+}
+
+export const getMonitoringLabels = (params?: Record<string, any>) => {
+  return request({
+    url: '/monitoring/labels',
+    method: 'GET',
+    params
+  })
+}
+
+export const createMonitoringLabel = (data: Partial<MonitoringLabel>) => {
+  return request({
+    url: '/monitoring/labels',
+    method: 'POST',
+    data
+  })
+}
+
+export const updateMonitoringLabel = (labelId: string | number, data: Partial<MonitoringLabel>) => {
+  return request({
+    url: `/monitoring/labels/${labelId}`,
+    method: 'PUT',
+    data
+  })
+}
+
+export const deleteMonitoringLabel = (labelId: string | number) => {
+  return request({
+    url: `/monitoring/labels/${labelId}`,
+    method: 'DELETE'
+  })
+}
+
+export interface StatusPageItem {
+  id: string | number
+  name: string
+  slug?: string
+  status?: string
+  is_public?: boolean
+  updated_at?: string
+}
+
+export const getStatusPages = (params?: Record<string, any>) => {
+  return request({
+    url: '/monitoring/status-pages',
+    method: 'GET',
+    params
+  })
+}
+
+export const createStatusPage = (data: Partial<StatusPageItem>) => {
+  return request({
+    url: '/monitoring/status-pages',
+    method: 'POST',
+    data
+  })
+}
+
+export const updateStatusPage = (statusId: string | number, data: Partial<StatusPageItem>) => {
+  return request({
+    url: `/monitoring/status-pages/${statusId}`,
+    method: 'PUT',
+    data
+  })
+}
+
+export const deleteStatusPage = (statusId: string | number) => {
+  return request({
+    url: `/monitoring/status-pages/${statusId}`,
+    method: 'DELETE'
   })
 }

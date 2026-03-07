@@ -99,29 +99,65 @@
         <!-- 监控管理菜单 -->
         <a-sub-menu
           key="monitoring"
-          v-if="hasAnyPermission(['monitoring:template', 'monitoring:target', 'monitoring:alert', 'monitoring:alert:center', 'monitoring:dashboard'])"
+          v-if="hasAnyPermission(['monitoring:template', 'monitoring:list', 'monitoring:target', 'monitoring:bulletin', 'monitoring:alert:center', 'monitoring:dashboard', 'monitoring:collector', 'monitoring:labels', 'monitoring:status'])"
         >
           <template #icon><LineChartOutlined /></template>
           <template #title>{{ t('menu.monitoring') }}</template>
+          <a-menu-item key="monitoring-dashboard" v-if="hasPermission('monitoring:dashboard')" @click="navigateTo('/monitoring/dashboard')">
+            <template #icon><DashboardOutlined /></template>
+            <span>{{ t('menu.monitoringDashboard') }}</span>
+          </a-menu-item>
+          <a-menu-item key="monitoring-list" v-if="hasAnyPermission(['monitoring:list', 'monitoring:target'])" @click="navigateTo('/monitoring/list')">
+            <template #icon><AimOutlined /></template>
+            <span>{{ t('menu.monitoringList') }}</span>
+          </a-menu-item>
+          <a-menu-item key="monitoring-bulletin" v-if="hasPermission('monitoring:bulletin')" @click="navigateTo('/monitoring/bulletin')">
+            <template #icon><BookOutlined /></template>
+            <span>{{ t('menu.monitoringBulletin') }}</span>
+          </a-menu-item>
           <a-menu-item key="monitoring-template" v-if="hasPermission('monitoring:template')" @click="navigateTo('/monitoring/template')">
             <template #icon><FileTextOutlined /></template>
             <span>{{ t('menu.monitoringTemplate') }}</span>
           </a-menu-item>
-          <a-menu-item key="monitoring-target" v-if="hasPermission('monitoring:target')" @click="navigateTo('/monitoring/target')">
-            <template #icon><AimOutlined /></template>
-            <span>{{ t('menu.monitoringTarget') }}</span>
-          </a-menu-item>
-          <a-menu-item
-            key="monitoring-alert"
-            v-if="hasAnyPermission(['monitoring:alert', 'monitoring:alert:center', 'monitoring:alert:current'])"
-            @click="navigateTo('/monitoring/alert')"
-          >
+          <a-sub-menu key="monitoring-alert-center" v-if="hasAnyPermission(['monitoring:alert:center', 'monitoring:alert:current', 'monitoring:alert:history', 'monitoring:alert:rule', 'monitoring:alert:integration', 'monitoring:alert:group', 'monitoring:alert:inhibit', 'monitoring:alert:silence', 'monitoring:alert:notice'])">
             <template #icon><BellOutlined /></template>
-            <span>{{ t('menu.monitoringAlert') }}</span>
+            <template #title>{{ t('menu.monitoringAlertCenter') }}</template>
+            <a-menu-item key="monitoring-alert-current" v-if="hasAnyPermission(['monitoring:alert:current', 'monitoring:alert:center'])" @click="navigateTo('/monitoring/alert/current')">
+              <span>{{ t('menu.monitoringAlertCurrent') }}</span>
+            </a-menu-item>
+            <a-menu-item key="monitoring-alert-history" v-if="hasAnyPermission(['monitoring:alert:history', 'monitoring:alert:center'])" @click="navigateTo('/monitoring/alert/history')">
+              <span>{{ t('menu.monitoringAlertHistory') }}</span>
+            </a-menu-item>
+            <a-menu-item key="monitoring-alert-rule" v-if="hasAnyPermission(['monitoring:alert:rule', 'monitoring:alert:setting'])" @click="navigateTo('/monitoring/alert/rule')">
+              <span>{{ t('menu.monitoringAlertRule') }}</span>
+            </a-menu-item>
+            <a-menu-item key="monitoring-alert-integration" v-if="hasPermission('monitoring:alert:integration')" @click="navigateTo('/monitoring/alert/integration')">
+              <span>{{ t('menu.monitoringAlertIntegration') }}</span>
+            </a-menu-item>
+            <a-menu-item key="monitoring-alert-group" v-if="hasPermission('monitoring:alert:group')" @click="navigateTo('/monitoring/alert/group')">
+              <span>{{ t('menu.monitoringAlertGroup') }}</span>
+            </a-menu-item>
+            <a-menu-item key="monitoring-alert-inhibit" v-if="hasPermission('monitoring:alert:inhibit')" @click="navigateTo('/monitoring/alert/inhibit')">
+              <span>{{ t('menu.monitoringAlertInhibit') }}</span>
+            </a-menu-item>
+            <a-menu-item key="monitoring-alert-silence" v-if="hasPermission('monitoring:alert:silence')" @click="navigateTo('/monitoring/alert/silence')">
+              <span>{{ t('menu.monitoringAlertSilence') }}</span>
+            </a-menu-item>
+            <a-menu-item key="monitoring-alert-notice" v-if="hasPermission('monitoring:alert:notice')" @click="navigateTo('/monitoring/alert/notice')">
+              <span>{{ t('menu.monitoringAlertNotice') }}</span>
+            </a-menu-item>
+          </a-sub-menu>
+          <a-menu-item key="monitoring-collector" v-if="hasPermission('monitoring:collector')" @click="navigateTo('/monitoring/collector')">
+            <template #icon><ClusterOutlined /></template>
+            <span>{{ t('menu.monitoringCollector') }}</span>
           </a-menu-item>
-          <a-menu-item key="monitoring-dashboard" v-if="hasPermission('monitoring:dashboard')" @click="navigateTo('/monitoring/dashboard')">
-            <template #icon><DashboardOutlined /></template>
-            <span>{{ t('menu.monitoringDashboard') }}</span>
+          <a-menu-item key="monitoring-labels" v-if="hasPermission('monitoring:labels')" @click="navigateTo('/monitoring/labels')">
+            <template #icon><TagsOutlined /></template>
+            <span>{{ t('menu.monitoringLabels') }}</span>
+          </a-menu-item>
+          <a-menu-item key="monitoring-status" v-if="hasPermission('monitoring:status')" @click="navigateTo('/monitoring/status')">
+            <template #icon><MobileOutlined /></template>
+            <span>{{ t('menu.monitoringStatus') }}</span>
           </a-menu-item>
         </a-sub-menu>
         
@@ -287,7 +323,9 @@ import {
   ScanOutlined,
   LineChartOutlined,
   FileTextOutlined,
-  AimOutlined
+  AimOutlined,
+  TagsOutlined,
+  MobileOutlined
 } from '@ant-design/icons-vue'
 
 const { t } = useI18n()
@@ -413,6 +451,38 @@ const updateSelectedKeys = () => {
   } else if (path.includes('/config/dictionary')) {
     selectedKeys.value = ['dictionary']
     openKeys.value = ['config']
+  } else if (path.includes('/monitoring/dashboard')) {
+    selectedKeys.value = ['monitoring-dashboard']
+    openKeys.value = ['monitoring']
+  } else if (path.includes('/monitoring/template')) {
+    selectedKeys.value = ['monitoring-template']
+    openKeys.value = ['monitoring']
+  } else if (path.includes('/monitoring/list') || path.includes('/monitoring/target')) {
+    selectedKeys.value = ['monitoring-list']
+    openKeys.value = ['monitoring']
+  } else if (path.includes('/monitoring/bulletin')) {
+    selectedKeys.value = ['monitoring-bulletin']
+    openKeys.value = ['monitoring']
+  } else if (path.includes('/monitoring/alert')) {
+    openKeys.value = ['monitoring', 'monitoring-alert-center']
+    if (path.includes('/current')) selectedKeys.value = ['monitoring-alert-current']
+    else if (path.includes('/history')) selectedKeys.value = ['monitoring-alert-history']
+    else if (path.includes('/rule')) selectedKeys.value = ['monitoring-alert-rule']
+    else if (path.includes('/integration')) selectedKeys.value = ['monitoring-alert-integration']
+    else if (path.includes('/group')) selectedKeys.value = ['monitoring-alert-group']
+    else if (path.includes('/inhibit')) selectedKeys.value = ['monitoring-alert-inhibit']
+    else if (path.includes('/silence')) selectedKeys.value = ['monitoring-alert-silence']
+    else if (path.includes('/notice')) selectedKeys.value = ['monitoring-alert-notice']
+    else selectedKeys.value = ['monitoring-alert-current']
+  } else if (path.includes('/monitoring/collector')) {
+    selectedKeys.value = ['monitoring-collector']
+    openKeys.value = ['monitoring']
+  } else if (path.includes('/monitoring/labels')) {
+    selectedKeys.value = ['monitoring-labels']
+    openKeys.value = ['monitoring']
+  } else if (path.includes('/monitoring/status')) {
+    selectedKeys.value = ['monitoring-status']
+    openKeys.value = ['monitoring']
   } else if (path.includes('/system/user')) {
     selectedKeys.value = ['user']
     openKeys.value = ['system']

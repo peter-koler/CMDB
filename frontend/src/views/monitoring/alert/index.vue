@@ -112,10 +112,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { message, Modal } from 'ant-design-vue'
 import dayjs, { Dayjs } from 'dayjs'
 import { io, Socket } from 'socket.io-client'
+import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import {
   claimAlert,
@@ -133,6 +134,8 @@ import {
 } from '@/api/monitoring'
 
 const userStore = useUserStore()
+const route = useRoute()
+const router = useRouter()
 const activeTab = ref<'current' | 'history' | 'rules'>('current')
 const loading = ref(false)
 const alerts = ref<AlertItem[]>([])
@@ -251,8 +254,18 @@ const handleTableChange = (pager: any) => {
 }
 
 const handleTabChange = () => {
+  if (activeTab.value === 'current') router.replace('/monitoring/alert/current')
+  if (activeTab.value === 'history') router.replace('/monitoring/alert/history')
+  if (activeTab.value === 'rules') router.replace('/monitoring/alert/rule')
   pagination.current = 1
   loadActiveData()
+}
+
+const syncTabByRoute = () => {
+  const path = route.path
+  if (path.endsWith('/history')) activeTab.value = 'history'
+  else if (path.endsWith('/rule')) activeTab.value = 'rules'
+  else activeTab.value = 'current'
 }
 
 const resetFilters = () => {
@@ -354,7 +367,7 @@ const exportHistory = () => {
     item.note || ''
   ])
   const header = ['级别', '告警名称', '监控对象', '指标值', '触发时间', '恢复时间', '处理人', '备注']
-  const csv = [header, ...rows].map((line) => line.map((v) => `"${String(v).replaceAll('"', '""')}"`).join(',')).join('\n')
+  const csv = [header, ...rows].map((line) => line.map((v) => `"${String(v).split('"').join('""')}"`).join(',')).join('\n')
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
@@ -382,9 +395,19 @@ const connectAlertSocket = () => {
 }
 
 onMounted(() => {
+  syncTabByRoute()
   loadActiveData()
   connectAlertSocket()
 })
+
+watch(
+  () => route.path,
+  () => {
+    syncTabByRoute()
+    pagination.current = 1
+    loadActiveData()
+  }
+)
 
 onUnmounted(() => {
   if (socket) {
