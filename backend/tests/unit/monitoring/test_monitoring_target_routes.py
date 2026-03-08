@@ -3,6 +3,7 @@ import json
 from flask_jwt_extended import create_access_token
 
 from app import db
+from app.models import NoticeReceiver, SingleAlert
 from app.models.role import Role, UserRole
 from app.models.user import User
 from app.services.manager_api_service import ManagerError
@@ -49,7 +50,7 @@ def test_alert_center_permission_denied_for_user_without_permissions(app, client
     assert payload["code"] == 403
 
 
-def test_alert_center_permission_granted_for_user_with_role(app, client, db_session, monkeypatch):
+def test_alert_center_permission_granted_for_user_with_role(app, client, db_session):
     user = User(username="ops", email="ops@example.com")
     user.set_password("Password123!")
     role = Role(name="ops", code="ops", status="active")
@@ -61,10 +62,17 @@ def test_alert_center_permission_granted_for_user_with_role(app, client, db_sess
     db.session.add(link)
     db.session.commit()
 
-    monkeypatch.setattr(
-        "app.routes.monitoring_target.manager_api_service.request",
-        lambda **kwargs: {"items": [{"id": 1, "level": "warning"}], "total": 1},
+    db_session.add(
+        SingleAlert(
+            fingerprint="fp-ops-1",
+            labels_json='{"severity":"warning","monitor_name":"mysql"}',
+            annotations_json="{}",
+            content="mysql latency high",
+            status="firing",
+            trigger_times=1,
+        )
     )
+    db_session.commit()
 
     headers = _auth_headers(app, user.id, username=user.username)
     resp = client.get(f"{API_PREFIX}/alerts/current", headers=headers)
@@ -187,7 +195,7 @@ def test_alert_integration_permission_denied_without_permission(app, client, db_
     assert payload["code"] == 403
 
 
-def test_alert_integration_permission_granted_with_role(app, client, db_session, monkeypatch):
+def test_alert_integration_permission_granted_with_role(app, client, db_session):
     user = User(username="integration_ops", email="integration_ops@example.com")
     user.set_password("Password123!")
     role = Role(name="integration_ops", code="integration_ops", status="active")
@@ -199,10 +207,14 @@ def test_alert_integration_permission_granted_with_role(app, client, db_session,
     db.session.add(link)
     db.session.commit()
 
-    monkeypatch.setattr(
-        "app.routes.monitoring_target.manager_api_service.request",
-        lambda **kwargs: {"items": [{"id": "i1", "name": "prometheus"}], "total": 1},
+    db_session.add(
+        NoticeReceiver(
+            name="ops-webhook",
+            type=2,
+            hook_url="https://example.com/hook",
+        )
     )
+    db_session.commit()
 
     headers = _auth_headers(app, user.id, username=user.username)
     resp = client.get(f"{API_PREFIX}/alert-integrations", headers=headers)
@@ -211,3 +223,35 @@ def test_alert_integration_permission_granted_with_role(app, client, db_session,
     payload = json.loads(resp.data)
     assert payload["code"] == 200
     assert payload["data"]["total"] == 1
+
+
+def test_status_pages_fallback_when_manager_unavailable(app, client, test_admin, monkeypatch):
+    def fake_request(**kwargs):
+        raise ManagerError(status=503, code="UPSTREAM_UNAVAILABLE", message="manager unavailable")
+
+    monkeypatch.setattr("app.routes.monitoring_target.manager_api_service.request", fake_request)
+    headers = _auth_headers(app, test_admin.id, username=test_admin.username, role="admin")
+
+    resp = client.get(f"{API_PREFIX}/status-pages?page=1&page_size=20", headers=headers)
+
+    assert resp.status_code == 200
+    payload = json.loads(resp.data)
+    assert payload["code"] == 200
+    assert payload["data"]["items"] == []
+    assert payload["data"]["total"] == 0
+
+
+def test_alert_integrations_fallback_when_manager_unavailable(app, client, test_admin, monkeypatch):
+    def fake_request(**kwargs):
+        raise ManagerError(status=503, code="UPSTREAM_UNAVAILABLE", message="manager unavailable")
+
+    monkeypatch.setattr("app.routes.monitoring_target.manager_api_service.request", fake_request)
+    headers = _auth_headers(app, test_admin.id, username=test_admin.username, role="admin")
+
+    resp = client.get(f"{API_PREFIX}/alert-integrations?page=1&page_size=20", headers=headers)
+
+    assert resp.status_code == 200
+    payload = json.loads(resp.data)
+    assert payload["code"] == 200
+    assert payload["data"]["items"] == []
+    assert payload["data"]["total"] == 0

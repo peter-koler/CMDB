@@ -182,7 +182,7 @@ const routes = [
             path: 'alert/rule',
             name: 'MonitoringAlertRule',
             component: () => import('@/views/monitoring/alert/index.vue'),
-            meta: { title: '告警规则', icon: 'FileProtectOutlined', permission: 'monitoring:alert:rule' }
+            meta: { title: '告警配置', icon: 'FileProtectOutlined', permission: 'monitoring:alert:rule' }
           },
           {
             path: 'alert/integration',
@@ -213,6 +213,12 @@ const routes = [
             name: 'MonitoringAlertNotice',
             component: () => import('@/views/monitoring/alert/notice.vue'),
             meta: { title: '通知配置', icon: 'NotificationOutlined', permission: 'monitoring:alert:notice' }
+          },
+          {
+            path: 'alert/setting',
+            name: 'MonitoringAlertSetting',
+            component: () => import('@/views/monitoring/alert/setting.vue'),
+            meta: { title: '告警配置', icon: 'SettingOutlined', permission: 'monitoring:alert:setting' }
           },
           {
             path: 'alert',

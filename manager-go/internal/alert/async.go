@@ -19,6 +19,10 @@ type Sender interface {
 	Send(ctx context.Context, task NotifyTask) error
 }
 
+type DeadLetterSink interface {
+	Save(task NotifyTask, reason string) DeadLetter
+}
+
 type Queues struct {
 	alertQueue  chan Event
 	notifyQueue chan NotifyTask
@@ -27,6 +31,7 @@ type Queues struct {
 	retryDelays []time.Duration
 	maxRetry    int
 	nextID      atomic.Int64
+	deadLetter  DeadLetterSink
 }
 
 func NewQueues(size int, retryDelays []time.Duration, maxRetry int) *Queues {
@@ -55,6 +60,19 @@ func (q *Queues) EnqueueAlert(ev Event) bool {
 	default:
 		return false
 	}
+}
+
+func (q *Queues) EnqueueNotify(task NotifyTask) bool {
+	select {
+	case q.notifyQueue <- task:
+		return true
+	default:
+		return false
+	}
+}
+
+func (q *Queues) SetDeadLetterSink(sink DeadLetterSink) {
+	q.deadLetter = sink
 }
 
 func (q *Queues) Start(ctx context.Context, sender Sender, alertWorkers, notifyWorkers int) {
@@ -90,6 +108,7 @@ func (q *Queues) alertWorker(ctx context.Context) {
 			case q.notifyQueue <- task:
 			default:
 				log.Printf("notify queue full drop event rule=%s monitor=%d", ev.RuleName, ev.MonitorID)
+				q.toDeadLetter(task, "notify queue full")
 			}
 		}
 	}
@@ -106,12 +125,14 @@ func (q *Queues) notifyWorker(ctx context.Context, sender Sender) {
 				if task.Attempt >= q.maxRetry {
 					log.Printf("notify max retry reached task=%d rule=%s monitor=%d -> manual handling",
 						task.ID, task.Event.RuleName, task.Event.MonitorID)
+					q.toDeadLetter(task, "max retry reached")
 					continue
 				}
 				select {
 				case q.retryQueue <- task:
 				default:
 					log.Printf("retry queue full drop task=%d", task.ID)
+					q.toDeadLetter(task, "retry queue full")
 				}
 			}
 		}
@@ -136,6 +157,7 @@ func (q *Queues) retryWorker(ctx context.Context) {
 			case q.notifyQueue <- task:
 			default:
 				log.Printf("notify queue full after retry task=%d", task.ID)
+				q.toDeadLetter(task, "notify queue full after retry")
 			}
 		}
 	}
@@ -149,4 +171,11 @@ func (q *Queues) retryDelay(attemptIndex int) time.Duration {
 		return q.retryDelays[len(q.retryDelays)-1]
 	}
 	return q.retryDelays[attemptIndex]
+}
+
+func (q *Queues) toDeadLetter(task NotifyTask, reason string) {
+	if q.deadLetter == nil {
+		return
+	}
+	q.deadLetter.Save(task, reason)
 }

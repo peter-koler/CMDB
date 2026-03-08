@@ -117,13 +117,26 @@ export interface AlertItem {
 export interface AlertRule {
   id: number
   name: string
-  monitor_type?: string
-  metric: string
-  operator?: string
-  threshold: number | string
-  level: 'critical' | 'warning' | 'info' | string
+  // realtime_metric, periodic_metric, realtime_log, periodic_log
+  type: string
+  expr: string
+  period?: number
+  times: number
+  labels: Record<string, string>
+  annotations: Record<string, string>
+  template?: string
+  datasource_type?: string
   enabled: boolean
+  creator?: string
+  modifier?: string
+  created_at?: string
   updated_at?: string
+  // 兼容旧字段
+  monitor_type?: string
+  metric?: string
+  operator?: string
+  threshold?: number | string
+  level?: 'critical' | 'warning' | 'info' | string
 }
 
 export interface MonitoringTarget {
@@ -270,9 +283,20 @@ export const disableAlertRule = (ruleId: number, version?: number) => {
 export interface AlertIntegration {
   id: string | number
   name: string
-  type: string
-  endpoint?: string
-  status?: string
+  source: 'prometheus' | 'zabbix' | 'skywalking' | 'nagios' | 'custom' | string
+  description?: string
+  webhook_url?: string
+  severity_mapping?: string
+  default_labels?: string
+  label_mapping?: string
+  source_config?: string | Record<string, any>
+  auth_type?: 'none' | 'token' | 'basic' | string
+  auth_token?: string
+  auth_username?: string
+  auth_password?: string
+  status?: 'enabled' | 'disabled' | string
+  created_at?: string
+  updated_at?: string
 }
 
 export const getAlertIntegrations = (params?: Record<string, any>) => request({ url: '/monitoring/alert-integrations', method: 'GET', params })
@@ -280,11 +304,21 @@ export const createAlertIntegration = (data: Partial<AlertIntegration>) => reque
 export const updateAlertIntegration = (id: string | number, data: Partial<AlertIntegration>) => request({ url: `/monitoring/alert-integrations/${id}`, method: 'PUT', data })
 export const deleteAlertIntegration = (id: string | number) => request({ url: `/monitoring/alert-integrations/${id}`, method: 'DELETE' })
 export const testAlertIntegration = (id: string | number, data?: Record<string, any>) => request({ url: `/monitoring/alert-integrations/${id}/test`, method: 'POST', data })
+export const toggleAlertIntegration = (id: string | number, enabled: boolean) => request({ 
+  url: `/monitoring/alert-integrations/${id}/toggle`, 
+  method: 'PATCH', 
+  data: { enabled } 
+})
 
 export interface AlertGroup {
   id: string | number
   name: string
-  matcher?: string
+  group_key?: string
+  match_type?: number
+  group_labels?: string | string[]
+  group_wait?: number
+  group_interval?: number
+  repeat_interval?: number
   enabled?: boolean
 }
 
@@ -292,12 +326,14 @@ export const getAlertGroups = (params?: Record<string, any>) => request({ url: '
 export const createAlertGroup = (data: Partial<AlertGroup>) => request({ url: '/monitoring/alert-groups', method: 'POST', data })
 export const updateAlertGroup = (id: string | number, data: Partial<AlertGroup>) => request({ url: `/monitoring/alert-groups/${id}`, method: 'PUT', data })
 export const deleteAlertGroup = (id: string | number) => request({ url: `/monitoring/alert-groups/${id}`, method: 'DELETE' })
+export const updateAlertGroupEnabled = (id: string | number, enabled: boolean) => request({ url: `/monitoring/alert-groups/${id}/enabled`, method: 'PATCH', data: { enabled } })
 
 export interface AlertInhibit {
   id: string | number
   name: string
-  source_matcher?: string
-  target_matcher?: string
+  source_labels?: string | Record<string, string>
+  target_labels?: string | Record<string, string>
+  equal_labels?: string | string[]
   enabled?: boolean
 }
 
@@ -305,13 +341,18 @@ export const getAlertInhibits = (params?: Record<string, any>) => request({ url:
 export const createAlertInhibit = (data: Partial<AlertInhibit>) => request({ url: '/monitoring/alert-inhibits', method: 'POST', data })
 export const updateAlertInhibit = (id: string | number, data: Partial<AlertInhibit>) => request({ url: `/monitoring/alert-inhibits/${id}`, method: 'PUT', data })
 export const deleteAlertInhibit = (id: string | number) => request({ url: `/monitoring/alert-inhibits/${id}`, method: 'DELETE' })
+export const updateAlertInhibitEnabled = (id: string | number, enabled: boolean) => request({ url: `/monitoring/alert-inhibits/${id}/enabled`, method: 'PATCH', data: { enabled } })
 
 export interface AlertSilence {
   id: string | number
   name: string
-  matcher?: string
-  start_at?: string
-  end_at?: string
+  type?: number
+  match_type?: number
+  labels?: string | Record<string, string>
+  days?: number[] | string
+  start_time?: number
+  end_time?: number
+  reason?: string
   enabled?: boolean
 }
 
@@ -319,11 +360,26 @@ export const getAlertSilences = (params?: Record<string, any>) => request({ url:
 export const createAlertSilence = (data: Partial<AlertSilence>) => request({ url: '/monitoring/alert-silences', method: 'POST', data })
 export const updateAlertSilence = (id: string | number, data: Partial<AlertSilence>) => request({ url: `/monitoring/alert-silences/${id}`, method: 'PUT', data })
 export const deleteAlertSilence = (id: string | number) => request({ url: `/monitoring/alert-silences/${id}`, method: 'DELETE' })
+export const updateAlertSilenceEnabled = (id: string | number, enabled: boolean) => request({ url: `/monitoring/alert-silences/${id}/enabled`, method: 'PATCH', data: { enabled } })
 
 export interface AlertNotice {
   id: string | number
   name: string
-  channel_type: string
+  channel_type?: string
+  notify_type?: string
+  receiver_type?: 'user' | 'group' | string
+  receiver_id?: number
+  receiver_name?: string
+  notify_times?: number
+  notify_scale?: 'single' | 'batch' | string
+  template_id?: number
+  template_name?: string
+  filter_all?: boolean
+  labels?: Record<string, string>
+  days?: number[]
+  period_start?: string
+  period_end?: string
+  enable?: boolean
   target?: string
   status?: string
 }

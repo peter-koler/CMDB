@@ -4,7 +4,7 @@
       <a-tabs v-model:activeKey="activeTab" @change="handleTabChange">
         <a-tab-pane key="current" tab="当前告警" />
         <a-tab-pane key="history" tab="告警历史" />
-        <a-tab-pane key="rules" tab="告警规则" />
+        <a-tab-pane key="rules" tab="告警配置" />
       </a-tabs>
 
       <a-form layout="inline" :model="filters">
@@ -26,7 +26,7 @@
             <a-button type="primary" @click="loadActiveData" :loading="loading">查询</a-button>
             <a-button @click="resetFilters">重置</a-button>
             <a-button v-if="activeTab === 'history'" @click="exportHistory">导出CSV</a-button>
-            <a-button v-if="activeTab === 'rules' && canEditRule" type="primary" @click="openRuleModal()">新增规则</a-button>
+            <a-button v-if="activeTab === 'rules' && canEditRule" type="primary" @click="openRuleModal()">新增配置</a-button>
           </a-space>
         </a-form-item>
       </a-form>

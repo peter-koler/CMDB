@@ -1,14 +1,28 @@
 <template>
   <a-card :bordered="false">
     <a-space direction="vertical" style="width: 100%" :size="16">
+      <!-- 说明卡片 -->
+      <a-alert type="info" show-icon>
+        <template #message>通知规则说明</template>
+        <template #description>
+          <div>
+            <p>通知规则定义告警触发时的通知方式和接收人。</p>
+            <p><strong>标签过滤</strong>：可以按告警标签过滤，只发送匹配的告警。</p>
+            <p><strong>生效时间</strong>：可以设置规则生效的星期几和时间段。</p>
+            <p><strong>通知模板</strong>：可以选择模板来自定义通知内容格式。</p>
+          </div>
+        </template>
+      </a-alert>
+
       <a-space>
-        <a-input v-model:value="keyword" placeholder="通知配置名称" style="width: 220px" />
-        <a-select v-model:value="channelFilter" allow-clear placeholder="全部渠道" style="width: 160px">
-          <a-select-option value="webhook">Webhook</a-select-option>
-          <a-select-option value="email">邮件</a-select-option>
-          <a-select-option value="wechat">企业微信</a-select-option>
-          <a-select-option value="dingtalk">钉钉</a-select-option>
-          <a-select-option value="feishu">飞书</a-select-option>
+        <a-input v-model:value="keyword" placeholder="通知规则名称" style="width: 220px" />
+        <a-select v-model:value="channelFilter" allow-clear placeholder="全部通知类型" style="width: 180px">
+          <a-select-option value="webhook">webhook</a-select-option>
+          <a-select-option value="email">email</a-select-option>
+          <a-select-option value="sms">sms</a-select-option>
+          <a-select-option value="wecom">wecom</a-select-option>
+          <a-select-option value="dingtalk">dingtalk</a-select-option>
+          <a-select-option value="feishu">feishu</a-select-option>
         </a-select>
         <a-button type="primary" :loading="loading" @click="loadData">查询</a-button>
         <a-button @click="reset">重置</a-button>
@@ -17,6 +31,21 @@
 
       <a-table :loading="loading" :columns="columns" :data-source="items" row-key="id" :pagination="pagination" @change="handleTableChange">
         <template #bodyCell="{ column, record }">
+          <template v-if="column.key === 'filter_all'">
+            <a-tag :color="record.filter_all !== false ? 'blue' : 'orange'">
+              {{ record.filter_all !== false ? '全部告警' : '标签匹配' }}
+            </a-tag>
+          </template>
+          <template v-if="column.key === 'time_limit'">
+            <div v-if="record.days && record.days.length < 7">
+              <span>每周: {{ formatDays(record.days) }}</span>
+            </div>
+            <div v-else>每天</div>
+            <div v-if="record.period_start && record.period_end">
+              {{ record.period_start }} - {{ record.period_end }}
+            </div>
+            <div v-else>全天</div>
+          </template>
           <template v-if="column.key === 'status'">
             <a-tag :color="record.status === 'enabled' ? 'green' : 'default'">{{ record.status || '-' }}</a-tag>
           </template>
@@ -33,16 +62,21 @@
       </a-table>
     </a-space>
 
-    <a-modal v-model:open="modalOpen" :title="editing?.id ? '编辑通知配置' : '新增通知配置'" :confirm-loading="saving" width="720px" @ok="saveItem">
+    <a-modal v-model:open="modalOpen" :title="editing?.id ? '编辑通知规则' : '新增通知规则'" :confirm-loading="saving" width="800px" @ok="saveItem">
       <a-form layout="vertical" :model="formState">
         <a-row :gutter="16">
-          <a-col :span="12"><a-form-item label="名称" required><a-input v-model:value="formState.name" /></a-form-item></a-col>
           <a-col :span="12">
-            <a-form-item label="渠道类型" required>
-              <a-select v-model:value="formState.channel_type">
+            <a-form-item label="规则名称" required>
+              <a-input v-model:value="formState.name" placeholder="如：生产环境告警通知" />
+            </a-form-item>
+          </a-col>
+          <a-col :span="12">
+            <a-form-item label="通知类型" required>
+              <a-select v-model:value="formState.notify_type">
                 <a-select-option value="webhook">Webhook</a-select-option>
                 <a-select-option value="email">邮件</a-select-option>
-                <a-select-option value="wechat">企业微信</a-select-option>
+                <a-select-option value="sms">短信</a-select-option>
+                <a-select-option value="wecom">企业微信</a-select-option>
                 <a-select-option value="dingtalk">钉钉</a-select-option>
                 <a-select-option value="feishu">飞书</a-select-option>
               </a-select>
@@ -50,47 +84,98 @@
           </a-col>
         </a-row>
 
-        <template v-if="formState.channel_type === 'webhook'">
-          <a-form-item label="Webhook URL" required><a-input v-model:value="config.webhook.url" placeholder="https://..." /></a-form-item>
-          <a-form-item label="请求方法"><a-select v-model:value="config.webhook.method"><a-select-option value="POST">POST</a-select-option><a-select-option value="PUT">PUT</a-select-option></a-select></a-form-item>
-          <a-form-item label="Headers(JSON)"><a-textarea v-model:value="config.webhook.headers" :rows="3" placeholder='{"X-Token":"xxx"}' /></a-form-item>
-        </template>
+        <a-row :gutter="16">
+          <a-col :span="12">
+            <a-form-item label="接收者类型" required>
+              <a-select v-model:value="formState.receiver_type">
+                <a-select-option value="user">用户</a-select-option>
+                <a-select-option value="group">用户组</a-select-option>
+              </a-select>
+            </a-form-item>
+          </a-col>
+          <a-col :span="12">
+            <a-form-item label="接收者ID" required>
+              <a-input-number v-model:value="formState.receiver_id" :min="1" style="width: 100%" placeholder="接收人ID" />
+            </a-form-item>
+          </a-col>
+        </a-row>
 
-        <template v-else-if="formState.channel_type === 'email'">
-          <a-row :gutter="16">
-            <a-col :span="12"><a-form-item label="SMTP服务器" required><a-input v-model:value="config.email.smtp_host" /></a-form-item></a-col>
-            <a-col :span="12"><a-form-item label="端口" required><a-input-number v-model:value="config.email.smtp_port" :min="1" style="width:100%" /></a-form-item></a-col>
-          </a-row>
-          <a-row :gutter="16">
-            <a-col :span="12"><a-form-item label="用户名" required><a-input v-model:value="config.email.username" /></a-form-item></a-col>
-            <a-col :span="12"><a-form-item label="密码" required><a-input-password v-model:value="config.email.password" /></a-form-item></a-col>
-          </a-row>
-          <a-form-item label="收件人"><a-input v-model:value="config.email.to" placeholder="多个逗号分隔" /></a-form-item>
-        </template>
+        <a-row :gutter="16">
+          <a-col :span="12">
+            <a-form-item label="发送规模" required>
+              <a-select v-model:value="formState.notify_scale">
+                <a-select-option value="single">单条发送</a-select-option>
+                <a-select-option value="batch">批量发送</a-select-option>
+              </a-select>
+            </a-form-item>
+          </a-col>
+          <a-col :span="12">
+            <a-form-item label="重试次数">
+              <a-input-number v-model:value="formState.notify_times" :min="1" :max="5" style="width: 100%" />
+            </a-form-item>
+          </a-col>
+        </a-row>
 
-        <template v-else-if="formState.channel_type === 'wechat'">
-          <a-row :gutter="16">
-            <a-col :span="12"><a-form-item label="CorpID" required><a-input v-model:value="config.wechat.corp_id" /></a-form-item></a-col>
-            <a-col :span="12"><a-form-item label="AgentID" required><a-input v-model:value="config.wechat.agent_id" /></a-form-item></a-col>
-          </a-row>
-          <a-form-item label="Secret" required><a-input-password v-model:value="config.wechat.secret" /></a-form-item>
-        </template>
+        <a-divider orientation="left">告警过滤</a-divider>
 
-        <template v-else-if="formState.channel_type === 'dingtalk'">
-          <a-form-item label="机器人Webhook" required><a-input v-model:value="config.dingtalk.webhook" /></a-form-item>
-          <a-form-item label="签名密钥"><a-input-password v-model:value="config.dingtalk.secret" /></a-form-item>
-        </template>
+        <a-form-item label="过滤方式">
+          <a-radio-group v-model:value="formState.filter_all">
+            <a-radio :value="true">转发所有告警</a-radio>
+            <a-radio :value="false">按标签过滤</a-radio>
+          </a-radio-group>
+        </a-form-item>
 
-        <template v-else-if="formState.channel_type === 'feishu'">
-          <a-form-item label="机器人Webhook" required><a-input v-model:value="config.feishu.webhook" /></a-form-item>
-          <a-form-item label="签名密钥"><a-input-password v-model:value="config.feishu.secret" /></a-form-item>
-        </template>
+        <a-form-item v-if="!formState.filter_all" label="标签过滤条件">
+          <div v-for="(item, index) in formState.labelItems" :key="index" style="margin-bottom: 8px;">
+            <a-row :gutter="8">
+              <a-col :span="10">
+                <a-input v-model:value="item.key" placeholder="标签键，如 severity" />
+              </a-col>
+              <a-col :span="10">
+                <a-input v-model:value="item.value" placeholder="标签值，如 critical" />
+              </a-col>
+              <a-col :span="4">
+                <a-button type="link" danger @click="removeLabel(index)">删除</a-button>
+              </a-col>
+            </a-row>
+          </div>
+          <a-button type="dashed" block @click="addLabel">
+            <plus-outlined /> 添加标签条件
+          </a-button>
+          <div style="margin-top: 4px; color: #999; font-size: 12px;">
+            只有匹配所有标签条件的告警才会发送通知
+          </div>
+        </a-form-item>
 
-        <a-form-item label="状态">
-          <a-select v-model:value="formState.status">
-            <a-select-option value="enabled">enabled</a-select-option>
-            <a-select-option value="disabled">disabled</a-select-option>
-          </a-select>
+        <a-divider orientation="left">生效时间</a-divider>
+
+        <a-form-item label="生效星期">
+          <a-checkbox-group v-model:value="formState.days">
+            <a-checkbox :value="1">周一</a-checkbox>
+            <a-checkbox :value="2">周二</a-checkbox>
+            <a-checkbox :value="3">周三</a-checkbox>
+            <a-checkbox :value="4">周四</a-checkbox>
+            <a-checkbox :value="5">周五</a-checkbox>
+            <a-checkbox :value="6">周六</a-checkbox>
+            <a-checkbox :value="7">周日</a-checkbox>
+          </a-checkbox-group>
+        </a-form-item>
+
+        <a-row :gutter="16">
+          <a-col :span="12">
+            <a-form-item label="开始时间">
+              <a-time-picker v-model:value="formState.periodStart" format="HH:mm" style="width: 100%" placeholder="全天" />
+            </a-form-item>
+          </a-col>
+          <a-col :span="12">
+            <a-form-item label="结束时间">
+              <a-time-picker v-model:value="formState.periodEnd" format="HH:mm" style="width: 100%" placeholder="全天" />
+            </a-form-item>
+          </a-col>
+        </a-row>
+
+        <a-form-item label="启用">
+          <a-switch v-model:checked="formState.enable" />
         </a-form-item>
       </a-form>
     </a-modal>
@@ -100,6 +185,8 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { message } from 'ant-design-vue'
+import { PlusOutlined } from '@ant-design/icons-vue'
+import dayjs from 'dayjs'
 import { useUserStore } from '@/stores/user'
 import {
   createAlertNotice,
@@ -109,6 +196,11 @@ import {
   type AlertNotice,
   updateAlertNotice
 } from '@/api/monitoring'
+
+interface LabelItem {
+  key: string
+  value: string
+}
 
 const userStore = useUserStore()
 const loading = ref(false)
@@ -120,13 +212,19 @@ const modalOpen = ref(false)
 const editing = ref<AlertNotice | null>(null)
 const pagination = reactive({ current: 1, pageSize: 20, total: 0 })
 
-const formState = reactive({ name: '', channel_type: 'webhook', status: 'enabled' })
-const config = reactive({
-  webhook: { url: '', method: 'POST', headers: '' },
-  email: { smtp_host: '', smtp_port: 25, username: '', password: '', to: '' },
-  wechat: { corp_id: '', agent_id: '', secret: '' },
-  dingtalk: { webhook: '', secret: '' },
-  feishu: { webhook: '', secret: '' }
+const formState = reactive({
+  name: '',
+  notify_type: 'webhook',
+  receiver_type: 'user',
+  receiver_id: 1,
+  notify_times: 1,
+  notify_scale: 'single',
+  filter_all: true,
+  labelItems: [] as LabelItem[],
+  days: [1, 2, 3, 4, 5, 6, 7] as number[],
+  periodStart: null as dayjs.Dayjs | null,
+  periodEnd: null as dayjs.Dayjs | null,
+  enable: true
 })
 
 const canCreate = computed(() => userStore.hasPermission('monitoring:alert:notice:create') || userStore.hasPermission('monitoring:alert:notice'))
@@ -135,12 +233,43 @@ const canDelete = computed(() => userStore.hasPermission('monitoring:alert:notic
 const canTest = computed(() => userStore.hasPermission('monitoring:alert:notice:test') || userStore.hasPermission('monitoring:alert:notice'))
 
 const columns = [
-  { title: '名称', dataIndex: 'name', key: 'name' },
-  { title: '渠道', dataIndex: 'channel_type', key: 'channel_type', width: 120 },
-  { title: '目标', dataIndex: 'target', key: 'target' },
+  { title: '规则名称', dataIndex: 'name', key: 'name' },
+  { title: '通知类型', dataIndex: 'notify_type', key: 'notify_type', width: 120 },
+  { title: '接收者', key: 'receiver', width: 150, customRender: ({ record }: { record: AlertNotice }) => `${record.receiver_type}:${record.receiver_id}` },
+  { title: '过滤方式', key: 'filter_all', width: 120 },
+  { title: '生效时间', key: 'time_limit', width: 180 },
   { title: '状态', dataIndex: 'status', key: 'status', width: 100 },
-  { title: '操作', key: 'actions', width: 160 }
+  { title: '操作', key: 'actions', width: 180 }
 ]
+
+const formatDays = (days: number[] | undefined): string => {
+  if (!days || days.length === 0) return '无'
+  const dayNames = ['', '一', '二', '三', '四', '五', '六', '日']
+  return days.map((d: number) => `周${dayNames[d]}`).join(', ')
+}
+
+const labelsToObject = (items: LabelItem[]): Record<string, string> => {
+  const result: Record<string, string> = {}
+  items.forEach(item => {
+    if (item.key.trim()) {
+      result[item.key.trim()] = item.value.trim()
+    }
+  })
+  return result
+}
+
+const objectToLabels = (obj: Record<string, string> | undefined): LabelItem[] => {
+  if (!obj) return []
+  return Object.entries(obj).map(([key, value]) => ({ key, value }))
+}
+
+const addLabel = () => {
+  formState.labelItems.push({ key: '', value: '' })
+}
+
+const removeLabel = (index: number) => {
+  formState.labelItems.splice(index, 1)
+}
 
 const normalizeList = (payload: any) => {
   if (Array.isArray(payload?.items)) return { items: payload.items, total: payload.total || payload.items.length }
@@ -148,20 +277,15 @@ const normalizeList = (payload: any) => {
   return { items: [], total: 0 }
 }
 
-const parseHeaders = (text: string) => {
-  const value = text.trim()
-  if (!value) return undefined
-  try {
-    return JSON.parse(value)
-  } catch {
-    throw new Error('Headers 不是合法 JSON')
-  }
-}
-
 const loadData = async () => {
   loading.value = true
   try {
-    const res = await getAlertNotices({ q: keyword.value || undefined, channel_type: channelFilter.value, page: pagination.current, page_size: pagination.pageSize })
+    const res = await getAlertNotices({
+      q: keyword.value || undefined,
+      notify_type: channelFilter.value,
+      page: pagination.current,
+      page_size: pagination.pageSize
+    })
     const parsed = normalizeList(res?.data)
     items.value = parsed.items
     pagination.total = parsed.total
@@ -172,104 +296,62 @@ const loadData = async () => {
   }
 }
 
-const resetConfig = () => {
-  config.webhook = { url: '', method: 'POST', headers: '' }
-  config.email = { smtp_host: '', smtp_port: 25, username: '', password: '', to: '' }
-  config.wechat = { corp_id: '', agent_id: '', secret: '' }
-  config.dingtalk = { webhook: '', secret: '' }
-  config.feishu = { webhook: '', secret: '' }
-}
-
 const openModal = (record?: AlertNotice) => {
   editing.value = record || null
   formState.name = record?.name || ''
-  formState.channel_type = record?.channel_type || 'webhook'
-  formState.status = record?.status || 'enabled'
-  resetConfig()
-
-  const cfg = (record as any)?.config || {}
-  if (formState.channel_type === 'webhook') {
-    config.webhook.url = cfg.url || ''
-    config.webhook.method = cfg.method || 'POST'
-    config.webhook.headers = JSON.stringify(cfg.headers || {}, null, 2)
-  }
-  if (formState.channel_type === 'email') {
-    config.email.smtp_host = cfg.smtp_host || ''
-    config.email.smtp_port = Number(cfg.smtp_port || 25)
-    config.email.username = cfg.username || ''
-    config.email.password = cfg.password || ''
-    config.email.to = Array.isArray(cfg.to) ? cfg.to.join(',') : (cfg.to || '')
-  }
-  if (formState.channel_type === 'wechat') {
-    config.wechat.corp_id = cfg.corp_id || ''
-    config.wechat.agent_id = cfg.agent_id || ''
-    config.wechat.secret = cfg.secret || ''
-  }
-  if (formState.channel_type === 'dingtalk') {
-    config.dingtalk.webhook = cfg.webhook || ''
-    config.dingtalk.secret = cfg.secret || ''
-  }
-  if (formState.channel_type === 'feishu') {
-    config.feishu.webhook = cfg.webhook || ''
-    config.feishu.secret = cfg.secret || ''
-  }
-
+  formState.notify_type = (record as any)?.notify_type || (record as any)?.channel_type || 'webhook'
+  formState.receiver_type = (record as any)?.receiver_type || 'user'
+  formState.receiver_id = Number((record as any)?.receiver_id || 1)
+  formState.notify_times = Number((record as any)?.notify_times || 1)
+  formState.notify_scale = (record as any)?.notify_scale || 'single'
+  formState.filter_all = (record as any)?.filter_all !== false
+  formState.labelItems = objectToLabels((record as any)?.labels)
+  formState.days = (record as any)?.days || [1, 2, 3, 4, 5, 6, 7]
+  
+  const periodStart = (record as any)?.period_start
+  const periodEnd = (record as any)?.period_end
+  formState.periodStart = periodStart ? dayjs(periodStart, 'HH:mm:ss') : null
+  formState.periodEnd = periodEnd ? dayjs(periodEnd, 'HH:mm:ss') : null
+  
+  formState.enable = (record as any)?.enable !== false && (record?.status || 'enabled') !== 'disabled'
+  
+  // 确保至少有一个空行
+  if (formState.labelItems.length === 0) addLabel()
+  
   modalOpen.value = true
 }
 
-const buildPayloadConfig = () => {
-  if (formState.channel_type === 'webhook') {
-    if (!config.webhook.url.trim()) throw new Error('Webhook URL 必填')
-    return {
-      target: config.webhook.url.trim(),
-      config: {
-        url: config.webhook.url.trim(),
-        method: config.webhook.method,
-        headers: parseHeaders(config.webhook.headers)
-      }
-    }
-  }
-  if (formState.channel_type === 'email') {
-    if (!config.email.smtp_host.trim() || !config.email.username.trim() || !config.email.password.trim()) throw new Error('邮件渠道必填项未完整填写')
-    return {
-      target: config.email.to.trim() || undefined,
-      config: {
-        smtp_host: config.email.smtp_host.trim(),
-        smtp_port: config.email.smtp_port,
-        username: config.email.username.trim(),
-        password: config.email.password,
-        to: config.email.to.split(',').map((x) => x.trim()).filter(Boolean)
-      }
-    }
-  }
-  if (formState.channel_type === 'wechat') {
-    if (!config.wechat.corp_id.trim() || !config.wechat.agent_id.trim() || !config.wechat.secret.trim()) throw new Error('企业微信渠道必填项未完整填写')
-    return { config: { corp_id: config.wechat.corp_id.trim(), agent_id: config.wechat.agent_id.trim(), secret: config.wechat.secret } }
-  }
-  if (formState.channel_type === 'dingtalk') {
-    if (!config.dingtalk.webhook.trim()) throw new Error('钉钉 Webhook 必填')
-    return { target: config.dingtalk.webhook.trim(), config: { webhook: config.dingtalk.webhook.trim(), secret: config.dingtalk.secret || undefined } }
-  }
-  if (formState.channel_type === 'feishu') {
-    if (!config.feishu.webhook.trim()) throw new Error('飞书 Webhook 必填')
-    return { target: config.feishu.webhook.trim(), config: { webhook: config.feishu.webhook.trim(), secret: config.feishu.secret || undefined } }
-  }
-  return {}
+const validateForm = () => {
+  if (!formState.name.trim()) throw new Error('请输入规则名称')
+  if (!formState.receiver_id || formState.receiver_id < 1) throw new Error('请输入有效的接收者ID')
+  if (formState.days.length === 0) throw new Error('请至少选择一天')
 }
 
 const saveItem = async () => {
-  if (!formState.name.trim() || !formState.channel_type) return message.warning('请填写完整必填字段')
   saving.value = true
   try {
-    const cfg = buildPayloadConfig()
-    const payload = {
+    validateForm()
+    
+    const payload: Partial<AlertNotice> = {
       name: formState.name.trim(),
-      channel_type: formState.channel_type,
-      status: formState.status,
-      ...cfg
+      notify_type: formState.notify_type,
+      receiver_type: formState.receiver_type,
+      receiver_id: Number(formState.receiver_id),
+      notify_times: Number(formState.notify_times || 1),
+      notify_scale: formState.notify_scale,
+      filter_all: formState.filter_all,
+      labels: formState.filter_all ? {} : labelsToObject(formState.labelItems),
+      days: formState.days,
+      period_start: formState.periodStart ? formState.periodStart.format('HH:mm:ss') : null,
+      period_end: formState.periodEnd ? formState.periodEnd.format('HH:mm:ss') : null,
+      enable: formState.enable
     }
-    if (editing.value?.id !== undefined && editing.value?.id !== null) await updateAlertNotice(editing.value.id, payload)
-    else await createAlertNotice(payload)
+    
+    if (editing.value?.id !== undefined && editing.value?.id !== null) {
+      await updateAlertNotice(editing.value.id, payload)
+    } else {
+      await createAlertNotice(payload)
+    }
     message.success('保存成功')
     modalOpen.value = false
     loadData()
@@ -306,3 +388,11 @@ const reset = () => {
 
 onMounted(loadData)
 </script>
+
+<style scoped>
+.label-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+</style>

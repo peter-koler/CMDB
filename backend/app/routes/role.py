@@ -402,6 +402,17 @@ def get_menu_tree():
                     ]
                 },
                 {
+                    'key': 'monitoring:alert:external',
+                    'title': '外部告警接入',
+                    'actions': [
+                        {'key': 'monitoring:alert:external:view', 'title': '查看'},
+                        {'key': 'monitoring:alert:external:create', 'title': '创建'},
+                        {'key': 'monitoring:alert:external:edit', 'title': '编辑'},
+                        {'key': 'monitoring:alert:external:delete', 'title': '删除'},
+                        {'key': 'monitoring:alert:external:test', 'title': '测试'}
+                    ]
+                },
+                {
                     'key': 'monitoring:alert:group',
                     'title': '告警分组',
                     'actions': [
