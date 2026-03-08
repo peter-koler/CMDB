@@ -2,7 +2,6 @@ package collector
 
 import (
 	"errors"
-	"hash/fnv"
 	"sort"
 	"strconv"
 	"sync"
@@ -117,10 +116,4 @@ func (r *Registry) SelectByMonitor(monitorID int64) (Node, error) {
 	return selected, nil
 }
 
-func hashScore(key string, node string) uint64 {
-	h := fnv.New64a()
-	_, _ = h.Write([]byte(key))
-	_, _ = h.Write([]byte{':'})
-	_, _ = h.Write([]byte(node))
-	return h.Sum64()
-}
+

@@ -11,6 +11,21 @@ type Config struct {
 	Server struct {
 		Addr string `json:"addr"`
 	} `json:"server"`
+	// Manager 配置 - 用于向 Manager 注册
+	Manager struct {
+		Addr        string `json:"addr"`         // Manager 地址，如 localhost:8080
+		CollectorID string `json:"collector_id"` // Collector 唯一标识
+		Mode        string `json:"mode"`         // public | private
+		Version     string `json:"version"`      // 版本号
+		IP          string `json:"ip"`           // IP 地址（可选，自动检测）
+	} `json:"manager"`
+	// Connection 连接配置
+	Connection struct {
+		HeartbeatIntervalSec int `json:"heartbeat_interval_sec"` // 心跳间隔（秒），默认 5
+		ReconnectMaxAttempts int `json:"reconnect_max_attempts"` // 最大重连次数，默认 10
+		ReconnectIntervalSec int `json:"reconnect_interval_sec"` // 重连间隔（秒），默认 5
+		ConnectTimeoutSec    int `json:"connect_timeout_sec"`    // 连接超时（秒），默认 10
+	} `json:"connection"`
 	Scheduler struct {
 		TickMs    int `json:"tick_ms"`
 		WheelSize int `json:"wheel_size"`
@@ -52,6 +67,15 @@ type Config struct {
 func Default() Config {
 	var c Config
 	c.Server.Addr = ":50051"
+	c.Manager.Addr = "localhost:8080"
+	c.Manager.CollectorID = "collector-1"
+	c.Manager.Mode = "public"
+	c.Manager.Version = "1.0.0"
+	c.Manager.IP = ""
+	c.Connection.HeartbeatIntervalSec = 5
+	c.Connection.ReconnectMaxAttempts = 10
+	c.Connection.ReconnectIntervalSec = 5
+	c.Connection.ConnectTimeoutSec = 10
 	c.Scheduler.TickMs = 1000
 	c.Scheduler.WheelSize = 512
 	c.Worker.Size = runtime.NumCPU() * 2
@@ -93,4 +117,28 @@ func (c Config) HeartbeatDuration() time.Duration {
 		return 10 * time.Second
 	}
 	return time.Duration(c.Stream.HeartbeatMs) * time.Millisecond
+}
+
+// ConnectionTimeout 返回连接超时时间
+func (c Config) ConnectionTimeout() time.Duration {
+	if c.Connection.ConnectTimeoutSec <= 0 {
+		return 10 * time.Second
+	}
+	return time.Duration(c.Connection.ConnectTimeoutSec) * time.Second
+}
+
+// HeartbeatInterval 返回心跳间隔时间
+func (c Config) HeartbeatInterval() time.Duration {
+	if c.Connection.HeartbeatIntervalSec <= 0 {
+		return 5 * time.Second
+	}
+	return time.Duration(c.Connection.HeartbeatIntervalSec) * time.Second
+}
+
+// ReconnectInterval 返回重连间隔时间
+func (c Config) ReconnectInterval() time.Duration {
+	if c.Connection.ReconnectIntervalSec <= 0 {
+		return 5 * time.Second
+	}
+	return time.Duration(c.Connection.ReconnectIntervalSec) * time.Second
 }

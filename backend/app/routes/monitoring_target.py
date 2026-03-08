@@ -347,6 +347,17 @@ def _rule_from_model(row: AlertDefine) -> dict:
         threshold = float(threshold) if threshold is not None else 0
     except (TypeError, ValueError):
         threshold = 0
+    
+    # 获取关联的通知规则信息
+    notice_rule_info = None
+    if row.notice_rule:
+        notice_rule_info = {
+            "id": row.notice_rule.id,
+            "name": row.notice_rule.name,
+            "receiver_name": row.notice_rule.receiver_name or (row.notice_rule.receiver.name if row.notice_rule.receiver else None),
+            "receiver_type": row.notice_rule.receiver_type or (row.notice_rule.receiver.type if row.notice_rule.receiver else None),
+        }
+    
     return {
         "id": row.id,
         "name": row.name,
@@ -356,6 +367,8 @@ def _rule_from_model(row: AlertDefine) -> dict:
         "threshold": threshold,
         "level": labels.get("severity") or "warning",
         "enabled": bool(row.enabled),
+        "notice_rule_id": row.notice_rule_id,
+        "notice_rule": notice_rule_info,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
     }
 
@@ -395,14 +408,19 @@ def _receiver_from_model(row: NoticeReceiver) -> dict:
 
 
 def _notice_rule_from_model(row: NoticeRule) -> dict:
+    """将通知规则模型转换为字典"""
+    # 获取关联的渠道信息
+    receiver = row.receiver
+    receiver_type = row.receiver_type or (receiver.type if receiver else None)
+    receiver_name = row.receiver_name or (receiver.name if receiver else None)
+    
     return {
         "id": row.id,
         "name": row.name,
-        "channel_type": row.notify_type,
-        "notify_type": row.notify_type,
-        "receiver_type": row.receiver_type,
-        "receiver_id": row.receiver_id,
-        "receiver_name": row.receiver_name,
+        "receiver_channel_id": row.receiver_channel_id,
+        "receiver_id": row.receiver_channel_id,  # 兼容前端字段名
+        "receiver_type": receiver_type,
+        "receiver_name": receiver_name,
         "notify_times": row.notify_times,
         "notify_scale": row.notify_scale,
         "template_id": row.template_id,
@@ -414,7 +432,6 @@ def _notice_rule_from_model(row: NoticeRule) -> dict:
         "period_end": row.period_end,
         "status": "enabled" if row.enable else "disabled",
         "enable": bool(row.enable),
-        "target": f"{row.receiver_type}:{row.receiver_id}",
     }
 
 
@@ -465,6 +482,27 @@ def enable_target(monitor_id: int):
 @require_any_permission("monitoring:target:update", "monitoring:list:disable")
 def disable_target(monitor_id: int):
     return _manager_call("PATCH", f"/api/v1/monitors/{monitor_id}/disable", payload=request.get_json() or {})
+
+
+@monitoring_target_bp.route("/targets/<int:monitor_id>/collector", methods=["POST"])
+@jwt_required()
+@require_any_permission("monitoring:target:assign", "monitoring:target:update")
+def assign_collector_to_target(monitor_id: int):
+    """为监控任务指定 Collector（固定分配）"""
+    data = request.get_json() or {}
+    return _manager_call(
+        "POST",
+        f"/api/v1/monitors/{monitor_id}/collector",
+        payload=data,
+    )
+
+
+@monitoring_target_bp.route("/targets/<int:monitor_id>/collector", methods=["DELETE"])
+@jwt_required()
+@require_any_permission("monitoring:target:assign", "monitoring:target:update")
+def unassign_collector_from_target(monitor_id: int):
+    """取消监控任务的 Collector 固定分配，改为自动分配"""
+    return _manager_call("DELETE", f"/api/v1/monitors/{monitor_id}/collector")
 
 
 @monitoring_target_bp.route("/alerts", methods=["GET"])
@@ -703,6 +741,19 @@ def create_alert_rule():
         "threshold": threshold_val,
     }
     annotations = {"summary": name}
+    
+    # 处理通知规则关联
+    notice_rule_id = payload.get("notice_rule_id")
+    if notice_rule_id is not None:
+        try:
+            notice_rule_id = int(notice_rule_id)
+            # 验证通知规则是否存在
+            notice_rule = NoticeRule.query.get(notice_rule_id)
+            if not notice_rule:
+                return jsonify({"code": 400, "message": "指定的通知规则不存在"}), 400
+        except (TypeError, ValueError):
+            return jsonify({"code": 400, "message": "notice_rule_id 必须是整数"}), 400
+    
     row = AlertDefine(
         name=name,
         type=str(payload.get("monitor_type") or "realtime_metric"),
@@ -714,6 +765,7 @@ def create_alert_rule():
         template=payload.get("template"),
         datasource_type=payload.get("datasource_type"),
         enabled=bool(payload.get("enabled", True)),
+        notice_rule_id=notice_rule_id,
         creator=(payload.get("creator") or "python-web"),
         modifier=(payload.get("modifier") or "python-web"),
     )
@@ -754,6 +806,23 @@ def update_alert_rule(rule_id: int):
         operator = labels.get("operator") or ">"
         threshold = labels.get("threshold", 0)
         row.expr = f"{metric} {operator} {threshold}"
+    
+    # 处理通知规则关联更新
+    if "notice_rule_id" in payload:
+        notice_rule_id = payload.get("notice_rule_id")
+        if notice_rule_id is not None:
+            try:
+                notice_rule_id = int(notice_rule_id)
+                # 验证通知规则是否存在
+                notice_rule = NoticeRule.query.get(notice_rule_id)
+                if not notice_rule:
+                    return jsonify({"code": 400, "message": "指定的通知规则不存在"}), 400
+                row.notice_rule_id = notice_rule_id
+            except (TypeError, ValueError):
+                return jsonify({"code": 400, "message": "notice_rule_id 必须是整数"}), 400
+        else:
+            row.notice_rule_id = None
+    
     row.updated_at = _now_naive_utc()
     db.session.commit()
     return jsonify({"code": 200, "data": _rule_from_model(row)})
@@ -1413,13 +1482,17 @@ def update_alert_silence_enabled(silence_id: str):
 @jwt_required()
 @require_any_permission("monitoring:alert:notice", "monitoring:alert:notice:view")
 def list_alert_notices():
+    """获取通知规则列表"""
     q = (request.args.get("q") or "").strip()
-    channel_type = (request.args.get("channel_type") or request.args.get("notify_type") or "").strip().lower()
+    receiver_id = request.args.get("receiver_id")
     query = NoticeRule.query
     if q:
         query = query.filter(NoticeRule.name.ilike(f"%{q}%"))
-    if channel_type:
-        query = query.filter(NoticeRule.notify_type == channel_type)
+    if receiver_id:
+        try:
+            query = query.filter(NoticeRule.receiver_channel_id == int(receiver_id))
+        except (TypeError, ValueError):
+            pass
     page, page_size = _page_args()
     total = query.count()
     rows = (
@@ -1435,24 +1508,26 @@ def list_alert_notices():
 @jwt_required()
 @require_any_permission("monitoring:alert:notice", "monitoring:alert:notice:create")
 def create_alert_notice():
+    """创建通知规则"""
     payload = request.get_json() or {}
     name = str(payload.get("name") or "").strip()
     if not name:
         return jsonify({"code": 400, "message": "名称不能为空"}), 400
-    receiver_type = str(payload.get("receiver_type") or "user").strip().lower()
-    receiver_id = payload.get("receiver_id")
-    if receiver_id is None and payload.get("target"):
-        target = str(payload.get("target"))
-        if ":" in target:
-            receiver_type, receiver_id_str = target.split(":", 1)
-            receiver_id = receiver_id_str
-        else:
-            receiver_id = target
+    
+    # 获取通知渠道ID
+    receiver_channel_id = payload.get("receiver_id") or payload.get("receiver_channel_id")
+    if receiver_channel_id is None:
+        return jsonify({"code": 400, "message": "请选择通知渠道"}), 400
     try:
-        receiver_id_int = int(receiver_id)
+        receiver_channel_id = int(receiver_channel_id)
     except (TypeError, ValueError):
         return jsonify({"code": 400, "message": "receiver_id 必须是整数"}), 400
-    notify_type = str(payload.get("notify_type") or payload.get("channel_type") or "webhook").strip().lower()
+    
+    # 验证通知渠道是否存在
+    receiver = NoticeReceiver.query.get(receiver_channel_id)
+    if not receiver:
+        return jsonify({"code": 400, "message": "指定的通知渠道不存在"}), 400
+    
     notify_scale = str(payload.get("notify_scale") or "single").strip().lower()
     if notify_scale not in {"single", "batch"}:
         return jsonify({"code": 400, "message": "notify_scale 只能是 single/batch"}), 400
@@ -1463,10 +1538,9 @@ def create_alert_notice():
     
     row = NoticeRule(
         name=name,
-        receiver_type=receiver_type if receiver_type in {"user", "group"} else "user",
-        receiver_id=receiver_id_int,
-        receiver_name=str(payload.get("receiver_name") or "").strip() or None,
-        notify_type=notify_type,
+        receiver_channel_id=receiver_channel_id,
+        receiver_name=receiver.name,
+        receiver_type=receiver.type,
         notify_times=max(int(payload.get("notify_times") or 1), 1),
         notify_scale=notify_scale,
         template_id=payload.get("template_id"),
@@ -1476,9 +1550,9 @@ def create_alert_notice():
         days_json=_json_dump(days),
         period_start=str(payload.get("period_start") or "").strip() or None,
         period_end=str(payload.get("period_end") or "").strip() or None,
-        enable=bool(payload.get("enable", payload.get("status", "enabled") == "enabled")),
-        creator=(payload.get("creator") or "python-web"),
-        modifier=(payload.get("modifier") or "python-web"),
+        enable=bool(payload.get("enable", True)),
+        creator=get_jwt_identity(),
+        modifier=get_jwt_identity(),
     )
     db.session.add(row)
     db.session.commit()
@@ -1489,36 +1563,25 @@ def create_alert_notice():
 @jwt_required()
 @require_any_permission("monitoring:alert:notice", "monitoring:alert:notice:edit")
 def update_alert_notice(notice_id: str):
+    """更新通知规则"""
     row = NoticeRule.query.get(notice_id)
     if not row:
         return jsonify({"code": 404, "message": "通知配置不存在"}), 404
     payload = request.get_json() or {}
     if "name" in payload:
         row.name = str(payload.get("name") or "").strip() or row.name
-    if "receiver_type" in payload:
-        rt = str(payload.get("receiver_type") or "").strip().lower()
-        if rt in {"user", "group"}:
-            row.receiver_type = rt
-    if "receiver_id" in payload:
-        try:
-            row.receiver_id = int(payload.get("receiver_id"))
-        except (TypeError, ValueError):
-            return jsonify({"code": 400, "message": "receiver_id 必须是整数"}), 400
-    if "receiver_name" in payload:
-        row.receiver_name = str(payload.get("receiver_name") or "").strip() or None
-    if "target" in payload and payload.get("target"):
-        target = str(payload.get("target"))
-        if ":" in target:
-            rt, rid = target.split(":", 1)
-            rt = rt.strip().lower()
-            if rt in {"user", "group"}:
-                row.receiver_type = rt
+    if "receiver_id" in payload or "receiver_channel_id" in payload:
+        receiver_channel_id = payload.get("receiver_id") or payload.get("receiver_channel_id")
+        if receiver_channel_id is not None:
             try:
-                row.receiver_id = int(rid)
+                receiver_channel_id = int(receiver_channel_id)
+                receiver = NoticeReceiver.query.get(receiver_channel_id)
+                if receiver:
+                    row.receiver_channel_id = receiver_channel_id
+                    row.receiver_name = receiver.name
+                    row.receiver_type = receiver.type
             except (TypeError, ValueError):
-                return jsonify({"code": 400, "message": "target 中 receiver_id 无效"}), 400
-    if "notify_type" in payload or "channel_type" in payload:
-        row.notify_type = str(payload.get("notify_type") or payload.get("channel_type")).strip().lower()
+                return jsonify({"code": 400, "message": "receiver_id 必须是整数"}), 400
     if "notify_times" in payload:
         try:
             row.notify_times = max(int(payload.get("notify_times")), 1)
@@ -1545,8 +1608,7 @@ def update_alert_notice(notice_id: str):
         row.period_end = str(payload.get("period_end") or "").strip() or None
     if "enable" in payload:
         row.enable = bool(payload.get("enable"))
-    if "status" in payload:
-        row.enable = str(payload.get("status")).lower() == "enabled"
+    row.modifier = get_jwt_identity()
     row.updated_at = _now_naive_utc()
     db.session.commit()
     return jsonify({"code": 200, "data": _notice_rule_from_model(row)})
@@ -1572,6 +1634,230 @@ def test_alert_notice(notice_id: str):
     if not row:
         return jsonify({"code": 404, "message": "通知配置不存在"}), 404
     return jsonify({"code": 200, "data": {"tested": True, "id": row.id}})
+
+
+# ==================== 通知渠道配置 API ====================
+
+@monitoring_target_bp.route("/notice-receivers", methods=["GET"])
+@jwt_required()
+@require_any_permission("monitoring:alert:notice", "monitoring:alert:notice:view")
+def list_notice_receivers():
+    """获取通知渠道列表"""
+    q = (request.args.get("q") or "").strip()
+    type_filter = request.args.get("type")
+    enable_filter = request.args.get("enable")
+    
+    query = NoticeReceiver.query
+    if q:
+        query = query.filter(NoticeReceiver.name.ilike(f"%{q}%"))
+    if type_filter is not None:
+        try:
+            query = query.filter(NoticeReceiver.type == int(type_filter))
+        except (TypeError, ValueError):
+            pass
+    if enable_filter is not None:
+        query = query.filter(NoticeReceiver.enable == (enable_filter.lower() == "true"))
+    
+    page, page_size = _page_args()
+    total = query.count()
+    rows = (
+        query.order_by(NoticeReceiver.updated_at.desc(), NoticeReceiver.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    return _list_response([row.to_dict() for row in rows], total, page, page_size)
+
+
+@monitoring_target_bp.route("/notice-receivers/all", methods=["GET"])
+@jwt_required()
+@require_any_permission("monitoring:alert:notice", "monitoring:alert:notice:view")
+def list_all_notice_receivers():
+    """获取所有启用的通知渠道（用于下拉选择）"""
+    rows = NoticeReceiver.query.filter_by(enable=True).order_by(NoticeReceiver.name).all()
+    return jsonify({
+        "code": 200,
+        "data": [{"id": r.id, "name": r.name, "type": r.type, "type_name": r.type_name} for r in rows]
+    })
+
+
+@monitoring_target_bp.route("/notice-receivers/<receiver_id>", methods=["GET"])
+@jwt_required()
+@require_any_permission("monitoring:alert:notice", "monitoring:alert:notice:view")
+def get_notice_receiver(receiver_id: str):
+    """获取单个通知渠道详情"""
+    row = NoticeReceiver.query.get(receiver_id)
+    if not row:
+        return jsonify({"code": 404, "message": "通知渠道不存在"}), 404
+    return jsonify({"code": 200, "data": row.to_dict()})
+
+
+@monitoring_target_bp.route("/notice-receivers", methods=["POST"])
+@jwt_required()
+@require_any_permission("monitoring:alert:notice", "monitoring:alert:notice:create")
+def create_notice_receiver():
+    """创建通知渠道"""
+    payload = request.get_json() or {}
+    name = str(payload.get("name") or "").strip()
+    if not name:
+        return jsonify({"code": 400, "message": "名称不能为空"}), 400
+    
+    try:
+        type_val = int(payload.get("type", NoticeReceiver.TYPE_EMAIL))
+    except (TypeError, ValueError):
+        type_val = NoticeReceiver.TYPE_EMAIL
+    
+    row = NoticeReceiver(
+        name=name,
+        type=type_val,
+        enable=bool(payload.get("enable", True)),
+        description=str(payload.get("description") or "").strip() or None,
+        creator=get_jwt_identity(),
+        modifier=get_jwt_identity(),
+    )
+    
+    # 根据类型设置配置
+    config = payload.get("config") or {}
+    _apply_receiver_config(row, config)
+    
+    db.session.add(row)
+    db.session.commit()
+    return jsonify({"code": 200, "data": row.to_dict()})
+
+
+@monitoring_target_bp.route("/notice-receivers/<receiver_id>", methods=["PUT"])
+@jwt_required()
+@require_any_permission("monitoring:alert:notice", "monitoring:alert:notice:edit")
+def update_notice_receiver(receiver_id: str):
+    """更新通知渠道"""
+    row = NoticeReceiver.query.get(receiver_id)
+    if not row:
+        return jsonify({"code": 404, "message": "通知渠道不存在"}), 404
+    
+    payload = request.get_json() or {}
+    if "name" in payload:
+        row.name = str(payload.get("name") or "").strip() or row.name
+    if "type" in payload:
+        try:
+            row.type = int(payload.get("type"))
+        except (TypeError, ValueError):
+            pass
+    if "enable" in payload:
+        row.enable = bool(payload.get("enable"))
+    if "description" in payload:
+        row.description = str(payload.get("description") or "").strip() or None
+    
+    # 更新配置
+    if "config" in payload:
+        _apply_receiver_config(row, payload.get("config") or {})
+    
+    row.modifier = get_jwt_identity()
+    row.updated_at = _now_naive_utc()
+    db.session.commit()
+    return jsonify({"code": 200, "data": row.to_dict()})
+
+
+@monitoring_target_bp.route("/notice-receivers/<receiver_id>", methods=["DELETE"])
+@jwt_required()
+@require_any_permission("monitoring:alert:notice", "monitoring:alert:notice:delete")
+def delete_notice_receiver(receiver_id: str):
+    """删除通知渠道"""
+    row = NoticeReceiver.query.get(receiver_id)
+    if not row:
+        return jsonify({"code": 404, "message": "通知渠道不存在"}), 404
+    db.session.delete(row)
+    db.session.commit()
+    return jsonify({"code": 200, "data": {"deleted": True}})
+
+
+@monitoring_target_bp.route("/notice-receivers/<receiver_id>/test", methods=["POST"])
+@jwt_required()
+@require_any_permission("monitoring:alert:notice", "monitoring:alert:notice:test")
+def test_notice_receiver(receiver_id: str):
+    """测试通知渠道"""
+    row = NoticeReceiver.query.get(receiver_id)
+    if not row:
+        return jsonify({"code": 404, "message": "通知渠道不存在"}), 404
+    
+    # TODO: 实现实际的发送测试逻辑
+    return jsonify({"code": 200, "data": {"tested": True, "id": row.id, "type": row.type}})
+
+
+def _apply_receiver_config(row: NoticeReceiver, config: dict):
+    """应用通知渠道配置"""
+    # 邮件配置
+    row.smtp_host = config.get("smtp_host") or row.smtp_host
+    row.smtp_port = config.get("smtp_port") or row.smtp_port
+    row.smtp_username = config.get("smtp_username") or row.smtp_username
+    row.smtp_password = config.get("smtp_password") or row.smtp_password
+    row.smtp_use_tls = config.get("smtp_use_tls", row.smtp_use_tls)
+    row.email_from = config.get("email_from") or row.email_from
+    row.email_to = config.get("email_to") or row.email_to
+    
+    # Webhook配置
+    row.hook_url = config.get("hook_url") or row.hook_url
+    row.hook_auth_type = config.get("hook_auth_type") or row.hook_auth_type
+    row.hook_auth_token = config.get("hook_auth_token") or row.hook_auth_token
+    row.hook_method = config.get("hook_method") or row.hook_method
+    row.hook_content_type = config.get("hook_content_type") or row.hook_content_type
+    
+    # 企业微信机器人
+    row.wecom_key = config.get("wecom_key") or row.wecom_key
+    row.wecom_mentioned_mobiles = config.get("wecom_mentioned_mobiles") or row.wecom_mentioned_mobiles
+    
+    # 企业微信应用
+    row.wecom_corp_id = config.get("wecom_corp_id") or row.wecom_corp_id
+    row.wecom_agent_id = config.get("wecom_agent_id") or row.wecom_agent_id
+    row.wecom_app_secret = config.get("wecom_app_secret") or row.wecom_app_secret
+    row.wecom_to_user = config.get("wecom_to_user") or row.wecom_to_user
+    row.wecom_to_party = config.get("wecom_to_party") or row.wecom_to_party
+    row.wecom_to_tag = config.get("wecom_to_tag") or row.wecom_to_tag
+    
+    # 钉钉
+    row.dingtalk_access_token = config.get("dingtalk_access_token") or row.dingtalk_access_token
+    row.dingtalk_secret = config.get("dingtalk_secret") or row.dingtalk_secret
+    row.dingtalk_at_mobiles = config.get("dingtalk_at_mobiles") or row.dingtalk_at_mobiles
+    row.dingtalk_is_at_all = config.get("dingtalk_is_at_all", row.dingtalk_is_at_all)
+    
+    # 飞书机器人
+    row.feishu_webhook_token = config.get("feishu_webhook_token") or row.feishu_webhook_token
+    row.feishu_secret = config.get("feishu_secret") or row.feishu_secret
+    
+    # 飞书应用
+    row.feishu_app_id = config.get("feishu_app_id") or row.feishu_app_id
+    row.feishu_app_secret = config.get("feishu_app_secret") or row.feishu_app_secret
+    row.feishu_receive_type = config.get("feishu_receive_type", row.feishu_receive_type)
+    row.feishu_user_id = config.get("feishu_user_id") or row.feishu_user_id
+    row.feishu_chat_id = config.get("feishu_chat_id") or row.feishu_chat_id
+    
+    # Slack
+    row.slack_webhook_url = config.get("slack_webhook_url") or row.slack_webhook_url
+    
+    # Discord
+    row.discord_webhook_url = config.get("discord_webhook_url") or row.discord_webhook_url
+    
+    # 短信
+    row.sms_provider = config.get("sms_provider") or row.sms_provider
+    row.sms_access_key = config.get("sms_access_key") or row.sms_access_key
+    row.sms_secret_key = config.get("sms_secret_key") or row.sms_secret_key
+    row.sms_sign_name = config.get("sms_sign_name") or row.sms_sign_name
+    row.sms_template_code = config.get("sms_template_code") or row.sms_template_code
+    row.sms_phone_numbers = config.get("sms_phone_numbers") or row.sms_phone_numbers
+    
+    # 华为云SMN
+    row.smn_ak = config.get("smn_ak") or row.smn_ak
+    row.smn_sk = config.get("smn_sk") or row.smn_sk
+    row.smn_project_id = config.get("smn_project_id") or row.smn_project_id
+    row.smn_region = config.get("smn_region") or row.smn_region
+    row.smn_topic_urn = config.get("smn_topic_urn") or row.smn_topic_urn
+    
+    # Server酱
+    row.serverchan_send_key = config.get("serverchan_send_key") or row.serverchan_send_key
+    
+    # Gotify
+    row.gotify_url = config.get("gotify_url") or row.gotify_url
+    row.gotify_token = config.get("gotify_token") or row.gotify_token
+    row.gotify_priority = config.get("gotify_priority", row.gotify_priority)
 
 
 @monitoring_target_bp.route("/alerts/realtime/publish", methods=["POST"])
@@ -1664,6 +1950,27 @@ def list_collectors():
 @require_any_permission("monitoring:collector:delete", "monitoring:collector")
 def delete_collector(collector_id: str):
     return _manager_call("DELETE", f"/api/v1/collectors/{collector_id}", params=request.args.to_dict())
+
+
+@monitoring_target_bp.route("/collectors/<collector_id>/offline", methods=["POST"])
+@jwt_required()
+@require_any_permission("monitoring:collector:offline", "monitoring:collector:manage")
+def offline_collector(collector_id: str):
+    """下线 Collector（踢出）并重新平衡任务"""
+    return _manager_call("POST", f"/api/v1/collectors/{collector_id}/offline", params=request.args.to_dict())
+
+
+@monitoring_target_bp.route("/collectors/<collector_id>/monitors", methods=["GET"])
+@jwt_required()
+@require_any_permission("monitoring:collector:view", "monitoring:collector")
+def get_collector_monitors(collector_id: str):
+    """获取 Collector 绑定的 Monitor 列表"""
+    return _manager_call(
+        "GET",
+        f"/api/v1/collectors/{collector_id}/monitors",
+        params=request.args.to_dict(),
+        fallback=lambda: {"items": [], "total": 0},
+    )
 
 
 @monitoring_target_bp.route("/labels", methods=["GET"])

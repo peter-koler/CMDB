@@ -2,24 +2,37 @@
   "server": {
     "addr": ":50051"
   },
+  "manager": {
+    "addr": "localhost:8080",
+    "collector_id": "collector-1",
+    "mode": "public",
+    "version": "1.0.0",
+    "ip": ""
+  },
+  "connection": {
+    "heartbeat_interval_sec": 5,
+    "reconnect_max_attempts": 10,
+    "reconnect_interval_sec": 5,
+    "connect_timeout_sec": 10
+  },
   "scheduler": {
     "tick_ms": 1000,
     "wheel_size": 512
   },
   "worker": {
-    "size": 8,
+    "size": 4,
     "queue_size": 2048
   },
   "queue": {
     "backend": "memory",
     "memory": {
-      "size": 4096
+      "size": 2048
     },
     "disk": {
       "path": "data/result-queue.jsonl"
     },
     "kafka": {
-      "brokers": ["127.0.0.1:9092"],
+      "brokers": ["localhost:9092"],
       "topic": "collector.metrics",
       "bin": "kcat"
     }
@@ -29,15 +42,6 @@
   },
   "precompute": {
     "enabled": false,
-    "rules": [
-      {
-        "metrics": "cpu",
-        "protocol": "linux",
-        "field": "mem_used_pct",
-        "op": ">",
-        "threshold": 80,
-        "summary": "memory usage high"
-      }
-    ]
+    "rules": []
   }
 }

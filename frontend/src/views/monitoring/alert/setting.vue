@@ -87,11 +87,15 @@
             </a-typography-text>
           </template>
 
-          <!-- 模板 -->
-          <template v-if="column.key === 'template'">
-            <a-typography-text ellipsis style="max-width: 200px" :title="record.template">
-              {{ record.template || '-' }}
-            </a-typography-text>
+          <!-- 通知规则 -->
+          <template v-if="column.key === 'notice_rule'">
+            <a-space v-if="record.notice_rule" direction="vertical" size="small">
+              <span style="font-weight: 500">{{ record.notice_rule.name }}</span>
+              <a-tag v-if="record.notice_rule.receiver_name" size="small" color="blue">
+                {{ record.notice_rule.receiver_name }}
+              </a-tag>
+            </a-space>
+            <a-tag v-else color="default">未配置</a-tag>
           </template>
 
           <!-- 标签 -->
@@ -353,6 +357,29 @@
           />
         </a-form-item>
 
+        <!-- 通知配置 -->
+        <a-divider orientation="left">通知配置</a-divider>
+        <a-form-item label="通知规则" extra="选择告警触发时使用的通知规则">
+          <a-select
+            v-model:value="formState.notice_rule_id"
+            placeholder="请选择通知规则"
+            allow-clear
+            style="width: 100%"
+          >
+            <a-select-option v-for="rule in noticeRules" :key="rule.id" :value="rule.id">
+              <a-space>
+                <span>{{ rule.name }}</span>
+                <a-tag v-if="rule.receiver_name" size="small" color="blue">
+                  {{ rule.receiver_name }}
+                </a-tag>
+              </a-space>
+            </a-select-option>
+          </a-select>
+          <div class="form-help">
+            没有合适的规则？<a @click="goToNoticeConfig">去配置通知规则</a>
+          </div>
+        </a-form-item>
+
         <!-- 消息模板 -->
         <a-divider orientation="left">消息模板</a-divider>
         <a-form-item label="告警内容模板" name="template" extra="支持变量: {{$labels.instance}}, {{$value}} 等">
@@ -406,16 +433,18 @@ import {
   deleteAlertRule,
   enableAlertRule,
   disableAlertRule,
-  type AlertRule
+  getAlertNotices,
+  type AlertRule,
+  type AlertNotice
 } from '@/api/monitoring'
 
 // 表格列定义
 const columns = [
   { title: '规则名称', key: 'name', width: 180 },
   { title: '类型', key: 'type', width: 140 },
-  { title: '表达式', key: 'expr', width: 220 },
-  { title: '模板', key: 'template', width: 200 },
-  { title: '标签', key: 'labels', width: 180 },
+  { title: '表达式', key: 'expr', width: 200 },
+  { title: '通知规则', key: 'notice_rule', width: 150 },
+  { title: '标签', key: 'labels', width: 150 },
   { title: '触发配置', key: 'trigger', width: 120 },
   { title: '启用', key: 'enabled', width: 80, align: 'center' },
   { title: '操作', key: 'actions', width: 140, fixed: 'right' }
@@ -428,6 +457,7 @@ const rules = ref<AlertRule[]>([])
 const searchKeyword = ref('')
 const selectedRowKeys = ref<number[]>([])
 const selectedRows = ref<AlertRule[]>([])
+const noticeRules = ref<AlertNotice[]>([])
 
 // 分页
 const pagination = reactive({
@@ -456,7 +486,8 @@ const formState = reactive<Partial<AlertRule>>({
   annotations: { summary: '' },
   template: '',
   datasource_type: 'promql',
-  enabled: true
+  enabled: true,
+  notice_rule_id: undefined
 })
 
 // 标签列表
@@ -502,6 +533,28 @@ const severityColor = (severity?: string) => {
     info: 'blue'
   }
   return map[severity || ''] || 'default'
+}
+
+// 加载通知规则列表
+const loadNoticeRules = async () => {
+  try {
+    const res = await getAlertNotices({ page_size: 1000 })
+    if (res.data?.code === 200) {
+      const data = res.data.data
+      if (Array.isArray(data)) {
+        noticeRules.value = data
+      } else if (data?.items) {
+        noticeRules.value = data.items
+      }
+    }
+  } catch (error: any) {
+    console.error('加载通知规则失败:', error)
+  }
+}
+
+// 跳转到通知规则配置
+const goToNoticeConfig = () => {
+  window.open('/monitoring/alert/notice', '_blank')
 }
 
 // 加载数据
@@ -571,6 +624,7 @@ const resetForm = () => {
   formState.template = ''
   formState.datasource_type = 'promql'
   formState.enabled = true
+  formState.notice_rule_id = undefined
   tagList.value = []
 }
 
@@ -587,7 +641,8 @@ const handleEdit = (record: AlertRule) => {
     annotations: { ...record.annotations },
     template: record.template,
     datasource_type: record.datasource_type,
-    enabled: record.enabled
+    enabled: record.enabled,
+    notice_rule_id: record.notice_rule_id
   })
   // 转换标签列表
   tagList.value = Object.entries(record.labels || {})
@@ -731,6 +786,7 @@ const removeTag = (index: number) => {
 
 onMounted(() => {
   loadData()
+  loadNoticeRules()
 })
 </script>
 

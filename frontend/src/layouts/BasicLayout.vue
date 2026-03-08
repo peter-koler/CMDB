@@ -144,7 +144,10 @@
               <span>{{ t('menu.monitoringAlertSilence') }}</span>
             </a-menu-item>
             <a-menu-item key="monitoring-alert-notice" v-if="hasPermission('monitoring:alert:notice')" @click="navigateTo('/monitoring/alert/notice')">
-              <span>{{ t('menu.monitoringAlertNotice') }}</span>
+              <span>通知规则</span>
+            </a-menu-item>
+            <a-menu-item key="monitoring-alert-notice-receiver" v-if="hasPermission('monitoring:alert:notice')" @click="navigateTo('/monitoring/alert/notice-receiver')">
+              <span>通知渠道</span>
             </a-menu-item>
           </a-sub-menu>
           <a-menu-item key="monitoring-collector" v-if="hasPermission('monitoring:collector')" @click="navigateTo('/monitoring/collector')">

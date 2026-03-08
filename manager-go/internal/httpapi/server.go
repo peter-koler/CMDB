@@ -16,16 +16,17 @@ import (
 )
 
 type Server struct {
-	store           *store.MonitorStore
-	notifier        *notify.Service
-	mux             *http.ServeMux
-	resources       *resourceHub
-	registry        *collector.Registry
-	collectorTO     time.Duration
-	ingestMetric    func(model.MetricPoint) error
-	alertStore      *alert.AlertStore
-	deadLetterStore *alert.DeadLetterStore
-	retryDeadLetter func(int64) error
+	store            *store.MonitorStore
+	notifier         *notify.Service
+	mux              *http.ServeMux
+	resources        *resourceHub
+	registry         *collector.Registry
+	collectorTO      time.Duration
+	ingestMetric     func(model.MetricPoint) error
+	alertStore       *alert.AlertStore
+	deadLetterStore  *alert.DeadLetterStore
+	retryDeadLetter  func(int64) error
+	collectorManager *collector.Manager
 }
 
 type Option func(*Server)
@@ -42,6 +43,12 @@ func WithCollectorRegistry(reg *collector.Registry, timeout time.Duration) Optio
 	return func(s *Server) {
 		s.registry = reg
 		s.collectorTO = timeout
+	}
+}
+
+func WithCollectorManager(mgr *collector.Manager) Option {
+	return func(s *Server) {
+		s.collectorManager = mgr
 	}
 }
 
@@ -87,10 +94,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/v1/monitors", s.handleMonitors)
 	s.mux.HandleFunc("/api/v1/monitors/", s.handleMonitorByID)
 	s.mux.HandleFunc("/api/v1/notify/test", s.handleNotifyTest)
-	s.mux.HandleFunc("/api/v1/collectors", s.handleCollectors)
+	// 注意：更具体的路由必须在通用路由之前注册
 	s.mux.HandleFunc("/api/v1/collectors/register", s.handleCollectorRegister)
 	s.mux.HandleFunc("/api/v1/collectors/assignments", s.handleCollectorAssignments)
 	s.mux.HandleFunc("/api/v1/collectors/", s.handleCollectorByID)
+	s.mux.HandleFunc("/api/v1/collectors", s.handleCollectors)
 	s.mux.HandleFunc("/api/v1/metrics", s.handleMetricsIngest)
 	s.mux.HandleFunc("/api/v1/alerts", s.handleAlerts)
 	s.mux.HandleFunc("/api/v1/alerts/history", s.handleAlertsHistory)
@@ -191,13 +199,13 @@ func (s *Server) handleCollectorRegister(w http.ResponseWriter, r *http.Request)
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	if s.registry == nil {
-		writeErr(w, http.StatusNotImplemented, "COLLECTOR_UNAVAILABLE", "collector registry not configured")
-		return
-	}
+
 	var req struct {
-		ID   string `json:"id"`
-		Addr string `json:"addr"`
+		ID      string `json:"id"`
+		Addr    string `json:"addr"`
+		Version string `json:"version"`
+		Mode    string `json:"mode"`
+		IP      string `json:"ip"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error())
@@ -205,6 +213,35 @@ func (s *Server) handleCollectorRegister(w http.ResponseWriter, r *http.Request)
 	}
 	if req.ID == "" {
 		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "id is required")
+		return
+	}
+	if req.Addr == "" {
+		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "addr is required")
+		return
+	}
+	if req.Mode == "" {
+		req.Mode = "public"
+	}
+
+	// 优先使用 collectorManager（数据库 + gRPC）
+	if s.collectorManager != nil {
+		if err := s.collectorManager.RegisterWithInfo(req.ID, req.Addr, req.IP, req.Version, req.Mode); err != nil {
+			writeErr(w, http.StatusConflict, "COLLECTOR_EXISTS", err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"id":      req.ID,
+			"addr":    req.Addr,
+			"version": req.Version,
+			"mode":    req.Mode,
+			"status":  "registered",
+		})
+		return
+	}
+
+	// 回退到 registry（内存）
+	if s.registry == nil {
+		writeErr(w, http.StatusNotImplemented, "COLLECTOR_UNAVAILABLE", "collector registry not configured")
 		return
 	}
 	n := s.registry.Upsert(req.ID, req.Addr)
@@ -216,6 +253,42 @@ func (s *Server) handleCollectors(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
+
+	// 优先从 collectorManager 获取（数据库）
+	if s.collectorManager != nil {
+		collectors, err := s.collectorManager.GetCollectorList()
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "DB_ERROR", err.Error())
+			return
+		}
+
+		// 转换为响应格式
+		items := make([]map[string]any, 0, len(collectors))
+		for _, c := range collectors {
+			items = append(items, map[string]any{
+				"id":         c.ID,
+				"name":       c.Name,
+				"ip":         c.IP,
+				"version":    c.Version,
+				"status":     c.Status,
+				"mode":       c.Mode,
+				"creator":    c.Creator,
+				"modifier":   c.Modifier,
+				"created_at": c.CreatedAt.Format(time.RFC3339),
+				"updated_at": c.UpdatedAt.Format(time.RFC3339),
+			})
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"items":     items,
+			"total":     len(items),
+			"page":      1,
+			"page_size": len(items),
+		})
+		return
+	}
+
+	// 回退到 registry（内存）
 	if s.registry == nil {
 		writeJSON(w, http.StatusOK, map[string]any{"items": []collector.Node{}, "total": 0})
 		return
@@ -275,6 +348,15 @@ func (s *Server) handleCollectorByID(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
+
+		// 优先使用 collectorManager
+		if s.collectorManager != nil {
+			s.collectorManager.Unregister(collectorID)
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		// 回退到 registry
 		if s.registry == nil {
 			writeErr(w, http.StatusNotImplemented, "COLLECTOR_UNAVAILABLE", "collector registry not configured")
 			return
@@ -318,6 +400,24 @@ func (s *Server) handleCollectorByID(w http.ResponseWriter, r *http.Request) {
 		s.handleCollectorReports(w, r, collectorID)
 		return
 	}
+	// 下线 Collector（踢出）
+	if len(parts) == 2 && parts[1] == "offline" {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		s.handleCollectorOffline(w, collectorID)
+		return
+	}
+	// 获取 Collector 绑定的 Monitor 列表
+	if len(parts) == 2 && parts[1] == "monitors" {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		s.handleCollectorMonitors(w, collectorID)
+		return
+	}
 	w.WriteHeader(http.StatusNotFound)
 }
 
@@ -353,6 +453,65 @@ func (s *Server) handleCollectorReports(w http.ResponseWriter, r *http.Request, 
 		}
 	}
 	s.handleMetricPayload(w, r)
+}
+
+// handleCollectorOffline 处理 Collector 下线（踢出）
+func (s *Server) handleCollectorOffline(w http.ResponseWriter, collectorID string) {
+	if s.collectorManager == nil {
+		writeErr(w, http.StatusNotImplemented, "COLLECTOR_UNAVAILABLE", "collector manager not configured")
+		return
+	}
+
+	if err := s.collectorManager.GoOffline(collectorID); err != nil {
+		writeErr(w, http.StatusInternalServerError, "OFFLINE_FAILED", err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"collector_id": collectorID,
+		"status":       "offline",
+		"message":      "Collector has been taken offline and tasks have been rebalanced",
+	})
+}
+
+// handleCollectorMonitors 获取 Collector 绑定的 Monitor 列表
+func (s *Server) handleCollectorMonitors(w http.ResponseWriter, collectorID string) {
+	if s.collectorManager == nil {
+		writeErr(w, http.StatusNotImplemented, "COLLECTOR_UNAVAILABLE", "collector manager not configured")
+		return
+	}
+
+	// 获取绑定关系
+	binds, err := s.collectorManager.GetCollectorStore().GetBindsByCollector(collectorID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "DB_ERROR", err.Error())
+		return
+	}
+
+	// 获取 Monitor 详情
+	items := make([]map[string]any, 0, len(binds))
+	for _, bind := range binds {
+		monitor, err := s.store.Get(bind.MonitorID)
+		if err != nil {
+			continue
+		}
+		items = append(items, map[string]any{
+			"monitor_id":   bind.MonitorID,
+			"monitor_name": monitor.Name,
+			"app":          monitor.App,
+			"target":       monitor.Target,
+			"status":       monitor.Status,
+			"pinned":       bind.Pinned == 1,
+			"created_at":   bind.CreatedAt.Format(time.RFC3339),
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items":     items,
+		"total":     len(items),
+		"page":      1,
+		"page_size": len(items),
+	})
 }
 
 func (s *Server) handleMetricsIngest(w http.ResponseWriter, r *http.Request) {

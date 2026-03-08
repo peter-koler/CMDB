@@ -131,6 +131,14 @@ export interface AlertRule {
   modifier?: string
   created_at?: string
   updated_at?: string
+  // 关联通知规则
+  notice_rule_id?: number
+  notice_rule?: {
+    id: number
+    name: string
+    receiver_name?: string
+    receiver_type?: number
+  }
   // 兼容旧字段
   monitor_type?: string
   metric?: string
@@ -419,11 +427,13 @@ export const getMonitoringDashboard = () => {
 export interface CollectorItem {
   id: string
   name?: string
-  host?: string
-  status?: string
+  ip?: string
+  status?: string | number
   version?: string
-  heartbeat_at?: string
+  updated_at?: string
   task_count?: number
+  mode?: string
+  created_at?: string
 }
 
 export const getCollectors = (params?: Record<string, any>) => {
@@ -437,6 +447,39 @@ export const getCollectors = (params?: Record<string, any>) => {
 export const deleteCollector = (collectorId: string) => {
   return request({
     url: `/monitoring/collectors/${collectorId}`,
+    method: 'DELETE'
+  })
+}
+
+// 下线 Collector（踢出）
+export const offlineCollector = (collectorId: string) => {
+  return request({
+    url: `/monitoring/collectors/${collectorId}/offline`,
+    method: 'POST'
+  })
+}
+
+// 获取 Collector 绑定的 Monitor 列表
+export const getCollectorMonitors = (collectorId: string) => {
+  return request({
+    url: `/monitoring/collectors/${collectorId}/monitors`,
+    method: 'GET'
+  })
+}
+
+// 为 Monitor 指定 Collector（固定分配）
+export const assignCollectorToMonitor = (monitorId: number, collectorId: string) => {
+  return request({
+    url: `/monitoring/targets/${monitorId}/collector`,
+    method: 'POST',
+    data: { collector_id: collectorId }
+  })
+}
+
+// 取消 Monitor 的 Collector 固定分配
+export const unassignCollectorFromMonitor = (monitorId: number) => {
+  return request({
+    url: `/monitoring/targets/${monitorId}/collector`,
     method: 'DELETE'
   })
 }
@@ -519,3 +562,27 @@ export const deleteStatusPage = (statusId: string | number) => {
     method: 'DELETE'
   })
 }
+
+// ==================== 通知渠道配置 ====================
+
+export interface NoticeReceiver {
+  id: string | number
+  name: string
+  type: number
+  type_name?: string
+  enable?: boolean
+  description?: string
+  config?: Record<string, any>
+  creator?: string
+  modifier?: string
+  created_at?: string
+  updated_at?: string
+}
+
+export const getNoticeReceivers = (params?: Record<string, any>) => request({ url: '/monitoring/notice-receivers', method: 'GET', params })
+export const getAllNoticeReceivers = () => request({ url: '/monitoring/notice-receivers/all', method: 'GET' })
+export const getNoticeReceiver = (id: string | number) => request({ url: `/monitoring/notice-receivers/${id}`, method: 'GET' })
+export const createNoticeReceiver = (data: Partial<NoticeReceiver>) => request({ url: '/monitoring/notice-receivers', method: 'POST', data })
+export const updateNoticeReceiver = (id: string | number, data: Partial<NoticeReceiver>) => request({ url: `/monitoring/notice-receivers/${id}`, method: 'PUT', data })
+export const deleteNoticeReceiver = (id: string | number) => request({ url: `/monitoring/notice-receivers/${id}`, method: 'DELETE' })
+export const testNoticeReceiver = (id: string | number) => request({ url: `/monitoring/notice-receivers/${id}/test`, method: 'POST' })

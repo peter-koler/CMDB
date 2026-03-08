@@ -12,6 +12,7 @@ import (
 	"collector-go/internal/dispatcher"
 	"collector-go/internal/precompute"
 	"collector-go/internal/queue"
+	"collector-go/internal/registration"
 	"collector-go/internal/scheduler"
 	"collector-go/internal/transport"
 	"collector-go/internal/worker"
@@ -28,6 +29,15 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	// 向 Manager 注册
+	if cfg.Manager.Addr != "" {
+		regClient := registration.NewClient(cfg, cfg.Server.Addr)
+		if err := regClient.Start(ctx); err != nil {
+			log.Printf("[Main] Failed to register to manager: %v", err)
+			// 注册失败不退出，继续启动服务
+		}
+	}
 
 	resultQueue, err := queue.NewFromConfig(cfg)
 	if err != nil {
@@ -53,7 +63,7 @@ func main() {
 	pool.Start(ctx)
 	go wheel.Start(ctx)
 
-	log.Printf("collector start on %s, queue=%s", cfg.Server.Addr, cfg.Queue.Backend)
+	log.Printf("collector start on %s, queue=%s, manager=%s", cfg.Server.Addr, cfg.Queue.Backend, cfg.Manager.Addr)
 	if err := server.Serve(ctx); err != nil {
 		log.Fatalf("collector stopped with error: %v", err)
 	}

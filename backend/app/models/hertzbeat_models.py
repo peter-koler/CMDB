@@ -45,6 +45,7 @@ class CollectorMonitorBind(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     collector = db.Column(db.String(100), nullable=False)
     monitor_id = db.Column(db.Integer, nullable=False)
+    pinned = db.Column(db.SmallInteger, nullable=False, default=0)  # 0-自动分配, 1-用户固定指定
     creator = db.Column(db.String(100), nullable=True)
     modifier = db.Column(db.String(100), nullable=True)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
@@ -188,6 +189,7 @@ class AlertDefine(db.Model):
         Index("idx_alert_defines_name", "name"),
         Index("idx_alert_defines_type", "type"),
         Index("idx_alert_defines_enabled", "enabled"),
+        Index("idx_alert_defines_notice_rule", "notice_rule_id"),
     )
 
     id = db.Column(db.Integer, primary_key=True)
@@ -201,6 +203,11 @@ class AlertDefine(db.Model):
     template = db.Column(db.String(2048), nullable=True)
     datasource_type = db.Column(db.String(100), nullable=True)
     enabled = db.Column(db.Boolean, nullable=False, default=True)
+    
+    # 关联通知规则
+    notice_rule_id = db.Column(db.Integer, db.ForeignKey("notice_rules.id"), nullable=True)
+    notice_rule = db.relationship("NoticeRule", backref="alert_defines", lazy="joined")
+    
     creator = db.Column(db.String(100), nullable=True)
     modifier = db.Column(db.String(100), nullable=True)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
@@ -326,23 +333,23 @@ class AlertIntegration(db.Model):
 
 
 class NoticeRule(db.Model):
-    """通知规则"""
+    """通知规则
+    
+    关联通知渠道(NoticeReceiver)来定义告警通知方式
+    """
     __tablename__ = "notice_rules"
     __table_args__ = (
-        CheckConstraint("receiver_type in ('user', 'group')", name="ck_notice_rule_receiver_type"),
-        CheckConstraint("notify_type in ('email', 'sms', 'webhook', 'wecom', 'dingtalk', 'feishu')", name="ck_notice_rule_notify_type"),
         CheckConstraint("notify_scale in ('single', 'batch')", name="ck_notice_rule_notify_scale"),
-        Index("idx_notice_rules_receiver", "receiver_type", "receiver_id"),
+        Index("idx_notice_rules_receiver", "receiver_channel_id"),
         Index("idx_notice_rules_template", "template_id"),
         Index("idx_notice_rules_enable", "enable"),
     )
 
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
-    receiver_type = db.Column(db.String(20), nullable=False)
-    receiver_id = db.Column(db.Integer, nullable=False)
+    receiver_channel_id = db.Column(db.Integer, db.ForeignKey("notice_receivers.id"), nullable=False)  # 关联的通知渠道ID
     receiver_name = db.Column(db.String(100), nullable=True)  # 接收者名称，用于显示
-    notify_type = db.Column(db.String(50), nullable=False)
+    receiver_type = db.Column(db.Integer, nullable=True)  # 渠道类型，用于显示
     notify_times = db.Column(db.Integer, nullable=True, default=1)
     notify_scale = db.Column(db.String(20), nullable=False, default="single")
     template_id = db.Column(db.Integer, nullable=True)  # 关联的通知模板ID
@@ -357,6 +364,9 @@ class NoticeRule(db.Model):
     modifier = db.Column(db.String(100), nullable=True)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # 关联关系
+    receiver = db.relationship("NoticeReceiver", backref="rules", lazy="joined")
 
     @property
     def labels(self) -> dict:
@@ -371,34 +381,285 @@ class NoticeRule(db.Model):
             return json.loads(self.days_json or "[1,2,3,4,5,6,7]")
         except json.JSONDecodeError:
             return [1, 2, 3, 4, 5, 6, 7]
+    
+    def to_dict(self) -> dict:
+        """转换为字典，包含关联的渠道信息"""
+        return {
+            "id": self.id,
+            "name": self.name,
+            "receiver_channel_id": self.receiver_channel_id,
+            "receiver_id": self.receiver_channel_id,  # 兼容前端字段名
+            "receiver_name": self.receiver_name or (self.receiver.name if self.receiver else None),
+            "receiver_type": self.receiver_type or (self.receiver.type if self.receiver else None),
+            "notify_times": self.notify_times,
+            "notify_scale": self.notify_scale,
+            "template_id": self.template_id,
+            "template_name": self.template_name,
+            "filter_all": self.filter_all,
+            "labels": self.labels,
+            "days": self.days,
+            "period_start": self.period_start,
+            "period_end": self.period_end,
+            "enable": self.enable,
+            "creator": self.creator,
+            "modifier": self.modifier,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
 
 
 class NoticeReceiver(db.Model):
-    """通知接收人"""
+    """通知接收人/通知渠道配置
+    
+    支持多种通知渠道类型，每种类型使用不同的配置字段
+    """
     __tablename__ = "notice_receivers"
     __table_args__ = (
         Index("idx_notice_receivers_name", "name"),
         Index("idx_notice_receivers_type", "type"),
+        Index("idx_notice_receivers_enable", "enable"),
     )
+
+    # 通知渠道类型定义
+    TYPE_SMS = 0           # 短信
+    TYPE_EMAIL = 1         # 邮件
+    TYPE_WEBHOOK = 2       # Webhook
+    TYPE_WECHAT = 3        # 微信公众号
+    TYPE_WECOM_ROBOT = 4   # 企业微信机器人
+    TYPE_DINGTALK = 5      # 钉钉机器人
+    TYPE_FEISHU = 6        # 飞书机器人
+    TYPE_TELEGRAM = 7      # Telegram机器人 (已移除)
+    TYPE_SLACK = 8         # Slack
+    TYPE_DISCORD = 9       # Discord
+    TYPE_WECOM_APP = 10    # 企业微信应用
+    TYPE_SMN = 11          # 华为云SMN
+    TYPE_SERVERCHAN = 12   # Server酱
+    TYPE_GOTIFY = 13       # Gotify
+    TYPE_FEISHU_APP = 14   # 飞书应用
+    
+    TYPE_CHOICES = {
+        TYPE_SMS: "短信",
+        TYPE_EMAIL: "邮件",
+        TYPE_WEBHOOK: "Webhook",
+        TYPE_WECHAT: "微信公众号",
+        TYPE_WECOM_ROBOT: "企业微信机器人",
+        TYPE_DINGTALK: "钉钉机器人",
+        TYPE_FEISHU: "飞书机器人",
+        TYPE_SLACK: "Slack",
+        TYPE_DISCORD: "Discord",
+        TYPE_WECOM_APP: "企业微信应用",
+        TYPE_SMN: "华为云SMN",
+        TYPE_SERVERCHAN: "Server酱",
+        TYPE_GOTIFY: "Gotify",
+        TYPE_FEISHU_APP: "飞书应用",
+    }
 
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
-    type = db.Column(db.SmallInteger, nullable=False)  # 0-SMS, 1-Email, 2-Webhook, 3-WeChat, 4-WeCom Robot, 5-DingTalk, 6-FeiShu, 7-Telegram, 8-Slack, 9-Discord, 10-WeCom App, 11-Slack, 12-Discord, 13-Gotify, 14-FeiShu App
-    phone = db.Column(db.String(100), nullable=True)
-    email = db.Column(db.String(100), nullable=True)
+    type = db.Column(db.SmallInteger, nullable=False, default=TYPE_EMAIL)
+    enable = db.Column(db.Boolean, nullable=False, default=True)
+    
+    # 通用字段
+    description = db.Column(db.String(500), nullable=True)
+    
+    # 邮件配置 (type=1)
+    smtp_host = db.Column(db.String(255), nullable=True)
+    smtp_port = db.Column(db.Integer, nullable=True, default=587)
+    smtp_username = db.Column(db.String(255), nullable=True)
+    smtp_password = db.Column(db.String(255), nullable=True)
+    smtp_use_tls = db.Column(db.Boolean, nullable=False, default=True)
+    email_from = db.Column(db.String(255), nullable=True)  # 发件人地址
+    email_to = db.Column(db.String(1000), nullable=True)   # 收件人地址（多个用逗号分隔）
+    
+    # Webhook配置 (type=2)
     hook_url = db.Column(db.String(1000), nullable=True)
-    hook_auth_type = db.Column(db.String(300), nullable=True)  # None, Basic, Bearer
-    hook_auth_token = db.Column(db.String(300), nullable=True)
-    wechat_id = db.Column(db.String(300), nullable=True)
-    app_id = db.Column(db.String(255), nullable=True)
-    access_token = db.Column(db.String(300), nullable=True)
-    tg_bot_token = db.Column(db.String(500), nullable=True)
-    tg_user_id = db.Column(db.String(100), nullable=True)
-    tg_message_thread_id = db.Column(db.String(100), nullable=True)
+    hook_auth_type = db.Column(db.String(50), nullable=True)  # None, Basic, Bearer
+    hook_auth_token = db.Column(db.String(500), nullable=True)
+    hook_method = db.Column(db.String(10), nullable=False, default="POST")  # GET/POST
+    hook_content_type = db.Column(db.String(50), nullable=False, default="application/json")
+    
+    # 企业微信机器人配置 (type=4)
+    wecom_key = db.Column(db.String(500), nullable=True)   # 机器人key
+    wecom_mentioned_mobiles = db.Column(db.String(500), nullable=True)  # @手机号列表
+    
+    # 企业微信应用配置 (type=10)
+    wecom_corp_id = db.Column(db.String(500), nullable=True)
+    wecom_agent_id = db.Column(db.String(100), nullable=True)
+    wecom_app_secret = db.Column(db.String(500), nullable=True)
+    wecom_to_user = db.Column(db.String(1000), nullable=True)   # 指定成员
+    wecom_to_party = db.Column(db.String(1000), nullable=True)  # 指定部门
+    wecom_to_tag = db.Column(db.String(1000), nullable=True)    # 指定标签
+    
+    # 钉钉机器人配置 (type=5)
+    dingtalk_access_token = db.Column(db.String(500), nullable=True)
+    dingtalk_secret = db.Column(db.String(500), nullable=True)  # 加签密钥
+    dingtalk_at_mobiles = db.Column(db.String(500), nullable=True)  # @手机号
+    dingtalk_is_at_all = db.Column(db.Boolean, nullable=False, default=False)
+    
+    # 飞书机器人配置 (type=6)
+    feishu_webhook_token = db.Column(db.String(500), nullable=True)
+    feishu_secret = db.Column(db.String(500), nullable=True)  # 加签密钥
+    
+    # 飞书应用配置 (type=14)
+    feishu_app_id = db.Column(db.String(500), nullable=True)
+    feishu_app_secret = db.Column(db.String(500), nullable=True)
+    feishu_receive_type = db.Column(db.SmallInteger, nullable=False, default=0)  # 0-user, 1-chat
+    feishu_user_id = db.Column(db.String(500), nullable=True)
+    feishu_chat_id = db.Column(db.String(500), nullable=True)
+    
+    # Slack配置 (type=8)
+    slack_webhook_url = db.Column(db.String(1000), nullable=True)
+    
+    # Discord配置 (type=9)
+    discord_webhook_url = db.Column(db.String(1000), nullable=True)
+    
+    # 短信配置 (type=0)
+    sms_provider = db.Column(db.String(50), nullable=True)  # aliyun, tencent, huawei
+    sms_access_key = db.Column(db.String(500), nullable=True)
+    sms_secret_key = db.Column(db.String(500), nullable=True)
+    sms_sign_name = db.Column(db.String(100), nullable=True)
+    sms_template_code = db.Column(db.String(100), nullable=True)
+    sms_phone_numbers = db.Column(db.String(1000), nullable=True)  # 手机号列表
+    
+    # 华为云SMN配置 (type=11)
+    smn_ak = db.Column(db.String(500), nullable=True)  # Access Key
+    smn_sk = db.Column(db.String(500), nullable=True)  # Secret Key
+    smn_project_id = db.Column(db.String(500), nullable=True)
+    smn_region = db.Column(db.String(100), nullable=True)
+    smn_topic_urn = db.Column(db.String(500), nullable=True)
+    
+    # Server酱配置 (type=12)
+    serverchan_send_key = db.Column(db.String(500), nullable=True)
+    
+    # Gotify配置 (type=13)
+    gotify_url = db.Column(db.String(1000), nullable=True)
+    gotify_token = db.Column(db.String(500), nullable=True)
+    gotify_priority = db.Column(db.Integer, nullable=False, default=5)
+    
+    # 审计字段
     creator = db.Column(db.String(100), nullable=True)
     modifier = db.Column(db.String(100), nullable=True)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    @property
+    def type_name(self) -> str:
+        return self.TYPE_CHOICES.get(self.type, "未知")
+    
+    @property
+    def type_icon(self) -> str:
+        """获取渠道类型的图标"""
+        icons = {
+            self.TYPE_SMS: "message",
+            self.TYPE_EMAIL: "mail",
+            self.TYPE_WEBHOOK: "global",
+            self.TYPE_WECHAT: "wechat",
+            self.TYPE_WECOM_ROBOT: "robot",
+            self.TYPE_DINGTALK: "dingding",
+            self.TYPE_FEISHU: "feishu",
+            self.TYPE_SLACK: "slack",
+            self.TYPE_DISCORD: "discord",
+            self.TYPE_WECOM_APP: "wecom",
+            self.TYPE_SMN: "cloud",
+            self.TYPE_SERVERCHAN: "notification",
+            self.TYPE_GOTIFY: "mobile",
+            self.TYPE_FEISHU_APP: "feishu",
+        }
+        return icons.get(self.type, "notification")
+    
+    def to_dict(self) -> dict:
+        """转换为字典，根据类型返回相关配置"""
+        base = {
+            "id": self.id,
+            "name": self.name,
+            "type": self.type,
+            "type_name": self.type_name,
+            "enable": self.enable,
+            "description": self.description,
+            "creator": self.creator,
+            "modifier": self.modifier,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+        
+        # 根据类型添加特定配置
+        if self.type == self.TYPE_EMAIL:
+            base["config"] = {
+                "smtp_host": self.smtp_host,
+                "smtp_port": self.smtp_port,
+                "smtp_username": self.smtp_username,
+                "smtp_use_tls": self.smtp_use_tls,
+                "email_from": self.email_from,
+                "email_to": self.email_to,
+            }
+        elif self.type == self.TYPE_WEBHOOK:
+            base["config"] = {
+                "hook_url": self.hook_url,
+                "hook_auth_type": self.hook_auth_type,
+                "hook_method": self.hook_method,
+                "hook_content_type": self.hook_content_type,
+            }
+        elif self.type == self.TYPE_WECOM_ROBOT:
+            base["config"] = {
+                "wecom_key": self.wecom_key,
+                "wecom_mentioned_mobiles": self.wecom_mentioned_mobiles,
+            }
+        elif self.type == self.TYPE_WECOM_APP:
+            base["config"] = {
+                "wecom_corp_id": self.wecom_corp_id,
+                "wecom_agent_id": self.wecom_agent_id,
+                "wecom_to_user": self.wecom_to_user,
+                "wecom_to_party": self.wecom_to_party,
+                "wecom_to_tag": self.wecom_to_tag,
+            }
+        elif self.type == self.TYPE_DINGTALK:
+            base["config"] = {
+                "dingtalk_access_token": self.dingtalk_access_token,
+                "dingtalk_at_mobiles": self.dingtalk_at_mobiles,
+                "dingtalk_is_at_all": self.dingtalk_is_at_all,
+            }
+        elif self.type == self.TYPE_FEISHU:
+            base["config"] = {
+                "feishu_webhook_token": self.feishu_webhook_token,
+            }
+        elif self.type == self.TYPE_FEISHU_APP:
+            base["config"] = {
+                "feishu_app_id": self.feishu_app_id,
+                "feishu_receive_type": self.feishu_receive_type,
+                "feishu_user_id": self.feishu_user_id,
+                "feishu_chat_id": self.feishu_chat_id,
+            }
+        elif self.type == self.TYPE_SLACK:
+            base["config"] = {
+                "slack_webhook_url": self.slack_webhook_url,
+            }
+        elif self.type == self.TYPE_DISCORD:
+            base["config"] = {
+                "discord_webhook_url": self.discord_webhook_url,
+            }
+        elif self.type == self.TYPE_SMS:
+            base["config"] = {
+                "sms_provider": self.sms_provider,
+                "sms_sign_name": self.sms_sign_name,
+                "sms_template_code": self.sms_template_code,
+                "sms_phone_numbers": self.sms_phone_numbers,
+            }
+        elif self.type == self.TYPE_SMN:
+            base["config"] = {
+                "smn_region": self.smn_region,
+                "smn_topic_urn": self.smn_topic_urn,
+            }
+        elif self.type == self.TYPE_SERVERCHAN:
+            base["config"] = {
+                "serverchan_send_key": self.serverchan_send_key,
+            }
+        elif self.type == self.TYPE_GOTIFY:
+            base["config"] = {
+                "gotify_url": self.gotify_url,
+                "gotify_priority": self.gotify_priority,
+            }
+        
+        return base
 
 
 class NoticeTemplate(db.Model):

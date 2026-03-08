@@ -73,6 +73,25 @@
         <a-form-item label="采集间隔(秒)" required>
           <a-input-number v-model:value="formState.interval" :min="5" :step="5" style="width: 100%" />
         </a-form-item>
+        <a-form-item label="采集器分配">
+          <a-space direction="vertical" style="width: 100%">
+            <a-select
+              v-model:value="formState.collector_id"
+              allow-clear
+              placeholder="自动分配（推荐）"
+              style="width: 100%"
+              :loading="collectorsLoading"
+              @focus="loadCollectors"
+            >
+              <a-select-option v-for="c in collectors" :key="c.id" :value="c.id">
+                {{ c.name || c.id }} {{ c.host ? `(${c.host})` : '' }}
+              </a-select-option>
+            </a-select>
+            <a-checkbox v-model:checked="formState.pin_collector" :disabled="!formState.collector_id">
+              固定分配到该采集器（不随负载均衡变更）
+            </a-checkbox>
+          </a-space>
+        </a-form-item>
         <a-form-item label="启用">
           <a-switch v-model:checked="formState.enabled" />
         </a-form-item>
@@ -92,7 +111,11 @@ import {
   enableMonitoringTarget,
   getMonitoringTargets,
   type MonitoringTarget,
-  updateMonitoringTarget
+  updateMonitoringTarget,
+  getCollectors,
+  assignCollectorToMonitor,
+  unassignCollectorFromMonitor,
+  type CollectorItem
 } from '@/api/monitoring'
 
 const userStore = useUserStore()
@@ -112,8 +135,33 @@ const formState = reactive({
   app: '',
   target: '',
   interval: 60,
-  enabled: true
+  enabled: true,
+  collector_id: undefined as string | undefined,
+  pin_collector: false
 })
+
+// Collector 列表
+const collectors = ref<Array<{ id: string; name?: string; host?: string; status?: string }>>([])
+const collectorsLoading = ref(false)
+
+// 加载 Collector 列表
+const loadCollectors = async () => {
+  collectorsLoading.value = true
+  try {
+    const res = await getCollectors({ status: 'online' })
+    const parsed = normalizeList(res?.data)
+    collectors.value = parsed.items.map((item: any) => ({
+      id: String(item.id),
+      name: item.name,
+      host: item.host,
+      status: item.status
+    }))
+  } catch (error) {
+    collectors.value = []
+  } finally {
+    collectorsLoading.value = false
+  }
+}
 
 const canEdit = computed(() => userStore.hasPermission('monitoring:list:edit') || userStore.hasPermission('monitoring:list') || userStore.hasPermission('monitoring:target:update') || userStore.hasPermission('monitoring:target'))
 const canCreate = computed(() => userStore.hasPermission('monitoring:list:create') || userStore.hasPermission('monitoring:list') || userStore.hasPermission('monitoring:target:create') || userStore.hasPermission('monitoring:target'))
@@ -185,7 +233,11 @@ const openModal = (record?: MonitoringTarget) => {
   formState.target = record?.target || record?.endpoint || ''
   formState.interval = Number(record?.interval || 60)
   formState.enabled = record?.enabled !== false
+  formState.collector_id = undefined
+  formState.pin_collector = false
   modalOpen.value = true
+  // 加载 Collector 列表
+  loadCollectors()
 }
 
 const saveTarget = async () => {
@@ -202,11 +254,28 @@ const saveTarget = async () => {
       interval: formState.interval,
       enabled: formState.enabled
     }
+    let monitorId: number
     if (editing.value?.id) {
       await updateMonitoringTarget(editing.value.id, { ...payload, version: editing.value.version })
+      monitorId = editing.value.id
     } else {
-      await createMonitoringTarget(payload)
+      const res = await createMonitoringTarget(payload)
+      monitorId = res?.data?.id || res?.data?.monitor_id
     }
+
+    // 处理 Collector 分配
+    if (formState.collector_id && formState.pin_collector && monitorId) {
+      // 固定分配到指定 Collector
+      await assignCollectorToMonitor(monitorId, formState.collector_id)
+    } else if (!formState.collector_id && editing.value?.id) {
+      // 取消固定分配（如果之前有）
+      try {
+        await unassignCollectorFromMonitor(editing.value.id)
+      } catch (e) {
+        // 忽略取消分配失败的错误（可能本来就没有绑定）
+      }
+    }
+
     message.success('保存成功')
     modalOpen.value = false
     loadTargets()

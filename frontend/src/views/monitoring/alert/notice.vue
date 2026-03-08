@@ -7,23 +7,16 @@
         <template #description>
           <div>
             <p>通知规则定义告警触发时的通知方式和接收人。</p>
+            <p><strong>通知渠道</strong>：选择已配置的通知渠道（邮件、钉钉、企业微信等）。</p>
             <p><strong>标签过滤</strong>：可以按告警标签过滤，只发送匹配的告警。</p>
             <p><strong>生效时间</strong>：可以设置规则生效的星期几和时间段。</p>
-            <p><strong>通知模板</strong>：可以选择模板来自定义通知内容格式。</p>
           </div>
         </template>
       </a-alert>
 
       <a-space>
         <a-input v-model:value="keyword" placeholder="通知规则名称" style="width: 220px" />
-        <a-select v-model:value="channelFilter" allow-clear placeholder="全部通知类型" style="width: 180px">
-          <a-select-option value="webhook">webhook</a-select-option>
-          <a-select-option value="email">email</a-select-option>
-          <a-select-option value="sms">sms</a-select-option>
-          <a-select-option value="wecom">wecom</a-select-option>
-          <a-select-option value="dingtalk">dingtalk</a-select-option>
-          <a-select-option value="feishu">feishu</a-select-option>
-        </a-select>
+        <a-select v-model:value="receiverFilter" allow-clear placeholder="全部通知渠道" style="width: 180px" :options="receiverOptions" />
         <a-button type="primary" :loading="loading" @click="loadData">查询</a-button>
         <a-button @click="reset">重置</a-button>
         <a-button v-if="canCreate" type="primary" @click="openModal()">新增</a-button>
@@ -31,6 +24,12 @@
 
       <a-table :loading="loading" :columns="columns" :data-source="items" row-key="id" :pagination="pagination" @change="handleTableChange">
         <template #bodyCell="{ column, record }">
+          <template v-if="column.key === 'receiver'">
+            <a-space>
+              <component :is="getReceiverIcon(record.receiver_type)" />
+              <span>{{ record.receiver_name || `渠道ID: ${record.receiver_id}` }}</span>
+            </a-space>
+          </template>
           <template v-if="column.key === 'filter_all'">
             <a-tag :color="record.filter_all !== false ? 'blue' : 'orange'">
               {{ record.filter_all !== false ? '全部告警' : '标签匹配' }}
@@ -46,8 +45,12 @@
             </div>
             <div v-else>全天</div>
           </template>
-          <template v-if="column.key === 'status'">
-            <a-tag :color="record.status === 'enabled' ? 'green' : 'default'">{{ record.status || '-' }}</a-tag>
+          <template v-if="column.key === 'enable'">
+            <a-switch
+              :checked="record.enable"
+              :disabled="!canEdit"
+              @change="(checked: boolean) => toggleEnabled(record, checked)"
+            />
           </template>
           <template v-if="column.key === 'actions'">
             <a-space>
@@ -71,38 +74,22 @@
             </a-form-item>
           </a-col>
           <a-col :span="12">
-            <a-form-item label="通知类型" required>
-              <a-select v-model:value="formState.notify_type">
-                <a-select-option value="webhook">Webhook</a-select-option>
-                <a-select-option value="email">邮件</a-select-option>
-                <a-select-option value="sms">短信</a-select-option>
-                <a-select-option value="wecom">企业微信</a-select-option>
-                <a-select-option value="dingtalk">钉钉</a-select-option>
-                <a-select-option value="feishu">飞书</a-select-option>
+            <a-form-item label="通知渠道" required>
+              <a-select v-model:value="formState.receiver_id" placeholder="选择通知渠道" @change="onReceiverChange">
+                <a-select-option v-for="r in receiverList" :key="r.id" :value="r.id">
+                  {{ r.name }} ({{ r.type_name }})
+                </a-select-option>
               </a-select>
+              <div class="form-help">
+                没有合适的渠道？<a @click="goToReceiverConfig">去配置通知渠道</a>
+              </div>
             </a-form-item>
           </a-col>
         </a-row>
 
         <a-row :gutter="16">
           <a-col :span="12">
-            <a-form-item label="接收者类型" required>
-              <a-select v-model:value="formState.receiver_type">
-                <a-select-option value="user">用户</a-select-option>
-                <a-select-option value="group">用户组</a-select-option>
-              </a-select>
-            </a-form-item>
-          </a-col>
-          <a-col :span="12">
-            <a-form-item label="接收者ID" required>
-              <a-input-number v-model:value="formState.receiver_id" :min="1" style="width: 100%" placeholder="接收人ID" />
-            </a-form-item>
-          </a-col>
-        </a-row>
-
-        <a-row :gutter="16">
-          <a-col :span="12">
-            <a-form-item label="发送规模" required>
+            <a-form-item label="发送规模">
               <a-select v-model:value="formState.notify_scale">
                 <a-select-option value="single">单条发送</a-select-option>
                 <a-select-option value="batch">批量发送</a-select-option>
@@ -185,8 +172,9 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { message } from 'ant-design-vue'
-import { PlusOutlined } from '@ant-design/icons-vue'
+import { PlusOutlined, MailOutlined, MessageOutlined, DingdingOutlined, MobileOutlined, GlobalOutlined } from '@ant-design/icons-vue'
 import dayjs from 'dayjs'
+import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import {
   createAlertNotice,
@@ -194,7 +182,9 @@ import {
   getAlertNotices,
   testAlertNotice,
   type AlertNotice,
-  updateAlertNotice
+  updateAlertNotice,
+  getAllNoticeReceivers,
+  type NoticeReceiver
 } from '@/api/monitoring'
 
 interface LabelItem {
@@ -202,23 +192,24 @@ interface LabelItem {
   value: string
 }
 
+const router = useRouter()
 const userStore = useUserStore()
 const loading = ref(false)
 const saving = ref(false)
 const keyword = ref('')
-const channelFilter = ref<string | undefined>(undefined)
+const receiverFilter = ref<string | undefined>(undefined)
 const items = ref<AlertNotice[]>([])
+const receiverList = ref<NoticeReceiver[]>([])
+const receiverOptions = ref<{ label: string; value: string | number }[]>([])
 const modalOpen = ref(false)
 const editing = ref<AlertNotice | null>(null)
 const pagination = reactive({ current: 1, pageSize: 20, total: 0 })
 
 const formState = reactive({
   name: '',
-  notify_type: 'webhook',
-  receiver_type: 'user',
-  receiver_id: 1,
+  receiver_id: undefined as number | undefined,
   notify_times: 1,
-  notify_scale: 'single',
+  notify_scale: 'single' as 'single' | 'batch',
   filter_all: true,
   labelItems: [] as LabelItem[],
   days: [1, 2, 3, 4, 5, 6, 7] as number[],
@@ -234,13 +225,31 @@ const canTest = computed(() => userStore.hasPermission('monitoring:alert:notice:
 
 const columns = [
   { title: '规则名称', dataIndex: 'name', key: 'name' },
-  { title: '通知类型', dataIndex: 'notify_type', key: 'notify_type', width: 120 },
-  { title: '接收者', key: 'receiver', width: 150, customRender: ({ record }: { record: AlertNotice }) => `${record.receiver_type}:${record.receiver_id}` },
+  { title: '通知渠道', key: 'receiver', width: 200 },
   { title: '过滤方式', key: 'filter_all', width: 120 },
   { title: '生效时间', key: 'time_limit', width: 180 },
-  { title: '状态', dataIndex: 'status', key: 'status', width: 100 },
+  { title: '启用', key: 'enable', width: 100 },
   { title: '操作', key: 'actions', width: 180 }
 ]
+
+const receiverTypeIcons: Record<number, any> = {
+  0: MobileOutlined,
+  1: MailOutlined,
+  2: GlobalOutlined,
+  4: MessageOutlined,
+  5: DingdingOutlined,
+  6: MessageOutlined,
+  8: GlobalOutlined,
+  9: GlobalOutlined,
+  10: MessageOutlined,
+  11: GlobalOutlined,
+  12: MessageOutlined,
+  14: MessageOutlined
+}
+
+const getReceiverIcon = (type: number) => {
+  return receiverTypeIcons[type] || MessageOutlined
+}
 
 const formatDays = (days: number[] | undefined): string => {
   if (!days || days.length === 0) return '无'
@@ -271,6 +280,28 @@ const removeLabel = (index: number) => {
   formState.labelItems.splice(index, 1)
 }
 
+const loadReceivers = async () => {
+  try {
+    const res = await getAllNoticeReceivers()
+    receiverList.value = res?.data || []
+    receiverOptions.value = receiverList.value.map(r => ({
+      label: `${r.name} (${r.type_name})`,
+      value: r.id
+    }))
+  } catch (error: any) {
+    console.error('加载通知渠道失败:', error)
+  }
+}
+
+const onReceiverChange = (value: number) => {
+  formState.receiver_id = value
+}
+
+const goToReceiverConfig = () => {
+  modalOpen.value = false
+  router.push('/monitoring/alert/notice-receiver')
+}
+
 const normalizeList = (payload: any) => {
   if (Array.isArray(payload?.items)) return { items: payload.items, total: payload.total || payload.items.length }
   if (Array.isArray(payload)) return { items: payload, total: payload.length }
@@ -282,7 +313,7 @@ const loadData = async () => {
   try {
     const res = await getAlertNotices({
       q: keyword.value || undefined,
-      notify_type: channelFilter.value,
+      receiver_id: receiverFilter.value,
       page: pagination.current,
       page_size: pagination.pageSize
     })
@@ -299,11 +330,9 @@ const loadData = async () => {
 const openModal = (record?: AlertNotice) => {
   editing.value = record || null
   formState.name = record?.name || ''
-  formState.notify_type = (record as any)?.notify_type || (record as any)?.channel_type || 'webhook'
-  formState.receiver_type = (record as any)?.receiver_type || 'user'
-  formState.receiver_id = Number((record as any)?.receiver_id || 1)
+  formState.receiver_id = (record as any)?.receiver_id
   formState.notify_times = Number((record as any)?.notify_times || 1)
-  formState.notify_scale = (record as any)?.notify_scale || 'single'
+  formState.notify_scale = ((record as any)?.notify_scale || 'single') as 'single' | 'batch'
   formState.filter_all = (record as any)?.filter_all !== false
   formState.labelItems = objectToLabels((record as any)?.labels)
   formState.days = (record as any)?.days || [1, 2, 3, 4, 5, 6, 7]
@@ -313,7 +342,7 @@ const openModal = (record?: AlertNotice) => {
   formState.periodStart = periodStart ? dayjs(periodStart, 'HH:mm:ss') : null
   formState.periodEnd = periodEnd ? dayjs(periodEnd, 'HH:mm:ss') : null
   
-  formState.enable = (record as any)?.enable !== false && (record?.status || 'enabled') !== 'disabled'
+  formState.enable = (record as any)?.enable !== false
   
   // 确保至少有一个空行
   if (formState.labelItems.length === 0) addLabel()
@@ -323,7 +352,7 @@ const openModal = (record?: AlertNotice) => {
 
 const validateForm = () => {
   if (!formState.name.trim()) throw new Error('请输入规则名称')
-  if (!formState.receiver_id || formState.receiver_id < 1) throw new Error('请输入有效的接收者ID')
+  if (!formState.receiver_id) throw new Error('请选择通知渠道')
   if (formState.days.length === 0) throw new Error('请至少选择一天')
 }
 
@@ -334,9 +363,7 @@ const saveItem = async () => {
     
     const payload: Partial<AlertNotice> = {
       name: formState.name.trim(),
-      notify_type: formState.notify_type,
-      receiver_type: formState.receiver_type,
-      receiver_id: Number(formState.receiver_id),
+      receiver_id: formState.receiver_id,
       notify_times: Number(formState.notify_times || 1),
       notify_scale: formState.notify_scale,
       filter_all: formState.filter_all,
@@ -373,6 +400,16 @@ const testItem = async (record: AlertNotice) => {
   message.success('测试发送成功')
 }
 
+const toggleEnabled = async (record: AlertNotice, checked: boolean) => {
+  try {
+    await updateAlertNotice(record.id, { enable: checked })
+    record.enable = checked
+    message.success(checked ? '已启用' : '已禁用')
+  } catch (error: any) {
+    message.error(error?.response?.data?.message || '操作失败')
+  }
+}
+
 const handleTableChange = (pager: any) => {
   pagination.current = pager.current
   pagination.pageSize = pager.pageSize
@@ -381,12 +418,15 @@ const handleTableChange = (pager: any) => {
 
 const reset = () => {
   keyword.value = ''
-  channelFilter.value = undefined
+  receiverFilter.value = undefined
   pagination.current = 1
   loadData()
 }
 
-onMounted(loadData)
+onMounted(() => {
+  loadData()
+  loadReceivers()
+})
 </script>
 
 <style scoped>
@@ -394,5 +434,10 @@ onMounted(loadData)
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
+}
+.form-help {
+  margin-top: 4px;
+  color: #999;
+  font-size: 12px;
 }
 </style>

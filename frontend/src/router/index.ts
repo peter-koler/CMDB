@@ -212,7 +212,13 @@ const routes = [
             path: 'alert/notice',
             name: 'MonitoringAlertNotice',
             component: () => import('@/views/monitoring/alert/notice.vue'),
-            meta: { title: '通知配置', icon: 'NotificationOutlined', permission: 'monitoring:alert:notice' }
+            meta: { title: '通知规则', icon: 'NotificationOutlined', permission: 'monitoring:alert:notice' }
+          },
+          {
+            path: 'alert/notice-receiver',
+            name: 'MonitoringAlertNoticeReceiver',
+            component: () => import('@/views/monitoring/alert/notice-receiver.vue'),
+            meta: { title: '通知渠道', icon: 'MailOutlined', permission: 'monitoring:alert:notice' }
           },
           {
             path: 'alert/setting',

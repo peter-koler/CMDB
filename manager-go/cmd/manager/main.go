@@ -41,6 +41,34 @@ func main() {
 	collectorTimeout := envDurationSeconds("COLLECTOR_HEARTBEAT_TIMEOUT_SECONDS", 30)
 	go reapCollectors(ctx, registry, collectorTimeout)
 
+	// 初始化 Collector Store 和 Manager
+	// 使用与 Python Web 相同的数据库
+	pythonWebDB := getenv("PYTHON_WEB_DB", "../backend/it_ops.db")
+	collectorStore, err := store.NewCollectorStoreWithPath(pythonWebDB)
+	if err != nil {
+		log.Printf("[Manager] Failed to create collector store: %v, using memory registry only", err)
+		collectorStore = nil
+	} else {
+		// 确保表结构存在（如果 Python Web 还没创建）
+		if err := collectorStore.InitTable(); err != nil {
+			log.Printf("[Manager] Failed to init collector table: %v", err)
+		}
+		log.Printf("[Manager] Connected to Python Web database: %s", pythonWebDB)
+	}
+
+	// 创建 Collector Manager
+	var collectorManager *collector.Manager
+	if collectorStore != nil {
+		collectorManager = collector.NewManager(
+			st,
+			collectorStore,
+			collector.WithManagerHeartbeatInterval(5*time.Second),
+			collector.WithManagerReconnectBackoff(5*time.Second),
+			collector.WithManagerMaxReconnectAttempts(10),
+		)
+		log.Printf("[Manager] Collector manager created with database storage")
+	}
+
 	redisAddr := getenv("REDIS_ADDR", "127.0.0.1:6379")
 	vmURL := getenv("VICTORIA_METRICS_URL", "http://127.0.0.1:8428")
 	dispatcher := dispatch.NewDispatcher(
@@ -166,6 +194,7 @@ func main() {
 		httpapi.WithMetricIngest(ingestPoint),
 		httpapi.WithAlertStore(alertStore),
 		httpapi.WithDeadLetterStore(deadLetters, retryDeadLetter),
+		httpapi.WithCollectorManager(collectorManager),
 	)
 
 	go func() {
