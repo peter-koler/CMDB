@@ -16,7 +16,7 @@ func TestDisableStopsDispatchWithinTenSeconds(t *testing.T) {
 		App:             "linux",
 		Target:          "127.0.0.1",
 		TemplateID:      1,
-		IntervalSeconds: 5,
+		IntervalSeconds: 10,
 		Enabled:         true,
 	})
 	if err != nil {

@@ -3,6 +3,7 @@ package alert
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -10,6 +11,8 @@ import (
 	"strings"
 	"time"
 )
+
+var ErrVMQueryEmptyResult = errors.New("vm query empty result")
 
 type VMQuerier interface {
 	QueryValue(ctx context.Context, promQL string, ts time.Time) (float64, error)
@@ -72,7 +75,7 @@ func (c *VMClient) QueryValue(ctx context.Context, promQL string, ts time.Time) 
 		return 0, fmt.Errorf("vm query failed status=%s", payload.Status)
 	}
 	if len(payload.Data.Result) == 0 || len(payload.Data.Result[0].Value) < 2 {
-		return 0, fmt.Errorf("vm query empty result")
+		return 0, ErrVMQueryEmptyResult
 	}
 	raw := fmt.Sprintf("%v", payload.Data.Result[0].Value[1])
 	v, err := strconv.ParseFloat(raw, 64)

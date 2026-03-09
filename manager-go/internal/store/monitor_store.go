@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"fmt"
 	"sort"
 	"sync"
 	"time"
@@ -32,6 +33,7 @@ func (s *MonitorStore) Create(in model.MonitorCreateInput) (model.Monitor, error
 	if err := validateCreate(in); err != nil {
 		return model.Monitor{}, err
 	}
+	interval := normalizedInterval(in.IntervalSeconds, in.Interval)
 	now := time.Now()
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -39,13 +41,20 @@ func (s *MonitorStore) Create(in model.MonitorCreateInput) (model.Monitor, error
 	s.nextID++
 	m := model.Monitor{
 		ID:              id,
+		JobID:           buildJobID(id, now),
+		CIID:            in.CIID,
+		CIModelID:       in.CIModelID,
+		CIName:          in.CIName,
+		CICode:          in.CICode,
 		Name:            in.Name,
 		App:             in.App,
 		Target:          in.Target,
 		TemplateID:      in.TemplateID,
-		IntervalSeconds: in.IntervalSeconds,
+		IntervalSeconds: interval,
 		Enabled:         in.Enabled,
 		Status:          model.StatusUnknown,
+		Labels:          cloneStringMap(in.Labels),
+		Params:          cloneStringMap(in.Params),
 		Version:         1,
 		CreatedAt:       now,
 		UpdatedAt:       now,
@@ -79,6 +88,7 @@ func (s *MonitorStore) Update(id int64, in model.MonitorUpdateInput) (model.Moni
 	if err := validateUpdate(in); err != nil {
 		return model.Monitor{}, err
 	}
+	interval := normalizedInterval(in.IntervalSeconds, in.Interval)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	cur, ok := s.records[id]
@@ -88,12 +98,18 @@ func (s *MonitorStore) Update(id int64, in model.MonitorUpdateInput) (model.Moni
 	if cur.Version != in.Version {
 		return model.Monitor{}, ErrVersionConflict
 	}
+	cur.CIID = in.CIID
+	cur.CIModelID = in.CIModelID
+	cur.CIName = in.CIName
+	cur.CICode = in.CICode
 	cur.Name = in.Name
 	cur.App = in.App
 	cur.Target = in.Target
 	cur.TemplateID = in.TemplateID
-	cur.IntervalSeconds = in.IntervalSeconds
+	cur.IntervalSeconds = interval
 	cur.Enabled = in.Enabled
+	cur.Labels = cloneStringMap(in.Labels)
+	cur.Params = cloneStringMap(in.Params)
 	cur.Version++
 	cur.UpdatedAt = time.Now()
 	s.records[id] = cur
@@ -132,7 +148,8 @@ func (s *MonitorStore) Delete(id int64, version int64) error {
 }
 
 func validateCreate(in model.MonitorCreateInput) error {
-	if in.Name == "" || in.App == "" || in.Target == "" || in.TemplateID <= 0 || in.IntervalSeconds < 5 {
+	interval := normalizedInterval(in.IntervalSeconds, in.Interval)
+	if in.Name == "" || in.App == "" || in.Target == "" || in.TemplateID <= 0 || interval < 10 {
 		return ErrInvalidInput
 	}
 	return nil
@@ -148,6 +165,29 @@ func validateUpdate(in model.MonitorUpdateInput) error {
 		Target:          in.Target,
 		TemplateID:      in.TemplateID,
 		IntervalSeconds: in.IntervalSeconds,
+		Interval:        in.Interval,
 		Enabled:         in.Enabled,
 	})
+}
+
+func normalizedInterval(primary int, fallback int) int {
+	if primary > 0 {
+		return primary
+	}
+	return fallback
+}
+
+func cloneStringMap(src map[string]string) map[string]string {
+	if len(src) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(src))
+	for k, v := range src {
+		out[k] = v
+	}
+	return out
+}
+
+func buildJobID(id int64, now time.Time) string {
+	return fmt.Sprintf("job-%d-%d", id, now.UnixMilli())
 }

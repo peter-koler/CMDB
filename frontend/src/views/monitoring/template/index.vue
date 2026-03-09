@@ -15,7 +15,7 @@
                   <FolderOutlined />
                   {{ t('template.addCategory') }}
                 </a-menu-item>
-                <a-menu-item @click="showAddSubCategoryModal()" :disabled="!selectedCategoryKeys[0]">
+                <a-menu-item @click="showAddSubCategoryModal()" :disabled="!selectedCategoryForActions">
                   <FolderAddOutlined />
                   {{ t('template.addSubCategory') }}
                 </a-menu-item>
@@ -31,11 +31,11 @@
             @select="handleCategorySelect"
             @rightClick="handleTreeRightClick"
           >
-            <template #title="{ name, key }">
-              <div class="tree-node" @contextmenu.prevent="showContextMenu($event, key)">
+            <template #title="{ name, key, nodeType, count }">
+              <div class="tree-node" @contextmenu.prevent="showContextMenu($event, key, nodeType)">
                 <span class="node-name">{{ name }}</span>
-                <span class="node-count" v-if="getTemplateCount(key) > 0">
-                  ({{ getTemplateCount(key) }})
+                <span class="node-count" v-if="nodeType === 'category' && count > 0">
+                  ({{ count }})
                 </span>
               </div>
             </template>
@@ -75,18 +75,6 @@
               <a-breadcrumb-item>{{ t('menu.monitoringTemplate') }}</a-breadcrumb-item>
               <a-breadcrumb-item v-if="currentCategory">{{ currentCategory.name }}</a-breadcrumb-item>
             </a-breadcrumb>
-            <div class="template-tabs" v-if="currentTemplates.length > 0">
-              <div
-                v-for="template in currentTemplates"
-                :key="template.app"
-                class="template-tab"
-                :class="{ active: selectedTemplate?.app === template.app }"
-                @click="selectTemplate(template)"
-              >
-                <FileTextOutlined />
-                <span class="tab-name">{{ template.app }}.yml</span>
-              </div>
-            </div>
           </div>
           <div class="header-actions" v-if="selectedTemplate || isNewTemplate">
             <a-space>
@@ -106,7 +94,7 @@
           <div class="editor-toolbar">
             <a-space>
               <a-tag color="blue">{{ isNewTemplate ? currentCategoryKey : selectedTemplate?.category }}</a-tag>
-              <span class="template-name">{{ isNewTemplate ? t('template.addNewType') : (selectedTemplate?.name?.[locale] || selectedTemplate?.app) }}</span>
+              <span class="template-name">{{ isNewTemplate ? t('template.addNewType') : getTemplateDisplayName(selectedTemplate) }}</span>
             </a-space>
           </div>
           <div class="code-editor-wrapper">
@@ -158,228 +146,295 @@
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message, Modal } from 'ant-design-vue'
+import * as yaml from 'js-yaml'
 import {
-  FileTextOutlined,
   EyeOutlined,
   SaveOutlined,
   PlusOutlined,
   FolderOutlined,
   FolderAddOutlined,
   EditOutlined,
-  DeleteOutlined,
-  DatabaseOutlined,
-  CloudOutlined,
-  DesktopOutlined,
-  GlobalOutlined,
-  ClusterOutlined,
-  CodeOutlined
+  DeleteOutlined
 } from '@ant-design/icons-vue'
 import TemplatePreview from './components/TemplatePreview.vue'
-import { getTemplates, getCategories, getTemplate } from '@/api/monitoring'
+import {
+  getTemplates,
+  getCategories,
+  createTemplate as createTemplateApi,
+  updateTemplate as updateTemplateApi,
+  createCategory as createCategoryApi,
+  updateCategory as updateCategoryApi,
+  deleteCategory as deleteCategoryApi
+} from '@/api/monitoring'
 
 const { t, locale } = useI18n()
 
-// 分类数据
-const categories = ref([
-  {
-    key: 'db',
-    name: t('template.categoryDb'),
-    icon: DatabaseOutlined,
-    children: [
-      { key: 'db:mysql', name: 'MySQL', icon: DatabaseOutlined },
-      { key: 'db:redis', name: 'Redis', icon: DatabaseOutlined },
-      { key: 'db:postgresql', name: 'PostgreSQL', icon: DatabaseOutlined },
-      { key: 'db:mongodb', name: 'MongoDB', icon: DatabaseOutlined }
-    ]
-  },
-  {
-    key: 'os',
-    name: t('template.categoryOs'),
-    icon: DesktopOutlined,
-    children: [
-      { key: 'os:linux', name: 'Linux', icon: DesktopOutlined },
-      { key: 'os:windows', name: 'Windows', icon: DesktopOutlined }
-    ]
-  },
-  {
-    key: 'middleware',
-    name: t('template.categoryMiddleware'),
-    icon: ClusterOutlined,
-    children: [
-      { key: 'middleware:nginx', name: 'Nginx', icon: GlobalOutlined },
-      { key: 'middleware:kafka', name: 'Kafka', icon: ClusterOutlined }
-    ]
-  },
-  {
-    key: 'custom',
-    name: t('template.categoryCustom'),
-    icon: CodeOutlined,
-    children: []
-  }
-])
+interface CategoryNode {
+  id?: number
+  key: string
+  name: string
+  icon?: string
+  parent_id?: number
+  children?: CategoryNode[]
+}
 
-// 模板数据
-const templates = ref<any[]>([])
+interface TemplateItem {
+  app: string
+  category: string
+  name: string | Record<string, string>
+  content: string
+  version?: number
+  is_hidden?: boolean
+}
+
+interface TreeNode {
+  key: string
+  name: string
+  nodeType: 'category' | 'template'
+  children?: TreeNode[]
+  count?: number
+}
+
+const categories = ref<CategoryNode[]>([])
+const templates = ref<TemplateItem[]>([])
 const selectedCategoryKeys = ref<string[]>([])
-const selectedTemplate = ref<any>(null)
+const selectedTemplate = ref<TemplateItem | null>(null)
 const templateYaml = ref('')
 const saving = ref(false)
 const previewModalVisible = ref(false)
 const currentCategoryKey = ref('')
-const isNewTemplate = computed(() => !selectedTemplate.value && currentCategoryKey.value)
 
-// 右键菜单
 const contextMenuVisible = ref(false)
 const contextMenuPosition = ref({ x: 0, y: 0 })
 const contextMenuKey = ref('')
 
-// 分类管理弹窗
 const categoryModalVisible = ref(false)
 const categoryModalTitle = ref('')
 const categoryForm = ref({ name: '', key: '', parentKey: '' })
 const isEditMode = ref(false)
 const isSubCategory = ref(false)
 
-// 计算属性
-const categoryTreeData = computed(() => categories.value)
+const isNewTemplate = computed(() => Boolean(!selectedTemplate.value && currentCategoryKey.value))
+const categoryTreeData = computed<TreeNode[]>(() => buildDisplayTree(categories.value))
 
 const currentCategory = computed(() => {
   const key = selectedCategoryKeys.value[0]
   if (!key) return null
-  for (const cat of categories.value) {
-    if (cat.key === key) return cat
-    if (cat.children) {
-      const child = cat.children.find((c: any) => c.key === key)
-      if (child) return child
+  if (String(key).startsWith('tpl:')) {
+    return selectedTemplate.value ? findCategoryByKey(selectedTemplate.value.category, categories.value) : null
+  }
+  return findCategoryByKey(key, categories.value)
+})
+
+const selectedCategoryForActions = computed(() => {
+  const key = selectedCategoryKeys.value[0]
+  if (!key) return null
+  if (String(key).startsWith('tpl:')) {
+    return selectedTemplate.value ? findCategoryByKey(selectedTemplate.value.category, categories.value) : null
+  }
+  return findCategoryByKey(key, categories.value)
+})
+
+const normalizeCode = (name: string) => {
+  const normalized = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
+  return normalized || `cat_${Date.now()}`
+}
+
+const findCategoryByKey = (key: string, list: CategoryNode[]): CategoryNode | null => {
+  for (const item of list) {
+    if (item.key === key) return item
+    if (item.children?.length) {
+      const found = findCategoryByKey(key, item.children)
+      if (found) return found
     }
   }
   return null
-})
+}
 
-const currentTemplates = computed(() => {
-  const key = selectedCategoryKeys.value[0]
-  if (!key) return []
-  // 如果 key 包含 ":"，则是具体的模板；否则是分类
-  if (key.includes(':')) {
-    // 选择的是具体模板
-    return templates.value.filter((t: any) => `${t.category}:${t.app}` === key)
-  } else {
-    // 选择的是分类
-    return templates.value.filter((t: any) => t.category === key)
+const getTemplateByTreeKey = (key: string) => {
+  if (!key.startsWith('tpl:')) return null
+  const app = key.slice(4)
+  return templates.value.find((item) => item.app === app) || null
+}
+
+const buildDisplayTree = (categoryNodes: CategoryNode[]): TreeNode[] => {
+  return categoryNodes.map((cat) => {
+    const categoryChildren = buildDisplayTree(cat.children || [])
+    const templateChildren = templates.value
+      .filter((t) => t.category === cat.key)
+      .sort((a, b) => getTemplateDisplayName(a).localeCompare(getTemplateDisplayName(b)))
+      .map<TreeNode>((tpl) => ({
+        key: `tpl:${tpl.app}`,
+        name: getTemplateDisplayName(tpl),
+        nodeType: 'template'
+      }))
+
+    const subtreeCount = categoryChildren.reduce((sum, node) => sum + (node.count || 0), 0)
+    const count = templateChildren.length + subtreeCount
+
+    return {
+      key: cat.key,
+      name: cat.name,
+      nodeType: 'category',
+      count,
+      children: [...categoryChildren, ...templateChildren]
+    }
+  })
+}
+
+const findFirstTemplateKey = (nodes: TreeNode[]): string | null => {
+  for (const node of nodes) {
+    if (node.nodeType === 'template') return node.key
+    if (node.children?.length) {
+      const nested = findFirstTemplateKey(node.children)
+      if (nested) return nested
+    }
   }
-})
+  return null
+}
 
-// 获取模板数量
-const getTemplateCount = (key: string) => {
-  if (key.includes(':')) {
-    return templates.value.filter((t: any) => `${t.category}:${t.app}` === key).length
-  } else {
-    return templates.value.filter((t: any) => t.category === key).length
+const getTemplateDisplayName = (tpl: TemplateItem | null) => {
+  if (!tpl) return ''
+  if (typeof tpl.name === 'string') return tpl.name || tpl.app
+  return tpl.name?.[String(locale.value)] || tpl.name?.['zh-CN'] || tpl.name?.['en-US'] || tpl.app
+}
+
+const parseYamlObject = (content: string): any => {
+  const doc = yaml.load(content || '')
+  if (!doc || typeof doc !== 'object' || Array.isArray(doc)) {
+    throw new Error('YAML 顶层必须是对象')
+  }
+  return doc
+}
+
+const normalizeTemplateYaml = (content: string, fallbackCategory = '') => {
+  const doc = parseYamlObject(content)
+  const app = String(doc.app || '').trim()
+  const category = String(doc.category || fallbackCategory || '').trim()
+  const nameNode = doc.name
+  const name = typeof nameNode === 'string'
+    ? nameNode.trim()
+    : String(nameNode?.['zh-CN'] || nameNode?.['en-US'] || app).trim()
+
+  if (!app) {
+    throw new Error('模板缺少 app 字段')
+  }
+  if (!category) {
+    throw new Error('模板缺少 category 字段')
+  }
+
+  const params = Array.isArray(doc.params) ? doc.params : []
+  const seen = new Set<string>()
+  const duplicates: string[] = []
+  const deduped: any[] = []
+  for (const item of params) {
+    if (!item || typeof item !== 'object') continue
+    const field = String((item as any).field || '').trim()
+    if (!field) continue
+    if (seen.has(field)) {
+      duplicates.push(field)
+      continue
+    }
+    seen.add(field)
+    deduped.push(item)
+  }
+  doc.params = deduped
+
+  return {
+    app,
+    category,
+    name: name || app,
+    content: yaml.dump(doc, { noRefs: true, sortKeys: false, lineWidth: -1 }),
+    duplicates
   }
 }
 
-// 生成默认模板
-const generateDefaultTemplate = (app: string, name: string) => {
-  return `# 监控类型: ${name}
-category: custom
-app: ${app}
-name:
-  zh-CN: ${name}
-  en-US: ${name}
+const buildCategoryTree = (rows: any[]): CategoryNode[] => {
+  const byId = new Map<number, CategoryNode>()
+  const roots: CategoryNode[] = []
 
-params:
-  - field: host
-    name:
-      zh-CN: 主机Host
-      en-US: Host
-    type: host
-    required: true
-  - field: port
-    name:
-      zh-CN: 端口
-      en-US: Port
-    type: number
-    required: true
+  rows.forEach((row) => {
+    const node: CategoryNode = {
+      id: Number(row.id),
+      key: String(row.code),
+      name: String(row.name || row.code),
+      icon: row.icon,
+      parent_id: row.parent_id ? Number(row.parent_id) : undefined,
+      children: []
+    }
+    byId.set(node.id as number, node)
+  })
 
-metrics:
-  - name: basic
-    priority: 0
-    fields:
-      - field: responseTime
-        type: 0
-        unit: ms
-    protocol: http
-    http:
-      host: ^_^host^_^`
+  rows.forEach((row) => {
+    const node = byId.get(Number(row.id))
+    if (!node) return
+    const parentId = row.parent_id ? Number(row.parent_id) : undefined
+    if (parentId && byId.has(parentId)) {
+      byId.get(parentId)?.children?.push(node)
+    } else {
+      roots.push(node)
+    }
+  })
+
+  return roots
 }
 
-// 加载模板数据
+const dedupeTemplatesByApp = (rows: any[]): TemplateItem[] => {
+  const byApp = new Map<string, TemplateItem>()
+  for (const row of rows || []) {
+    const app = String(row?.app || '').trim()
+    if (!app) continue
+    byApp.set(app, {
+      app,
+      category: String(row?.category || '').trim(),
+      name: row?.name || app,
+      content: String(row?.content || ''),
+      version: Number(row?.version || 0),
+      is_hidden: Boolean(row?.is_hidden)
+    })
+  }
+  return Array.from(byApp.values()).sort((a, b) => a.app.localeCompare(b.app))
+}
+
 const loadTemplates = async () => {
   try {
-    // 从后端 API 获取模板列表
-    const response = await getTemplates()
-    console.log('Templates response:', response)
-    if (response && response.code == 200 && response.data) {
-      templates.value = response.data.map((item: any) => ({
-        app: item.app,
-        category: item.category,
-        parentCategory: item.category.split(':')[0],
-        name: item.name,
-        content: item.content,
-        version: item.version,
-        is_hidden: item.is_hidden
-      }))
-      console.log('Parsed templates:', templates.value)
-    }
+    const [tplResp, catResp] = await Promise.all([getTemplates(), getCategories()])
 
-    // 获取分类列表
-    const catResponse = await getCategories()
-    console.log('Categories response:', catResponse)
-    if (catResponse && catResponse.code == 200 && catResponse.data) {
-      // 构建分类树
-      const categoryMap = new Map<string, any>()
-      catResponse.data.forEach((cat: any) => {
-        if (!cat.parent_id) {
-          categoryMap.set(cat.code, {
-            key: cat.code,
-            name: cat.name,
-            icon: getCategoryIcon(cat.icon),
-            children: []
-          })
-        }
-      })
-
-      // 将模板添加到对应的分类下
-      templates.value.forEach((tmpl: any) => {
-        const parentKey = tmpl.parentCategory
-        if (categoryMap.has(parentKey)) {
-          categoryMap.get(parentKey).children.push({
-            key: `${parentKey}:${tmpl.app}`,
-            name: tmpl.name,
-            app: tmpl.app
-          })
-        }
-      })
-
-      // 更新分类数据
-      categories.value = Array.from(categoryMap.values())
-      console.log('Final categories:', categories.value)
-    }
-
-    // 默认选中第一个模板
-    console.log('After load - templates:', templates.value.length, 'categories:', categories.value.length)
-    if (templates.value.length > 0 && !selectedTemplate.value) {
-      // 选择第一个分类
-      const firstCategory = categories.value[0]
-      if (firstCategory && firstCategory.children && firstCategory.children.length > 0) {
-        // 选择第一个子节点（具体模板）
-        selectedCategoryKeys.value = [firstCategory.children[0].key]
-        console.log('Auto selecting first template:', firstCategory.children[0])
-        selectTemplate(templates.value.find((t: any) => `${t.category}:${t.app}` === firstCategory.children[0].key))
-      } else if (firstCategory) {
-        // 没有子节点，选择分类
-        selectedCategoryKeys.value = [firstCategory.key]
+    templates.value = dedupeTemplatesByApp(tplResp?.data || [])
+    categories.value = buildCategoryTree(catResp?.data || [])
+    const selectedKey = selectedCategoryKeys.value[0]
+    if (selectedKey?.startsWith('tpl:')) {
+      const selectedTpl = getTemplateByTreeKey(selectedKey)
+      if (selectedTpl) {
+        selectTemplate(selectedTpl)
+      } else {
+        selectedCategoryKeys.value = []
+        selectedTemplate.value = null
+        templateYaml.value = ''
       }
+      return
+    }
+
+    if (selectedKey && findCategoryByKey(selectedKey, categories.value)) {
+      currentCategoryKey.value = selectedKey
+      selectedTemplate.value = null
+      templateYaml.value = ''
+      return
+    }
+
+    const firstTplKey = findFirstTemplateKey(categoryTreeData.value)
+    if (firstTplKey) {
+      selectedCategoryKeys.value = [firstTplKey]
+      const firstTpl = getTemplateByTreeKey(firstTplKey)
+      if (firstTpl) {
+        selectTemplate(firstTpl)
+      }
+      return
+    }
+
+    if (categories.value.length) {
+      selectedCategoryKeys.value = [categories.value[0].key]
+      currentCategoryKey.value = categories.value[0].key
     }
   } catch (error) {
     console.error('Failed to load templates:', error)
@@ -387,38 +442,23 @@ const loadTemplates = async () => {
   }
 }
 
-// 获取分类图标
-const getCategoryIcon = (iconName?: string) => {
-  const iconMap: Record<string, any> = {
-    database: DatabaseOutlined,
-    desktop: DesktopOutlined,
-    cluster: ClusterOutlined,
-    cloud: CloudOutlined,
-    global: GlobalOutlined,
-    code: CodeOutlined
-  }
-  return iconMap[iconName || 'code'] || CodeOutlined
-}
-
-// 显示右键菜单
-const showContextMenu = (e: MouseEvent, key: string) => {
+const showContextMenu = (e: MouseEvent, key: string, nodeType: 'category' | 'template') => {
+  if (nodeType !== 'category') return
   e.preventDefault()
   contextMenuKey.value = key
   contextMenuPosition.value = { x: e.clientX, y: e.clientY }
   contextMenuVisible.value = true
 }
 
-// 隐藏右键菜单
 const hideContextMenu = () => {
   contextMenuVisible.value = false
 }
 
-// 处理树节点右键点击
 const handleTreeRightClick = ({ event, node }: any) => {
-  showContextMenu(event, node.key)
+  if (node?.nodeType !== 'category') return
+  showContextMenu(event, String(node.key), 'category')
 }
 
-// 显示新增分类弹窗
 const showAddCategoryModal = () => {
   isEditMode.value = false
   isSubCategory.value = false
@@ -427,9 +467,8 @@ const showAddCategoryModal = () => {
   categoryModalVisible.value = true
 }
 
-// 显示新增子分类弹窗
 const showAddSubCategoryModal = () => {
-  const parentKey = selectedCategoryKeys.value[0]
+  const parentKey = selectedCategoryForActions.value?.key
   if (!parentKey) return
   isEditMode.value = false
   isSubCategory.value = true
@@ -438,241 +477,171 @@ const showAddSubCategoryModal = () => {
   categoryModalVisible.value = true
 }
 
-// 处理重命名分类
 const handleRenameCategory = () => {
   hideContextMenu()
-  const key = contextMenuKey.value
-  const category = findCategoryByKey(key)
-  if (category) {
-    isEditMode.value = true
-    isSubCategory.value = key.includes(':')
-    categoryModalTitle.value = t('template.renameCategory')
-    categoryForm.value = { name: category.name, key, parentKey: '' }
-    categoryModalVisible.value = true
-  }
-}
-
-// 处理新增子分类（从右键菜单）
-const handleAddSubCategory = () => {
-  hideContextMenu()
-  const parentKey = contextMenuKey.value
-  isEditMode.value = false
-  isSubCategory.value = true
-  categoryModalTitle.value = t('template.addSubCategory')
-  categoryForm.value = { name: '', key: '', parentKey }
+  const category = findCategoryByKey(contextMenuKey.value, categories.value)
+  if (!category) return
+  isEditMode.value = true
+  isSubCategory.value = Boolean(category.parent_id)
+  categoryModalTitle.value = t('template.renameCategory')
+  categoryForm.value = { name: category.name, key: category.key, parentKey: '' }
   categoryModalVisible.value = true
 }
 
-// 处理删除分类
+const handleAddSubCategory = () => {
+  hideContextMenu()
+  if (!contextMenuKey.value) return
+  isEditMode.value = false
+  isSubCategory.value = true
+  categoryModalTitle.value = t('template.addSubCategory')
+  categoryForm.value = { name: '', key: '', parentKey: contextMenuKey.value }
+  categoryModalVisible.value = true
+}
+
 const handleDeleteCategory = () => {
   hideContextMenu()
   const key = contextMenuKey.value
+  if (!key) return
   Modal.confirm({
     title: t('template.confirmDeleteCategory'),
     content: t('template.confirmDeleteCategoryContent'),
     okText: t('common.confirm'),
     cancelText: t('common.cancel'),
-    onOk: () => {
-      deleteCategory(key)
-      message.success(t('template.deleteSuccess'))
+    onOk: async () => {
+      try {
+        await deleteCategoryApi(key)
+        if (selectedCategoryKeys.value[0] === key) {
+          selectedCategoryKeys.value = []
+          selectedTemplate.value = null
+          templateYaml.value = ''
+        }
+        await loadTemplates()
+        message.success(t('template.deleteSuccess'))
+      } catch (error: any) {
+        message.error(error?.response?.data?.message || t('template.saveFailed'))
+      }
     }
   })
 }
 
-// 查找分类
-const findCategoryByKey = (key: string) => {
-  for (const cat of categories.value) {
-    if (cat.key === key) return cat
-    if (cat.children) {
-      const child = cat.children.find((c: any) => c.key === key)
-      if (child) return child
-    }
-  }
-  return null
-}
-
-// 删除分类
-const deleteCategory = (key: string) => {
-  // 删除主分类
-  const mainIndex = categories.value.findIndex((c: any) => c.key === key)
-  if (mainIndex > -1) {
-    categories.value.splice(mainIndex, 1)
-    if (selectedCategoryKeys.value[0] === key) {
-      selectedCategoryKeys.value = []
-      selectedTemplate.value = null
-    }
-    return
-  }
-  
-  // 删除子分类
-  for (const cat of categories.value) {
-    if (cat.children) {
-      const childIndex = cat.children.findIndex((c: any) => c.key === key)
-      if (childIndex > -1) {
-        cat.children.splice(childIndex, 1)
-        if (selectedCategoryKeys.value[0] === key) {
-          selectedCategoryKeys.value = [cat.key]
-          if (currentTemplates.value.length > 0) {
-            selectTemplate(currentTemplates.value[0])
-          } else {
-            selectedTemplate.value = null
-            templateYaml.value = ''
-          }
-        }
-        return
-      }
-    }
-  }
-}
-
-// 保存分类
-const handleSaveCategory = () => {
-  if (!categoryForm.value.name) {
+const handleSaveCategory = async () => {
+  const name = categoryForm.value.name.trim()
+  if (!name) {
     message.error(t('template.categoryNameRequired'))
     return
   }
-  
-  if (isEditMode.value) {
-    // 编辑模式
-    const category = findCategoryByKey(categoryForm.value.key)
-    if (category) {
-      category.name = categoryForm.value.name
+
+  try {
+    if (isEditMode.value) {
+      await updateCategoryApi(categoryForm.value.key, { name })
       message.success(t('template.saveSuccess'))
-    }
-  } else {
-    // 新增模式
-    const newKey = isSubCategory.value
-      ? `${categoryForm.value.parentKey}:${categoryForm.value.name.toLowerCase().replace(/\s+/g, '_')}`
-      : categoryForm.value.name.toLowerCase().replace(/\s+/g, '_')
-    
-    if (isSubCategory.value) {
-      const newCategory = {
-        key: newKey,
-        name: categoryForm.value.name,
-        icon: DatabaseOutlined
-      }
-      const parent = categories.value.find((c: any) => c.key === categoryForm.value.parentKey)
-      if (parent) {
-        if (!parent.children) parent.children = []
-        parent.children.push(newCategory)
-      }
     } else {
-      const newCategory: any = {
-        key: newKey,
-        name: categoryForm.value.name,
-        icon: ClusterOutlined,
-        children: []
-      }
-      categories.value.push(newCategory)
+      const parent = isSubCategory.value
+        ? findCategoryByKey(categoryForm.value.parentKey, categories.value)
+        : null
+      const code = normalizeCode(name)
+      await createCategoryApi({
+        name,
+        code,
+        parent_id: parent?.id
+      })
+      message.success(t('template.addSuccess'))
     }
-    message.success(t('template.addSuccess'))
+    categoryModalVisible.value = false
+    await loadTemplates()
+  } catch (error: any) {
+    message.error(error?.response?.data?.message || t('template.saveFailed'))
   }
-  
-  categoryModalVisible.value = false
 }
 
-// 选择分类
 const handleCategorySelect = (keys: string[]) => {
-  console.log('Category selected:', keys, 'templates:', templates.value.length, 'categories:', categories.value.length)
   selectedCategoryKeys.value = keys
   hideContextMenu()
-  console.log('currentTemplates:', currentTemplates.value.length, currentTemplates.value)
-  
+
   const key = keys[0]
   if (!key) {
     selectedTemplate.value = null
     templateYaml.value = ''
+    currentCategoryKey.value = ''
     return
   }
-  
-  if (key.includes(':')) {
-    // 选择的是具体模板
-    if (currentTemplates.value.length > 0) {
-      selectTemplate(currentTemplates.value[0])
+
+  if (key.startsWith('tpl:')) {
+    const template = getTemplateByTreeKey(key)
+    if (template) {
+      selectTemplate(template)
+      return
     }
-  } else {
-    // 选择的是分类 - 显示空编辑器，允许新建模板
     selectedTemplate.value = null
     templateYaml.value = ''
-    currentCategoryKey.value = key
+    return
   }
+
+  currentCategoryKey.value = key
+  selectedTemplate.value = null
+  templateYaml.value = ''
 }
 
-// 选择模板
-const selectTemplate = (template: any) => {
+const selectTemplate = (template: TemplateItem) => {
   selectedTemplate.value = template
+  currentCategoryKey.value = template.category
   templateYaml.value = template.content || ''
 }
 
-// 保存模板
 const handleSave = async () => {
-  if (!templateYaml.value.trim()) {
+  const raw = templateYaml.value.trim()
+  if (!raw) {
     message.warning('请输入模板内容')
     return
   }
-  
+
   saving.value = true
   try {
+    const normalized = normalizeTemplateYaml(raw, selectedTemplate.value?.category || currentCategoryKey.value)
+    if (normalized.duplicates.length) {
+      message.warning(`检测到重复 params 字段并自动去重: ${Array.from(new Set(normalized.duplicates)).join(', ')}`)
+    }
+    templateYaml.value = normalized.content
+
     if (isNewTemplate.value) {
-      // 新建模板 - 从 YAML 解析 app 和 name
-      const yamlContent = templateYaml.value
-      const appMatch = yamlContent.match(/^app:\s*(.+)$/m)
-      const nameMatch = yamlContent.match(/name:\s*[\n\r]*\s*zh-CN:\s*(.+)$/m)
-      
-      if (!appMatch) {
-        message.error('模板缺少 app 字段')
-        saving.value = false
+      const resp = await createTemplateApi({
+        app: normalized.app,
+        name: normalized.name,
+        category: normalized.category,
+        content: normalized.content
+      })
+      if (resp.code != 200) {
+        message.error(resp.message || t('template.saveFailed'))
         return
       }
-      
-      const app = appMatch[1].trim()
-      const name = nameMatch ? nameMatch[1].trim() : app
-      
-      // 调用后端 API 创建模板
-      const { createTemplate: createTemplateApi } = await import('@/api/monitoring')
-      const response = await createTemplateApi({
-        app,
-        name,
-        category: currentCategoryKey.value,
-        content: templateYaml.value
-      })
-      
-      if (response.code == 200) {
-        message.success(t('template.addSuccess') || '添加成功')
-        // 刷新模板列表
-        await loadTemplates()
-        // 选中新创建的模板
-        const newKey = `${currentCategoryKey.value}:${app}`
-        selectedCategoryKeys.value = [newKey]
-      } else {
-        message.error(response.message || t('template.saveFailed'))
-      }
-    } else {
-      // 更新现有模板
-      const { updateTemplate: updateTemplateApi } = await import('@/api/monitoring')
-      const response = await updateTemplateApi(selectedTemplate.value.app, {
-        name: selectedTemplate.value.name,
-        category: selectedTemplate.value.category,
-        content: templateYaml.value
-      })
-      
-      if (response.code == 200) {
-        message.success(t('template.saveSuccess'))
-        // 更新本地数据
-        selectedTemplate.value.content = templateYaml.value
-      } else {
-        message.error(response.message || t('template.saveFailed'))
-      }
+      message.success(t('template.addSuccess') || '添加成功')
+      await loadTemplates()
+      selectedCategoryKeys.value = [`tpl:${normalized.app}`]
+      const created = templates.value.find((t) => t.app === normalized.app)
+      if (created) selectTemplate(created)
+      return
     }
-  } catch (error) {
+
+    if (!selectedTemplate.value) return
+    const resp = await updateTemplateApi(selectedTemplate.value.app, {
+      name: normalized.name,
+      category: normalized.category,
+      content: normalized.content
+    })
+    if (resp.code != 200) {
+      message.error(resp.message || t('template.saveFailed'))
+      return
+    }
+    message.success(t('template.saveSuccess'))
+    await loadTemplates()
+  } catch (error: any) {
     console.error('Save template error:', error)
-    message.error(t('template.saveFailed'))
+    message.error(error?.message || t('template.saveFailed'))
   } finally {
     saving.value = false
   }
 }
 
-// 预览
 const handlePreview = () => {
   previewModalVisible.value = true
 }

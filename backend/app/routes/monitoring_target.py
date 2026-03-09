@@ -439,14 +439,44 @@ def _notice_rule_from_model(row: NoticeRule) -> dict:
 @jwt_required()
 @require_any_permission("monitoring:target", "monitoring:list")
 def list_targets():
-    return _manager_call("GET", "/api/v1/monitors", params=request.args.to_dict())
+    return _manager_call(
+        "GET",
+        "/api/v1/monitors",
+        params=request.args.to_dict(),
+        fallback=lambda: {"items": [], "total": 0, "page": 1, "page_size": 20}
+    )
 
 
 @monitoring_target_bp.route("/targets", methods=["POST"])
 @jwt_required()
 @require_any_permission("monitoring:target:create", "monitoring:list:create")
 def create_target():
-    return _manager_call("POST", "/api/v1/monitors", payload=request.get_json() or {})
+    payload = request.get_json() or {}
+
+    # 前端兼容字段：interval -> interval_seconds
+    if "interval_seconds" not in payload and "interval" in payload:
+        payload["interval_seconds"] = payload.get("interval")
+    try:
+        interval_seconds = int(payload.get("interval_seconds") or 0)
+    except (TypeError, ValueError):
+        interval_seconds = 0
+    if interval_seconds < 10:
+        return jsonify({"code": 400, "message": "采集间隔最小为10秒"}), 400
+    payload["interval_seconds"] = interval_seconds
+
+    # 目标地址默认由参数中的 host/port 构造，回退到 CI 标识
+    params = payload.get("params") if isinstance(payload.get("params"), dict) else {}
+    host = str(params.get("host") or "").strip()
+    port = str(params.get("port") or "").strip()
+    if not payload.get("target"):
+        if host:
+            payload["target"] = f"{host}:{port or '6379'}"
+        elif payload.get("ci_code"):
+            payload["target"] = f"ci:{payload.get('ci_code')}"
+        elif payload.get("ci_id"):
+            payload["target"] = f"ci:{payload.get('ci_id')}"
+
+    return _manager_call("POST", "/api/v1/monitors", payload=payload)
 
 
 @monitoring_target_bp.route("/targets/<int:monitor_id>", methods=["GET"])
@@ -503,6 +533,34 @@ def assign_collector_to_target(monitor_id: int):
 def unassign_collector_from_target(monitor_id: int):
     """取消监控任务的 Collector 固定分配，改为自动分配"""
     return _manager_call("DELETE", f"/api/v1/monitors/{monitor_id}/collector")
+
+
+@monitoring_target_bp.route("/targets/<int:monitor_id>/metrics/series", methods=["GET"])
+@jwt_required()
+@require_any_permission("monitoring:target:view", "monitoring:list:view")
+def get_target_metric_series(monitor_id: int):
+    params = request.args.to_dict()
+    params["monitor_id"] = monitor_id
+    return _manager_call(
+        "GET",
+        "/api/v1/metrics/series",
+        params=params,
+        fallback=lambda: {"items": [], "total": 0},
+    )
+
+
+@monitoring_target_bp.route("/targets/<int:monitor_id>/metrics/query-range", methods=["GET"])
+@jwt_required()
+@require_any_permission("monitoring:target:view", "monitoring:list:view")
+def query_target_metric_range(monitor_id: int):
+    params = request.args.to_dict()
+    params["monitor_id"] = monitor_id
+    return _manager_call(
+        "GET",
+        "/api/v1/metrics/query-range",
+        params=params,
+        fallback=lambda: {"items": [], "total": 0},
+    )
 
 
 @monitoring_target_bp.route("/alerts", methods=["GET"])

@@ -2,6 +2,7 @@ package alert
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -59,6 +60,10 @@ func (p *PeriodicEvaluator) RunDue(ctx context.Context, monitorID int64, now tim
 
 		value, err := p.querier.QueryValue(ctx, r.PromQL, now)
 		if err != nil {
+			// 空结果表示当前窗口尚未产出该指标，按“无数据”处理，不刷错误日志。
+			if errors.Is(err, ErrVMQueryEmptyResult) {
+				continue
+			}
 			log.Printf("periodic rule query error rule=%s err=%v", r.Name, err)
 			continue
 		}

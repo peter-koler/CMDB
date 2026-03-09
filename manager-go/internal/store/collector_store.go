@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -100,6 +101,7 @@ CREATE INDEX IF NOT EXISTS idx_binds_monitor ON collector_monitor_binds(monitor_
 	}
 
 	// 尝试添加可能缺失的列（兼容旧表）
+	_ = s.addColumnIfNotExists("collector_monitor_binds", "pinned", "INTEGER NOT NULL DEFAULT 0")
 	_ = s.addColumnIfNotExists("collector_monitor_binds", "creator", "TEXT")
 	_ = s.addColumnIfNotExists("collector_monitor_binds", "modifier", "TEXT")
 
@@ -108,22 +110,37 @@ CREATE INDEX IF NOT EXISTS idx_binds_monitor ON collector_monitor_binds(monitor_
 
 // addColumnIfNotExists 如果列不存在则添加
 func (s *CollectorStore) addColumnIfNotExists(table, column, colType string) error {
-	// SQLite 不支持 IF NOT EXISTS 添加列，需要检查
-	var count int
-	err := s.db.QueryRow(
-		"SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?",
-		table, column,
-	).Scan(&count)
+	rows, err := s.db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
 	if err != nil {
 		return err
 	}
-	if count == 0 {
-		_, err = s.db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, colType))
-		if err != nil {
+	defer rows.Close()
+
+	for rows.Next() {
+		var (
+			cid       int
+			name      string
+			fieldType string
+			notNull   int
+			defaultV  sql.NullString
+			pk        int
+		)
+		if err := rows.Scan(&cid, &name, &fieldType, &notNull, &defaultV, &pk); err != nil {
 			return err
 		}
-		log.Printf("[CollectorStore] Added column %s to table %s", column, table)
+		if strings.EqualFold(name, column) {
+			return nil
+		}
 	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	_, err = s.db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, colType))
+	if err != nil {
+		return err
+	}
+	log.Printf("[CollectorStore] Added column %s to table %s", column, table)
 	return nil
 }
 
@@ -335,14 +352,14 @@ func (s *CollectorStore) GetStats() (map[string]interface{}, error) {
 // CollectorMonitorBind Collector-Monitor 绑定关系
 // @Description 采集器与监控任务的绑定关系，支持用户固定指定或自动分配
 type CollectorMonitorBind struct {
-	ID         int64     `json:"id"`
-	Collector  string    `json:"collector"`   // Collector 名称
-	MonitorID  int64     `json:"monitor_id"`  // 监控任务 ID
-	Pinned     int8      `json:"pinned"`      // 0-自动分配, 1-用户固定指定
-	Creator    *string   `json:"creator"`
-	Modifier   *string   `json:"modifier"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	ID        int64     `json:"id"`
+	Collector string    `json:"collector"`  // Collector 名称
+	MonitorID int64     `json:"monitor_id"` // 监控任务 ID
+	Pinned    int8      `json:"pinned"`     // 0-自动分配, 1-用户固定指定
+	Creator   *string   `json:"creator"`
+	Modifier  *string   `json:"modifier"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // CreateBind 创建绑定关系

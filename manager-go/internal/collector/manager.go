@@ -7,7 +7,9 @@ import (
 	"hash/fnv"
 	"log"
 	"net"
+	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -92,6 +94,18 @@ func NewManager(monitorStore *store.MonitorStore, collectorStore *store.Collecto
 	return m
 }
 
+func (m *Manager) SetReportHandler(fn func(string, *pb.CollectRep)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.onReport = fn
+}
+
+func (m *Manager) SetAckHandler(fn func(string, *pb.CommandAck)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.onAck = fn
+}
+
 // Register 注册 Collector
 func (m *Manager) Register(id, addr string) error {
 	return m.RegisterWithInfo(id, addr, "", "", "public")
@@ -102,8 +116,11 @@ func (m *Manager) RegisterWithInfo(id, addr, ip, version, mode string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if _, exists := m.clients[id]; exists {
-		return fmt.Errorf("collector %s already registered", id)
+	// 如果 Collector 已存在，先断开再重新注册（允许重新注册）
+	if client, exists := m.clients[id]; exists {
+		log.Printf("[Manager] Collector %s already registered, disconnecting and re-registering", id)
+		client.Disconnect()
+		delete(m.clients, id)
 	}
 
 	// 如果没有提供 IP，从 addr 解析
@@ -279,12 +296,17 @@ func (m *Manager) DispatchTask(collectorID string, task *pb.CollectTask) error {
 
 // DispatchTaskByMonitor 根据 Monitor ID 自动选择 Collector 分发任务
 func (m *Manager) DispatchTaskByMonitor(monitorID int64, task *pb.CollectTask) error {
-	client, err := m.SelectCollector(monitorID)
+	client, pinned, err := m.selectCollectorForMonitor(monitorID)
 	if err != nil {
 		return err
 	}
-
-	return client.SendTask(task)
+	if err := client.SendTask(task); err != nil {
+		return err
+	}
+	if err := m.persistBind(client.id, monitorID, pinned); err != nil {
+		log.Printf("[Manager] Failed to persist bind monitor=%d collector=%s err=%v", monitorID, client.id, err)
+	}
+	return nil
 }
 
 // DeleteTask 删除指定 Collector 上的任务
@@ -299,7 +321,7 @@ func (m *Manager) DeleteTask(collectorID string, jobID int64) error {
 
 // DeleteTaskByMonitor 根据 Monitor ID 自动选择 Collector 删除任务
 func (m *Manager) DeleteTaskByMonitor(monitorID int64, jobID int64) error {
-	client, err := m.SelectCollector(monitorID)
+	client, _, err := m.selectCollectorForMonitor(monitorID)
 	if err != nil {
 		return err
 	}
@@ -317,21 +339,11 @@ func (m *Manager) BuildCollectTask(monitor *model.Monitor) (*pb.CollectTask, int
 		App:        monitor.App,
 		IntervalMs: int64(monitor.IntervalSeconds) * 1000,
 		CommandId:  time.Now().UnixNano(),
-		Version:    1,
+		Version:    monitor.Version,
 		TraceId:    fmt.Sprintf("%d-%d", monitor.ID, time.Now().Unix()),
 	}
 
-	// 这里需要根据 monitor.App 从模板获取具体的 metrics 任务
-	// 简化版本，实际应该从模板服务获取
-	task.Tasks = []*pb.MetricsTask{
-		{
-			Name:      "default",
-			Protocol:  "http", // 根据实际配置
-			TimeoutMs: 10000,
-			Priority:  0,
-			Params:    make(map[string]string),
-		},
-	}
+	task.Tasks = m.buildMetricsTasks(monitor)
 
 	return task, jobID
 }
@@ -424,4 +436,237 @@ func (m *Manager) ReBalanceJobs() error {
 
 	log.Printf("[Manager] Rebalance completed")
 	return nil
+}
+
+func (m *Manager) AssignCollector(monitorID int64, collectorID string, pinned bool) error {
+	if _, err := m.monitorStore.Get(monitorID); err != nil {
+		return err
+	}
+	client, err := m.GetClient(collectorID)
+	if err != nil {
+		return err
+	}
+	if client.GetState() != StateConnected {
+		return fmt.Errorf("collector %s is not connected", collectorID)
+	}
+	flag := int8(0)
+	if pinned {
+		flag = 1
+	}
+	if err := m.persistBind(collectorID, monitorID, pinned); err != nil {
+		return err
+	}
+	if m.collectorStore != nil {
+		// persistBind keeps current relation when unchanged. Force pinned flag update when requested.
+		if bind, err := m.collectorStore.GetBindByMonitor(monitorID); err == nil && bind != nil && bind.Pinned != flag {
+			_ = m.collectorStore.DeleteBindByMonitor(monitorID)
+			if _, err := m.collectorStore.CreateBind(collectorID, monitorID, flag); err != nil {
+				return err
+			}
+		}
+	}
+	monitor, err := m.monitorStore.Get(monitorID)
+	if err != nil {
+		return err
+	}
+	if monitor.Enabled {
+		task, _ := m.BuildCollectTask(&monitor)
+		return m.DispatchTask(collectorID, task)
+	}
+	return nil
+}
+
+func (m *Manager) UnassignCollector(monitorID int64) error {
+	if m.collectorStore == nil {
+		return nil
+	}
+	if err := m.collectorStore.DeleteBindByMonitor(monitorID); err != nil {
+		return err
+	}
+	monitor, err := m.monitorStore.Get(monitorID)
+	if err != nil {
+		return err
+	}
+	if !monitor.Enabled {
+		return nil
+	}
+	task, _ := m.BuildCollectTask(&monitor)
+	return m.DispatchTaskByMonitor(monitorID, task)
+}
+
+func (m *Manager) selectCollectorForMonitor(monitorID int64) (*Client, bool, error) {
+	if m.collectorStore != nil {
+		if bind, err := m.collectorStore.GetBindByMonitor(monitorID); err == nil && bind != nil && bind.Pinned == 1 {
+			client, err := m.GetClient(bind.Collector)
+			if err == nil && client.GetState() == StateConnected {
+				return client, true, nil
+			}
+		}
+	}
+	client, err := m.SelectCollector(monitorID)
+	if err != nil {
+		return nil, false, err
+	}
+	return client, false, nil
+}
+
+func (m *Manager) persistBind(collectorID string, monitorID int64, pinned bool) error {
+	if m.collectorStore == nil {
+		return nil
+	}
+	wantPinned := int8(0)
+	if pinned {
+		wantPinned = 1
+	}
+	bind, err := m.collectorStore.GetBindByMonitor(monitorID)
+	if err == nil && bind != nil {
+		if bind.Collector == collectorID && bind.Pinned == wantPinned {
+			return nil
+		}
+		if bind.Pinned == 1 && !pinned {
+			// Keep user-pinned assignment untouched when doing auto dispatch.
+			return nil
+		}
+		if err := m.collectorStore.DeleteBindByMonitor(monitorID); err != nil {
+			return err
+		}
+	}
+	_, err = m.collectorStore.CreateBind(collectorID, monitorID, wantPinned)
+	return err
+}
+
+func (m *Manager) buildMetricsTasks(monitor *model.Monitor) []*pb.MetricsTask {
+	app := strings.TrimSpace(strings.ToLower(monitor.App))
+	switch app {
+	case "redis":
+		return buildRedisTasks(monitor)
+	default:
+		return buildDefaultTasks(monitor)
+	}
+}
+
+func buildDefaultTasks(monitor *model.Monitor) []*pb.MetricsTask {
+	protocolName := strings.TrimSpace(strings.ToLower(monitor.App))
+	if protocolName == "" {
+		protocolName = "http"
+	}
+	params := cloneStringMap(monitor.Params)
+	if params == nil {
+		params = make(map[string]string)
+	}
+	if protocolName == "http" {
+		if _, ok := params["url"]; !ok {
+			params["url"] = monitor.Target
+		}
+	}
+	return []*pb.MetricsTask{
+		{
+			Name:      protocolName,
+			Protocol:  protocolName,
+			TimeoutMs: int64(readIntParam(params, "timeout", 5000)),
+			Priority:  0,
+			Params:    params,
+		},
+	}
+}
+
+func buildRedisTasks(monitor *model.Monitor) []*pb.MetricsTask {
+	params := cloneStringMap(monitor.Params)
+	if params == nil {
+		params = make(map[string]string)
+	}
+	host := strings.TrimSpace(params["host"])
+	port := strings.TrimSpace(params["port"])
+	if host == "" {
+		host, port = splitHostPortFallback(monitor.Target)
+	}
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	if port == "" {
+		port = "6379"
+	}
+	timeout := readIntParam(params, "timeout", 3000)
+	sections := []string{"server", "clients", "memory", "stats"}
+	if raw := strings.TrimSpace(params["sections"]); raw != "" {
+		userSections := strings.Split(raw, ",")
+		sections = make([]string, 0, len(userSections))
+		for _, item := range userSections {
+			sec := strings.TrimSpace(strings.ToLower(item))
+			if sec == "" {
+				continue
+			}
+			sections = append(sections, sec)
+		}
+		if len(sections) == 0 {
+			sections = []string{"server", "clients", "memory", "stats"}
+		}
+	}
+	tasks := make([]*pb.MetricsTask, 0, len(sections))
+	for idx, sec := range sections {
+		taskParams := map[string]string{
+			"host":     host,
+			"port":     port,
+			"timeout":  strconv.Itoa(timeout),
+			"section":  sec,
+			"username": strings.TrimSpace(params["username"]),
+			"password": strings.TrimSpace(params["password"]),
+		}
+		tasks = append(tasks, &pb.MetricsTask{
+			Name:      sec,
+			Protocol:  "redis",
+			TimeoutMs: int64(timeout),
+			Priority:  int32(idx),
+			Params:    taskParams,
+		})
+	}
+	return tasks
+}
+
+func splitHostPortFallback(target string) (string, string) {
+	raw := strings.TrimSpace(target)
+	if raw == "" {
+		return "", ""
+	}
+	if strings.Contains(raw, "://") {
+		if u, err := url.Parse(raw); err == nil {
+			host := strings.TrimSpace(u.Hostname())
+			port := strings.TrimSpace(u.Port())
+			return host, port
+		}
+	}
+	if host, port, err := net.SplitHostPort(raw); err == nil {
+		return strings.TrimSpace(host), strings.TrimSpace(port)
+	}
+	parts := strings.Split(raw, ":")
+	if len(parts) == 2 {
+		return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
+	}
+	return raw, ""
+}
+
+func readIntParam(params map[string]string, key string, def int) int {
+	if params == nil {
+		return def
+	}
+	raw := strings.TrimSpace(params[key])
+	if raw == "" {
+		return def
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil || v <= 0 {
+		return def
+	}
+	return v
+}
+
+func cloneStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }

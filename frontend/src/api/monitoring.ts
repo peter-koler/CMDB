@@ -149,14 +149,25 @@ export interface AlertRule {
 
 export interface MonitoringTarget {
   id: number
+  job_id?: string
   name?: string
   app?: string
   target?: string
   endpoint?: string
+  ci_id?: number
+  ci_model_id?: number
+  ci_name?: string
+  ci_code?: string
+  template_id?: number
   status?: string
   enabled?: boolean
   interval?: number
+  interval_seconds?: number
+  params?: Record<string, string>
+  labels?: Record<string, string>
   last_collected_at?: string
+  created_at?: string
+  updated_at?: string
   version?: number
 }
 
@@ -205,6 +216,40 @@ export const disableMonitoringTarget = (monitorId: number, data?: Record<string,
     url: `/monitoring/targets/${monitorId}/disable`,
     method: 'PATCH',
     data
+  })
+}
+
+export interface MetricSeriesItem {
+  __name__?: string
+  __metrics__?: string
+  __metric__?: string
+  [key: string]: string | undefined
+}
+
+export interface MetricRangePoint {
+  timestamp: number
+  value: number
+}
+
+export interface MetricRangeSeries {
+  name: string
+  labels?: Record<string, string>
+  points: MetricRangePoint[]
+}
+
+export const getTargetMetricSeries = (monitorId: number, params?: Record<string, any>) => {
+  return request({
+    url: `/monitoring/targets/${monitorId}/metrics/series`,
+    method: 'GET',
+    params
+  })
+}
+
+export const queryTargetMetricRange = (monitorId: number, params?: Record<string, any>) => {
+  return request({
+    url: `/monitoring/targets/${monitorId}/metrics/query-range`,
+    method: 'GET',
+    params
   })
 }
 
@@ -468,11 +513,11 @@ export const getCollectorMonitors = (collectorId: string) => {
 }
 
 // 为 Monitor 指定 Collector（固定分配）
-export const assignCollectorToMonitor = (monitorId: number, collectorId: string) => {
+export const assignCollectorToMonitor = (monitorId: number, collectorId: string, pinned: boolean = true) => {
   return request({
     url: `/monitoring/targets/${monitorId}/collector`,
     method: 'POST',
-    data: { collector_id: collectorId }
+    data: { collector_id: collectorId, pinned }
   })
 }
 

@@ -17,7 +17,7 @@
     <div class="section-title">{{ t('template.preview.params') }}</div>
     <a-table
       :columns="paramColumns"
-      :data-source="parsedConfig.params"
+      :data-source="previewParams"
       :pagination="false"
       size="small"
       bordered
@@ -26,9 +26,9 @@
     <a-divider />
 
     <div class="section-title">{{ t('template.preview.metrics') }}</div>
-    <a-collapse v-if="parsedConfig.metrics?.length > 0">
+    <a-collapse v-if="previewMetrics.length > 0">
       <a-collapse-panel
-        v-for="(metric, index) in parsedConfig.metrics"
+        v-for="(metric, index) in previewMetrics"
         :key="index"
         :header="`${metric.name} (${t('template.preview.priority')}: ${metric.priority})`"
       >
@@ -74,6 +74,39 @@ const parsedConfig = computed(() => {
     console.error('YAML parse error:', e)
     return {}
   }
+})
+
+const previewParams = computed<any[]>(() => {
+  const params = Array.isArray((parsedConfig.value as any)?.params) ? (parsedConfig.value as any).params : []
+  const seen = new Set<string>()
+  const out: any[] = []
+  for (const item of params) {
+    if (!item || typeof item !== 'object') continue
+    if (item.hide === true) continue
+    const field = String(item.field || '').trim()
+    if (!field || seen.has(field)) continue
+    seen.add(field)
+    out.push(item)
+  }
+  return out
+})
+
+const previewMetrics = computed<any[]>(() => {
+  const metrics = Array.isArray((parsedConfig.value as any)?.metrics) ? (parsedConfig.value as any).metrics : []
+  return metrics.map((metric: any) => {
+    const fields = Array.isArray(metric?.fields) ? metric.fields : []
+    const seen = new Set<string>()
+    const deduped = fields.filter((field: any) => {
+      const key = String(field?.field || '').trim()
+      if (!key || seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+    return {
+      ...metric,
+      fields: deduped
+    }
+  })
 })
 
 const paramColumns = [

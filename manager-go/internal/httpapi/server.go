@@ -3,13 +3,16 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"manager-go/internal/alert"
 	"manager-go/internal/collector"
+	"manager-go/internal/metrics"
 	"manager-go/internal/model"
 	"manager-go/internal/notify"
 	"manager-go/internal/store"
@@ -27,6 +30,7 @@ type Server struct {
 	deadLetterStore  *alert.DeadLetterStore
 	retryDeadLetter  func(int64) error
 	collectorManager *collector.Manager
+	vmQuery          *metrics.VMClient
 }
 
 type Option func(*Server)
@@ -49,6 +53,12 @@ func WithCollectorRegistry(reg *collector.Registry, timeout time.Duration) Optio
 func WithCollectorManager(mgr *collector.Manager) Option {
 	return func(s *Server) {
 		s.collectorManager = mgr
+	}
+}
+
+func WithVMQueryClient(client *metrics.VMClient) Option {
+	return func(s *Server) {
+		s.vmQuery = client
 	}
 }
 
@@ -99,6 +109,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/v1/collectors/assignments", s.handleCollectorAssignments)
 	s.mux.HandleFunc("/api/v1/collectors/", s.handleCollectorByID)
 	s.mux.HandleFunc("/api/v1/collectors", s.handleCollectors)
+	s.mux.HandleFunc("/api/v1/metrics/series", s.handleMetricsSeries)
+	s.mux.HandleFunc("/api/v1/metrics/query-range", s.handleMetricsQueryRange)
 	s.mux.HandleFunc("/api/v1/metrics", s.handleMetricsIngest)
 	s.mux.HandleFunc("/api/v1/alerts", s.handleAlerts)
 	s.mux.HandleFunc("/api/v1/alerts/history", s.handleAlertsHistory)
@@ -140,14 +152,31 @@ func (s *Server) handleMonitors(w http.ResponseWriter, r *http.Request) {
 			writeStoreErr(w, err)
 			return
 		}
+		if s.collectorManager != nil && m.Enabled {
+			task, _ := s.collectorManager.BuildCollectTask(&m)
+			if err := s.collectorManager.DispatchTaskByMonitor(m.ID, task); err != nil {
+				writeErr(w, http.StatusBadGateway, "COLLECTOR_DISPATCH_FAILED", err.Error())
+				return
+			}
+		}
 		writeJSON(w, http.StatusCreated, m)
 	case http.MethodGet:
-		items := s.store.List()
+		items := filterMonitors(s.store.List(), r)
+		page, pageSize := pageParams(r)
+		start := (page - 1) * pageSize
+		end := start + pageSize
+		total := len(items)
+		if start > total {
+			start = total
+		}
+		if end > total {
+			end = total
+		}
 		writeJSON(w, http.StatusOK, map[string]any{
-			"items":     items,
-			"page":      1,
-			"page_size": len(items),
-			"total":     len(items),
+			"items":     items[start:end],
+			"page":      page,
+			"page_size": pageSize,
+			"total":     total,
 		})
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -168,6 +197,17 @@ func (s *Server) handleMonitorByID(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(parts) == 1 {
 		s.handleMonitorCRUD(w, r, id)
+		return
+	}
+	if len(parts) == 2 && parts[1] == "collector" {
+		switch r.Method {
+		case http.MethodPost:
+			s.handleAssignMonitorCollector(w, r, id)
+		case http.MethodDelete:
+			s.handleUnassignMonitorCollector(w, id)
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
 		return
 	}
 	if len(parts) == 2 && r.Method == http.MethodPatch && (parts[1] == "enable" || parts[1] == "disable") {
@@ -514,6 +554,151 @@ func (s *Server) handleCollectorMonitors(w http.ResponseWriter, collectorID stri
 	})
 }
 
+func (s *Server) handleAssignMonitorCollector(w http.ResponseWriter, r *http.Request, monitorID int64) {
+	if s.collectorManager == nil {
+		writeErr(w, http.StatusNotImplemented, "COLLECTOR_UNAVAILABLE", "collector manager not configured")
+		return
+	}
+	var req struct {
+		CollectorID string `json:"collector_id"`
+		Pinned      *bool  `json:"pinned"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error())
+		return
+	}
+	req.CollectorID = strings.TrimSpace(req.CollectorID)
+	if req.CollectorID == "" {
+		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "collector_id is required")
+		return
+	}
+	pinned := true
+	if req.Pinned != nil {
+		pinned = *req.Pinned
+	}
+	if err := s.collectorManager.AssignCollector(monitorID, req.CollectorID, pinned); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeErr(w, http.StatusNotFound, "MONITOR_NOT_FOUND", err.Error())
+			return
+		}
+		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"monitor_id":   monitorID,
+		"collector_id": req.CollectorID,
+		"pinned":       pinned,
+	})
+}
+
+func (s *Server) handleUnassignMonitorCollector(w http.ResponseWriter, monitorID int64) {
+	if s.collectorManager == nil {
+		writeErr(w, http.StatusNotImplemented, "COLLECTOR_UNAVAILABLE", "collector manager not configured")
+		return
+	}
+	if err := s.collectorManager.UnassignCollector(monitorID); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeErr(w, http.StatusNotFound, "MONITOR_NOT_FOUND", err.Error())
+			return
+		}
+		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"monitor_id": monitorID,
+		"unassigned": true,
+	})
+}
+
+func (s *Server) handleMetricsSeries(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if s.vmQuery == nil {
+		writeErr(w, http.StatusNotImplemented, "METRIC_QUERY_UNAVAILABLE", "vm query not configured")
+		return
+	}
+	monitorID, err := strconv.ParseInt(strings.TrimSpace(r.URL.Query().Get("monitor_id")), 10, 64)
+	if err != nil || monitorID <= 0 {
+		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "monitor_id is required")
+		return
+	}
+	start, end, err := resolveRangeWindow(r)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error())
+		return
+	}
+	matchers := []string{fmt.Sprintf(`{__monitor_id__="%d"}`, monitorID)}
+	if extra := strings.TrimSpace(r.URL.Query().Get("match")); extra != "" {
+		matchers = append(matchers, extra)
+	}
+	series, err := s.vmQuery.ListSeries(r.Context(), matchers, start, end)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "UPSTREAM_UNAVAILABLE", err.Error())
+		return
+	}
+	sort.Slice(series, func(i, j int) bool {
+		return strings.TrimSpace(series[i]["__name__"]) < strings.TrimSpace(series[j]["__name__"])
+	})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items": series,
+		"total": len(series),
+		"from":  start.UTC().Format(time.RFC3339),
+		"to":    end.UTC().Format(time.RFC3339),
+	})
+}
+
+func (s *Server) handleMetricsQueryRange(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if s.vmQuery == nil {
+		writeErr(w, http.StatusNotImplemented, "METRIC_QUERY_UNAVAILABLE", "vm query not configured")
+		return
+	}
+	monitorID, err := strconv.ParseInt(strings.TrimSpace(r.URL.Query().Get("monitor_id")), 10, 64)
+	if err != nil || monitorID <= 0 {
+		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "monitor_id is required")
+		return
+	}
+	start, end, err := resolveRangeWindow(r)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error())
+		return
+	}
+	stepSec := atoiDefault(r.URL.Query().Get("step"), 60)
+	if stepSec <= 0 {
+		stepSec = 60
+	}
+	names := parseCSVNames(r.URL.Query().Get("names"))
+	if name := strings.TrimSpace(r.URL.Query().Get("name")); name != "" {
+		names = append(names, name)
+	}
+	if len(names) == 0 {
+		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "name or names is required")
+		return
+	}
+	out := make([]metrics.RangeSeries, 0, len(names))
+	for _, name := range names {
+		query := fmt.Sprintf(`%s{__monitor_id__="%d"}`, strings.TrimSpace(name), monitorID)
+		series, err := s.vmQuery.QueryRange(r.Context(), query, start, end, time.Duration(stepSec)*time.Second)
+		if err != nil {
+			writeErr(w, http.StatusBadGateway, "UPSTREAM_UNAVAILABLE", err.Error())
+			return
+		}
+		out = append(out, series...)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items": out,
+		"total": len(out),
+		"from":  start.UTC().Format(time.RFC3339),
+		"to":    end.UTC().Format(time.RFC3339),
+		"step":  stepSec,
+	})
+}
+
 func (s *Server) handleMetricsIngest(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -747,6 +932,10 @@ func (s *Server) handleStatusPageByID(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleResourceCollection(w http.ResponseWriter, r *http.Request, name string) {
+	if s.resources == nil {
+		writeErr(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "资源配置由 Python Web 管理，请访问 /api/v1/ 下的对应端点")
+		return
+	}
 	st := s.resources.get(name)
 	if st == nil {
 		writeErr(w, http.StatusNotFound, "RESOURCE_NOT_FOUND", "resource store not found")
@@ -783,6 +972,10 @@ func (s *Server) handleResourceCollection(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Server) handleResourceByID(w http.ResponseWriter, r *http.Request, prefix, name string) {
+	if s.resources == nil {
+		writeErr(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "资源配置由 Python Web 管理，请访问 /api/v1/ 下的对应端点")
+		return
+	}
 	st := s.resources.get(name)
 	if st == nil {
 		writeErr(w, http.StatusNotFound, "RESOURCE_NOT_FOUND", "resource store not found")
@@ -907,8 +1100,24 @@ func (s *Server) handleMonitorCRUD(w http.ResponseWriter, r *http.Request, id in
 			writeStoreErr(w, err)
 			return
 		}
+		if s.collectorManager != nil {
+			task, _ := s.collectorManager.BuildCollectTask(&m)
+			if m.Enabled {
+				if err := s.collectorManager.DispatchTaskByMonitor(m.ID, task); err != nil {
+					writeErr(w, http.StatusBadGateway, "COLLECTOR_DISPATCH_FAILED", err.Error())
+					return
+				}
+			} else {
+				_ = s.collectorManager.DeleteTaskByMonitor(m.ID, task.JobId)
+			}
+		}
 		writeJSON(w, http.StatusOK, m)
 	case http.MethodDelete:
+		m, err := s.store.Get(id)
+		if err != nil {
+			writeStoreErr(w, err)
+			return
+		}
 		version, err := strconv.ParseInt(r.URL.Query().Get("version"), 10, 64)
 		if err != nil || version <= 0 {
 			writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "version is required")
@@ -917,6 +1126,11 @@ func (s *Server) handleMonitorCRUD(w http.ResponseWriter, r *http.Request, id in
 		if err := s.store.Delete(id, version); err != nil {
 			writeStoreErr(w, err)
 			return
+		}
+		if s.collectorManager != nil {
+			task, _ := s.collectorManager.BuildCollectTask(&m)
+			_ = s.collectorManager.DeleteTaskByMonitor(id, task.JobId)
+			_ = s.collectorManager.UnassignCollector(id)
 		}
 		w.WriteHeader(http.StatusNoContent)
 	default:
@@ -936,6 +1150,17 @@ func (s *Server) handleEnableDisable(w http.ResponseWriter, r *http.Request, id 
 	if err != nil {
 		writeStoreErr(w, err)
 		return
+	}
+	if s.collectorManager != nil {
+		task, _ := s.collectorManager.BuildCollectTask(&m)
+		if enabled {
+			if err := s.collectorManager.DispatchTaskByMonitor(m.ID, task); err != nil {
+				writeErr(w, http.StatusBadGateway, "COLLECTOR_DISPATCH_FAILED", err.Error())
+				return
+			}
+		} else {
+			_ = s.collectorManager.DeleteTaskByMonitor(m.ID, task.JobId)
+		}
 	}
 	writeJSON(w, http.StatusOK, m)
 }
@@ -977,6 +1202,40 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+func filterMonitors(items []model.Monitor, r *http.Request) []model.Monitor {
+	q := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("q")))
+	app := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("app")))
+	status := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("status")))
+
+	out := make([]model.Monitor, 0, len(items))
+	for _, item := range items {
+		if app != "" && strings.ToLower(strings.TrimSpace(item.App)) != app {
+			continue
+		}
+		if status != "" {
+			enabled := status == "enabled" || status == "up" || status == "running"
+			if item.Enabled != enabled {
+				continue
+			}
+		}
+		if q != "" {
+			hay := strings.ToLower(strings.Join([]string{
+				item.Name,
+				item.Target,
+				item.CIName,
+				item.CICode,
+				item.App,
+				item.JobID,
+			}, " "))
+			if !strings.Contains(hay, q) {
+				continue
+			}
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
 func pageParams(r *http.Request) (int, int) {
 	page := atoiDefault(r.URL.Query().Get("page"), 1)
 	pageSize := atoiDefault(r.URL.Query().Get("page_size"), 20)
@@ -1001,6 +1260,59 @@ func atoiDefault(raw string, def int) int {
 		return def
 	}
 	return v
+}
+
+func parseCSVNames(raw string) []string {
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	seen := make(map[string]struct{}, len(parts))
+	for _, part := range parts {
+		name := strings.TrimSpace(part)
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
+	}
+	return out
+}
+
+func resolveRangeWindow(r *http.Request) (time.Time, time.Time, error) {
+	now := time.Now().UTC()
+	end, err := parseTimeQuery(r.URL.Query().Get("to"), now)
+	if err != nil {
+		return time.Time{}, time.Time{}, fmt.Errorf("invalid to: %w", err)
+	}
+	start, err := parseTimeQuery(r.URL.Query().Get("from"), end.Add(-time.Hour))
+	if err != nil {
+		return time.Time{}, time.Time{}, fmt.Errorf("invalid from: %w", err)
+	}
+	if !start.Before(end) {
+		return time.Time{}, time.Time{}, fmt.Errorf("from must be earlier than to")
+	}
+	return start, end, nil
+}
+
+func parseTimeQuery(raw string, fallback time.Time) (time.Time, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return fallback, nil
+	}
+	if i, err := strconv.ParseInt(value, 10, 64); err == nil {
+		if i > 1_000_000_000_000 {
+			return time.UnixMilli(i).UTC(), nil
+		}
+		if i > 0 {
+			return time.Unix(i, 0).UTC(), nil
+		}
+	}
+	if t, err := time.Parse(time.RFC3339, value); err == nil {
+		return t.UTC(), nil
+	}
+	return time.Time{}, fmt.Errorf("unsupported time format %q", value)
 }
 
 func decodeMapBody(w http.ResponseWriter, r *http.Request) (map[string]any, bool) {

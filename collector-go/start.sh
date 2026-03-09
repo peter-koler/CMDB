@@ -51,23 +51,21 @@ if ! command -v go &> /dev/null; then
     exit 1
 fi
 
-# 检查是否已编译的二进制文件
+# 每次启动前重新编译
 BINARY="./collector"
-if [ -f "$BINARY" ]; then
-    echo "[INFO] Using compiled binary: $BINARY"
-    if [ -n "$CONFIG_PATH" ]; then
-        nohup "$BINARY" -config "$CONFIG_PATH" > "$LOG_FILE" 2>&1 &
-    else
-        nohup "$BINARY" > "$LOG_FILE" 2>&1 &
-    fi
+echo "[INFO] Building collector..."
+go build -o "$BINARY" ./cmd/collector/main.go
+if [ ! -f "$BINARY" ]; then
+    echo "[ERROR] Build failed"
+    exit 1
+fi
+echo "[INFO] Build successful: $BINARY"
+
+# 使用编译后的二进制启动
+if [ -n "$CONFIG_PATH" ]; then
+    nohup "$BINARY" -config "$CONFIG_PATH" > "$LOG_FILE" 2>&1 &
 else
-    echo "[INFO] Binary not found, building from source..."
-    # 编译并运行
-    if [ -n "$CONFIG_PATH" ]; then
-        nohup go run cmd/collector/main.go -config "$CONFIG_PATH" > "$LOG_FILE" 2>&1 &
-    else
-        nohup go run cmd/collector/main.go > "$LOG_FILE" 2>&1 &
-    fi
+    nohup "$BINARY" > "$LOG_FILE" 2>&1 &
 fi
 
 # 保存 PID

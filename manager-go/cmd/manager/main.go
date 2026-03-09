@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -19,8 +19,10 @@ import (
 	"manager-go/internal/collector"
 	"manager-go/internal/dispatch"
 	"manager-go/internal/httpapi"
+	"manager-go/internal/metrics"
 	"manager-go/internal/model"
 	"manager-go/internal/notify"
+	pb "manager-go/internal/pb/proto"
 	"manager-go/internal/scheduler"
 	"manager-go/internal/store"
 )
@@ -43,7 +45,7 @@ func main() {
 
 	// 初始化 Collector Store 和 Manager
 	// 使用与 Python Web 相同的数据库
-	pythonWebDB := getenv("PYTHON_WEB_DB", "../backend/it_ops.db")
+	pythonWebDB := getenv("PYTHON_WEB_DB", "../backend/instance/it_ops.db")
 	collectorStore, err := store.NewCollectorStoreWithPath(pythonWebDB)
 	if err != nil {
 		log.Printf("[Manager] Failed to create collector store: %v, using memory registry only", err)
@@ -176,25 +178,38 @@ func main() {
 		return nil
 	}
 
-	dataDir := getenv("MANAGER_DATA_DIR", "data")
-	resourceHub, err := httpapi.NewSQLiteResourceHub(filepath.Join(dataDir, "resources.db"))
-	if err != nil {
-		log.Printf("init sqlite resources failed, fallback to json files: %v", err)
-		resourceHub, err = httpapi.NewPersistentResourceHub(filepath.Join(dataDir, "resources"))
-		if err != nil {
-			log.Printf("init json resources failed, fallback to memory: %v", err)
-			resourceHub = nil
-		}
+	if collectorManager != nil {
+		collectorManager.SetReportHandler(func(collectorID string, rep *pb.CollectRep) {
+			points := collectorReportToPoints(st, collectorID, rep)
+			for _, point := range points {
+				if err := ingestPoint(point); err != nil {
+					log.Printf("collector report ingest failed collector=%s monitor=%d metric=%s_%s err=%v",
+						collectorID, point.MonitorID, point.Metrics, point.Field, err)
+				}
+			}
+		})
+		collectorManager.SetAckHandler(func(collectorID string, ack *pb.CommandAck) {
+			if ack == nil {
+				return
+			}
+			log.Printf("collector ack collector=%s job=%d command=%d type=%s status=%s reason=%s",
+				collectorID, ack.GetJobId(), ack.GetCommandId(), ack.GetCommandType(), ack.GetStatus().String(), ack.GetReason())
+		})
 	}
+
+	vmQueryClient := metrics.NewVMClient(vmURL, 1500*time.Millisecond)
+
+	// 资源配置由 Python Web 管理，Manager 不再维护独立的 resources.db
+	// 如需访问资源配置，请调用 Python Web API
 
 	api := httpapi.NewServer(
 		st,
-		httpapi.WithResourceHub(resourceHub),
 		httpapi.WithCollectorRegistry(registry, collectorTimeout),
 		httpapi.WithMetricIngest(ingestPoint),
 		httpapi.WithAlertStore(alertStore),
 		httpapi.WithDeadLetterStore(deadLetters, retryDeadLetter),
 		httpapi.WithCollectorManager(collectorManager),
+		httpapi.WithVMQueryClient(vmQueryClient),
 	)
 
 	go func() {
@@ -206,6 +221,9 @@ func main() {
 				m, err := st.Get(id)
 				if err != nil {
 					log.Printf("dispatch skip monitor id=%d err=%v", id, err)
+					continue
+				}
+				if collectorManager != nil && len(collectorManager.GetConnectedClients()) > 0 {
 					continue
 				}
 
@@ -314,6 +332,118 @@ func makePoint(m model.Monitor) model.MetricPoint {
 			"env": "dev",
 		},
 	}
+}
+
+func collectorReportToPoints(st *store.MonitorStore, collectorID string, rep *pb.CollectRep) []model.MetricPoint {
+	if rep == nil {
+		return nil
+	}
+	timestamp := rep.GetTimeUnixMs()
+	if timestamp <= 0 {
+		timestamp = time.Now().UnixMilli()
+	}
+
+	monitor, err := st.Get(rep.GetMonitorId())
+	app := strings.TrimSpace(rep.GetApp())
+	instance := strings.TrimSpace(rep.GetFields()["identity"])
+	if err == nil {
+		if app == "" {
+			app = strings.TrimSpace(monitor.App)
+		}
+		if instance == "" {
+			instance = strings.TrimSpace(monitor.Target)
+		}
+	}
+	if app == "" {
+		app = "unknown"
+	}
+	if instance == "" {
+		instance = "unknown"
+	}
+
+	metricGroup := strings.TrimSpace(rep.GetMetrics())
+	if metricGroup == "" {
+		metricGroup = "collect"
+	}
+
+	baseLabels := map[string]string{
+		"collector_id": collectorID,
+		"protocol":     strings.TrimSpace(rep.GetProtocol()),
+		"app":          app,
+	}
+	if section := strings.TrimSpace(rep.GetFields()["section"]); section != "" {
+		baseLabels["section"] = section
+	}
+
+	points := []model.MetricPoint{
+		{
+			MonitorID: rep.GetMonitorId(),
+			App:       app,
+			Metrics:   metricGroup,
+			Field:     "success",
+			Value:     boolToFloat(rep.GetSuccess()),
+			UnixMs:    timestamp,
+			Instance:  instance,
+			Labels:    cloneLabels(baseLabels),
+		},
+	}
+	if rep.GetRawLatencyMs() > 0 {
+		points = append(points, model.MetricPoint{
+			MonitorID: rep.GetMonitorId(),
+			App:       app,
+			Metrics:   metricGroup,
+			Field:     "raw_latency_ms",
+			Value:     float64(rep.GetRawLatencyMs()),
+			UnixMs:    timestamp,
+			Instance:  instance,
+			Labels:    cloneLabels(baseLabels),
+		})
+	}
+	for field, raw := range rep.GetFields() {
+		key := strings.TrimSpace(field)
+		if key == "" || key == "identity" || key == "section" {
+			continue
+		}
+		value, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
+		if err != nil || math.IsNaN(value) || math.IsInf(value, 0) {
+			continue
+		}
+		points = append(points, model.MetricPoint{
+			MonitorID: rep.GetMonitorId(),
+			App:       app,
+			Metrics:   metricGroup,
+			Field:     key,
+			Value:     value,
+			UnixMs:    timestamp,
+			Instance:  instance,
+			Labels:    cloneLabels(baseLabels),
+		})
+	}
+	return points
+}
+
+func boolToFloat(ok bool) float64 {
+	if ok {
+		return 1
+	}
+	return 0
+}
+
+func cloneLabels(src map[string]string) map[string]string {
+	if len(src) == 0 {
+		return nil
+	}
+	dst := make(map[string]string, len(src))
+	for k, v := range src {
+		if strings.TrimSpace(v) == "" {
+			continue
+		}
+		dst[k] = v
+	}
+	if len(dst) == 0 {
+		return nil
+	}
+	return dst
 }
 
 func pointVars(p model.MetricPoint) map[string]float64 {

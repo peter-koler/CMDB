@@ -13,45 +13,65 @@ echo "=================================="
 echo "  Arco Collector Stopping..."
 echo "=================================="
 
-if [ ! -f "$PID_FILE" ]; then
-    echo "[WARN] PID file not found: $PID_FILE"
-    echo "[INFO] Collector may not be running"
-    exit 0
-fi
+# 首先停止所有 collector-go 相关进程（包括 go run 产生的临时进程）
+echo "[INFO] Stopping all collector processes..."
 
-PID=$(cat "$PID_FILE")
+# 查找并停止所有 collector-go 进程
+COLLECTOR_PIDS=$(pgrep -f "collector-go" || true)
+if [ -n "$COLLECTOR_PIDS" ]; then
+    echo "[INFO] Found collector processes: $COLLECTOR_PIDS"
+    echo "$COLLECTOR_PIDS" | while read -r pid; do
+        if [ -n "$pid" ]; then
+            echo "[INFO] Stopping process $pid..."
+            kill -TERM "$pid" 2>/dev/null || true
+        fi
+    done
 
-if ! ps -p "$PID" > /dev/null 2>&1; then
-    echo "[WARN] Process $PID is not running"
-    rm -f "$PID_FILE"
-    exit 0
-fi
+    # 等待进程结束
+    for i in {1..5}; do
+        sleep 1
+        REMAINING=$(pgrep -f "collector-go" || true)
+        if [ -z "$REMAINING" ]; then
+            break
+        fi
+        echo "[INFO] Waiting for processes to stop... ($i/5)"
+    done
 
-echo "[INFO] Stopping Collector (PID: $PID)..."
-
-# 尝试优雅停止
-kill -TERM "$PID" 2>/dev/null || true
-
-# 等待进程结束
-for i in {1..10}; do
-    if ! ps -p "$PID" > /dev/null 2>&1; then
-        echo "[SUCCESS] Collector stopped gracefully"
-        rm -f "$PID_FILE"
-        exit 0
+    # 强制停止剩余的进程
+    REMAINING=$(pgrep -f "collector-go" || true)
+    if [ -n "$REMAINING" ]; then
+        echo "[WARN] Force killing remaining processes..."
+        echo "$REMAINING" | while read -r pid; do
+            if [ -n "$pid" ]; then
+                kill -KILL "$pid" 2>/dev/null || true
+            fi
+        done
     fi
-    echo "[INFO] Waiting for shutdown... ($i/10)"
-    sleep 1
-done
-
-# 强制停止
-echo "[WARN] Force killing process..."
-kill -KILL "$PID" 2>/dev/null || true
-sleep 1
-
-if ! ps -p "$PID" > /dev/null 2>&1; then
-    echo "[SUCCESS] Collector stopped"
-    rm -f "$PID_FILE"
-else
-    echo "[ERROR] Failed to stop Collector"
-    exit 1
 fi
+
+# 同时检查 PID 文件中的进程
+if [ -f "$PID_FILE" ]; then
+    PID=$(cat "$PID_FILE")
+    if ps -p "$PID" > /dev/null 2>&1; then
+        echo "[INFO] Stopping PID from file: $PID"
+        kill -TERM "$PID" 2>/dev/null || true
+        sleep 2
+        if ps -p "$PID" > /dev/null 2>&1; then
+            kill -KILL "$PID" 2>/dev/null || true
+        fi
+    fi
+    rm -f "$PID_FILE"
+fi
+
+# 清理 go run 产生的临时进程
+GO_RUN_PIDS=$(pgrep -f "go-build.*collector" || true)
+if [ -n "$GO_RUN_PIDS" ]; then
+    echo "[INFO] Cleaning up go run processes..."
+    echo "$GO_RUN_PIDS" | while read -r pid; do
+        if [ -n "$pid" ]; then
+            kill -TERM "$pid" 2>/dev/null || true
+        fi
+    done
+fi
+
+echo "[SUCCESS] All collector processes stopped"
