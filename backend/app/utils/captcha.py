@@ -14,11 +14,11 @@ def generate_math_captcha():
 
     # 生成数字，确保减法结果为正数
     if operator == '+':
-        num1 = random.randint(1, 100)
-        num2 = random.randint(1, 100)
+        num1 = random.randint(1, 20)
+        num2 = random.randint(1, 20)
         result = num1 + num2
     else:
-        num1 = random.randint(2, 100)
+        num1 = random.randint(2, 20)
         num2 = random.randint(1, num1 - 1)
         result = num1 - num2
 
