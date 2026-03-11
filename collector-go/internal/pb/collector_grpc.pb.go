@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.1
 // - protoc             v7.34.0
-// source: proto/collector.proto
+// source: collector.proto
 
 package pb
 
@@ -111,5 +111,5 @@ var CollectorService_ServiceDesc = grpc.ServiceDesc{
 			ClientStreams: true,
 		},
 	},
-	Metadata: "proto/collector.proto",
+	Metadata: "collector.proto",
 }

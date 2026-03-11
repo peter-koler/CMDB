@@ -78,7 +78,7 @@
           </div>
           <div class="header-actions" v-if="selectedTemplate || isNewTemplate">
             <a-space>
-              <a-button @click="handlePreview" v-if="selectedTemplate">
+              <a-button @click="handlePreview" v-if="selectedTemplate && activeRightTab === 'content'">
                 <EyeOutlined />
                 {{ t('template.preview') }}
               </a-button>
@@ -91,20 +91,97 @@
         </div>
 
         <div class="editor-content" v-if="selectedTemplate || isNewTemplate">
-          <div class="editor-toolbar">
-            <a-space>
-              <a-tag color="blue">{{ isNewTemplate ? currentCategoryKey : selectedTemplate?.category }}</a-tag>
-              <span class="template-name">{{ isNewTemplate ? t('template.addNewType') : getTemplateDisplayName(selectedTemplate) }}</span>
-            </a-space>
-          </div>
-          <div class="code-editor-wrapper">
-            <textarea
-              v-model="templateYaml"
-              class="code-textarea"
-              :placeholder="isNewTemplate ? '# 请在此粘贴 YAML 模板内容...\n# 例如：\n# category: db\n# app: mysql\n# name:\n#   zh-CN: MySQL数据库\n#   en-US: MySQL Database\n# params:\n#   - name: host\n#     ...' : ''"
-              spellcheck="false"
-            />
-          </div>
+          <a-tabs v-model:activeKey="activeRightTab">
+            <a-tab-pane key="content" tab="模板内容">
+              <div class="content-tab-pane">
+                <div class="editor-toolbar">
+                  <a-space>
+                    <a-tag color="blue">{{ isNewTemplate ? currentCategoryKey : selectedTemplate?.category }}</a-tag>
+                    <span class="template-name">{{ isNewTemplate ? t('template.addNewType') : getTemplateDisplayName(selectedTemplate) }}</span>
+                  </a-space>
+                </div>
+                <div class="code-editor-wrapper">
+                  <textarea
+                    v-model="templateYaml"
+                    class="code-textarea"
+                    :placeholder="isNewTemplate ? '# 请在此粘贴 YAML 模板内容...\n# 例如：\n# category: db\n# app: mysql\n# name:\n#   zh-CN: MySQL数据库\n#   en-US: MySQL Database\n# params:\n#   - name: host\n#     ...' : ''"
+                    spellcheck="false"
+                  />
+                </div>
+              </div>
+            </a-tab-pane>
+            <a-tab-pane key="default-policy" tab="默认监控策略" :disabled="!selectedTemplate">
+              <div class="policy-content">
+                <a-space style="margin-bottom: 12px">
+                  <a-button type="primary" @click="addPolicyRule">新增策略</a-button>
+                  <a-button v-if="String(selectedTemplate?.app || '').toLowerCase() === 'redis'" @click="importRedisPolicyRules">
+                    导入 Redis 推荐策略
+                  </a-button>
+                  <a-button danger @click="clearPolicyRules">清空策略</a-button>
+                </a-space>
+                <a-alert
+                  v-if="!defaultPolicyDraft.length"
+                  type="info"
+                  show-icon
+                  message="当前模板未定义默认监控策略"
+                  description="可在此可视化维护默认告警策略，保存后会自动同步到模板 YAML 的 alerts 段。"
+                />
+                <a-table
+                  v-else
+                  size="small"
+                  :pagination="false"
+                  :data-source="defaultPolicyDraft"
+                  :columns="defaultPolicyColumns"
+                  row-key="key"
+                  :scroll="{ x: 1180 }"
+                >
+                  <template #bodyCell="{ column, record, index }">
+                    <template v-if="column.key === 'name'">
+                      <div class="policy-name-cell">
+                        <div>{{ record.name }}</div>
+                        <a-tag size="small" :color="record.mode === 'core' ? 'blue' : 'default'">
+                          {{ record.mode === 'core' ? '核心' : '扩展' }}
+                        </a-tag>
+                      </div>
+                    </template>
+                    <template v-else-if="column.key === 'type'">
+                      <a-tag :color="record.type === 'periodic_metric' ? 'green' : 'blue'">
+                        {{ record.type === 'periodic_metric' ? '周期' : '实时' }}
+                      </a-tag>
+                    </template>
+                    <template v-else-if="column.key === 'metric'">
+                      {{ displayMetricName(record.metric) }}
+                    </template>
+                    <template v-else-if="column.key === 'level'">
+                      <a-tag :color="record.level === 'critical' ? 'red' : record.level === 'warning' ? 'orange' : 'blue'">
+                        {{ record.level }}
+                      </a-tag>
+                    </template>
+                    <template v-else-if="column.key === 'rule'">
+                      {{ `${record.metric} ${record.operator} ${record.threshold}` }}
+                    </template>
+                    <template v-else-if="column.key === 'trigger'">
+                      {{ `周期 ${record.period}s / 连续 ${record.times} 次` }}
+                    </template>
+                    <template v-else-if="column.key === 'notice_rule_id'">
+                      {{ getNoticeRuleName(record.notice_rule_id) }}
+                    </template>
+                    <template v-else-if="column.key === 'enabled'">
+                      <a-switch :checked="record.enabled" @change="(checked: boolean) => { record.enabled = checked }" />
+                    </template>
+                    <template v-else-if="column.key === 'actions'">
+                      <a-space :size="4">
+                        <a-button type="link" size="small" @click="openPolicyRuleEditor(record, index)">编辑</a-button>
+                        <a-button type="link" size="small" :disabled="index === 0" @click="movePolicyRule(index, -1)">上移</a-button>
+                        <a-button type="link" size="small" :disabled="index === defaultPolicyDraft.length - 1" @click="movePolicyRule(index, 1)">下移</a-button>
+                        <a-button danger type="link" size="small" @click="removePolicyRule(index)">删除</a-button>
+                      </a-space>
+                    </template>
+                  </template>
+                </a-table>
+              </div>
+            </a-tab-pane>
+          </a-tabs>
         </div>
 
         <div class="empty-state" v-else>
@@ -139,11 +216,144 @@
         </a-form-item>
       </a-form>
     </a-modal>
+
+    <a-modal
+      v-model:open="policyEditorVisible"
+      :title="policyEditIndex === -1 ? '新增默认策略' : '编辑默认策略'"
+      width="860px"
+      :confirm-loading="policyEditorSaving"
+      @ok="savePolicyRuleEditor"
+    >
+      <a-form layout="vertical">
+        <a-row :gutter="16">
+          <a-col :span="12">
+            <a-form-item label="规则名称" required>
+              <a-input v-model:value="policyForm.name" placeholder="请输入规则名称" />
+            </a-form-item>
+          </a-col>
+          <a-col :span="12">
+            <a-form-item label="规则类型">
+              <a-select v-model:value="policyForm.type">
+                <a-select-option value="realtime_metric">实时指标</a-select-option>
+                <a-select-option value="periodic_metric">周期指标</a-select-option>
+              </a-select>
+            </a-form-item>
+          </a-col>
+        </a-row>
+
+        <a-row :gutter="16">
+          <a-col :span="12">
+            <a-form-item label="监控指标" required>
+              <a-select v-model:value="policyForm.metric" show-search option-filter-prop="label" placeholder="请选择模板指标">
+                <a-select-option v-for="opt in metricOptions" :key="opt.value" :value="opt.value" :label="opt.label">
+                  {{ opt.label }}
+                </a-select-option>
+              </a-select>
+            </a-form-item>
+          </a-col>
+          <a-col :span="6">
+            <a-form-item label="操作符">
+              <a-select v-model:value="policyForm.operator">
+                <a-select-option value=">">&gt;</a-select-option>
+                <a-select-option value=">=">&gt;=</a-select-option>
+                <a-select-option value="<">&lt;</a-select-option>
+                <a-select-option value="<=">&lt;=</a-select-option>
+                <a-select-option value="==">==</a-select-option>
+                <a-select-option value="!=">!=</a-select-option>
+              </a-select>
+            </a-form-item>
+          </a-col>
+          <a-col :span="6">
+            <a-form-item label="阈值" required>
+              <a-input-number v-model:value="policyForm.threshold" style="width: 100%" />
+            </a-form-item>
+          </a-col>
+        </a-row>
+
+        <a-row :gutter="16">
+          <a-col :span="8">
+            <a-form-item label="触发级别">
+              <a-select v-model:value="policyForm.level">
+                <a-select-option value="critical">critical</a-select-option>
+                <a-select-option value="warning">warning</a-select-option>
+                <a-select-option value="info">info</a-select-option>
+              </a-select>
+            </a-form-item>
+          </a-col>
+          <a-col :span="8">
+            <a-form-item label="执行周期(秒)">
+              <a-input-number v-model:value="policyForm.period" :min="0" style="width: 100%" />
+            </a-form-item>
+          </a-col>
+          <a-col :span="8">
+            <a-form-item label="连续触发次数">
+              <a-input-number v-model:value="policyForm.times" :min="1" style="width: 100%" />
+            </a-form-item>
+          </a-col>
+        </a-row>
+
+        <a-row :gutter="16">
+          <a-col :span="12">
+            <a-form-item label="通知规则">
+              <a-select v-model:value="policyForm.notice_rule_id" allow-clear placeholder="请选择通知规则">
+                <a-select-option v-for="item in noticeRuleOptions" :key="Number(item.id)" :value="Number(item.id)">
+                  {{ item.name }}
+                </a-select-option>
+              </a-select>
+            </a-form-item>
+          </a-col>
+          <a-col :span="6">
+            <a-form-item label="策略分组">
+              <a-select v-model:value="policyForm.mode">
+                <a-select-option value="core">核心</a-select-option>
+                <a-select-option value="extended">扩展</a-select-option>
+              </a-select>
+            </a-form-item>
+          </a-col>
+          <a-col :span="6">
+            <a-form-item label="默认启用">
+              <a-switch v-model:checked="policyForm.enabled" />
+            </a-form-item>
+          </a-col>
+        </a-row>
+
+        <a-form-item label="监控标签">
+          <a-space direction="vertical" style="width: 100%">
+            <a-row v-for="(tag, idx) in policyFormLabelList" :key="idx" :gutter="8">
+              <a-col :span="10">
+                <a-input v-model:value="tag.key" placeholder="标签名" />
+              </a-col>
+              <a-col :span="10">
+                <a-input v-model:value="tag.value" placeholder="标签值" />
+              </a-col>
+              <a-col :span="4">
+                <a-button type="link" danger @click="removePolicyLabel(idx)">删除</a-button>
+              </a-col>
+            </a-row>
+            <a-button type="dashed" block @click="addPolicyLabel">添加标签</a-button>
+          </a-space>
+        </a-form-item>
+
+        <a-form-item label="告警内容模板">
+          <a-textarea v-model:value="policyForm.template" :rows="2" placeholder="支持模板变量，如 {{$labels.instance}} {{$value}}" />
+        </a-form-item>
+
+        <a-form-item>
+          <a-space>
+            <a-switch v-model:checked="policyFormUseCustomExpr" />
+            <span>高级模式：自定义表达式</span>
+          </a-space>
+        </a-form-item>
+        <a-form-item v-if="policyFormUseCustomExpr" label="表达式">
+          <a-textarea v-model:value="policyForm.expr" :rows="3" placeholder="例如：(used_memory / maxmemory) * 100 > 85" />
+        </a-form-item>
+      </a-form>
+    </a-modal>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message, Modal } from 'ant-design-vue'
 import * as yaml from 'js-yaml'
@@ -164,7 +374,9 @@ import {
   updateTemplate as updateTemplateApi,
   createCategory as createCategoryApi,
   updateCategory as updateCategoryApi,
-  deleteCategory as deleteCategoryApi
+  deleteCategory as deleteCategoryApi,
+  getAlertNotices,
+  type AlertNotice
 } from '@/api/monitoring'
 
 const { t, locale } = useI18n()
@@ -195,6 +407,48 @@ interface TreeNode {
   count?: number
 }
 
+interface DefaultPolicyItem {
+  key: string
+  name: string
+  type: 'realtime_metric' | 'periodic_metric'
+  metric: string
+  operator: string
+  threshold: number
+  level: 'critical' | 'warning' | 'info'
+  period: number
+  times: number
+  mode: 'core' | 'extended'
+  enabled: boolean
+  expr?: string
+  template?: string
+  notice_rule_id?: number
+  labels?: Record<string, string>
+}
+
+interface MetricOption {
+  value: string
+  label: string
+}
+
+const REDIS_DEFAULT_POLICY: DefaultPolicyItem[] = [
+  { key: 'redis_unavailable', name: '实例不可用', type: 'realtime_metric', metric: 'redis_server_up', operator: '<', threshold: 0.5, level: 'critical', period: 60, times: 1, mode: 'core', enabled: true, expr: 'redis_server_up < 0.5' },
+  { key: 'redis_memory_usage_high', name: '内存使用率过高', type: 'periodic_metric', metric: 'used_memory', operator: '>', threshold: 85, level: 'warning', period: 300, times: 1, mode: 'core', enabled: true, expr: '(maxmemory > 0) && ((used_memory / maxmemory) * 100 > 85)' },
+  { key: 'redis_memory_fragmentation_high', name: '内存碎片严重', type: 'periodic_metric', metric: 'mem_fragmentation_ratio', operator: '>', threshold: 2.0, level: 'warning', period: 600, times: 1, mode: 'core', enabled: true, expr: 'mem_fragmentation_ratio > 2.0' },
+  { key: 'redis_connections_saturated', name: '连接数饱和', type: 'realtime_metric', metric: 'connected_clients', operator: '>', threshold: 90, level: 'critical', period: 300, times: 1, mode: 'core', enabled: true, expr: '(maxclients > 0) && ((connected_clients / maxclients) * 100 > 90)' },
+  { key: 'redis_rejected_connections', name: '拒绝连接', type: 'realtime_metric', metric: 'rejected_connections', operator: '>', threshold: 0, level: 'critical', period: 300, times: 1, mode: 'core', enabled: true, expr: 'rejected_connections > 0' },
+  { key: 'redis_rdb_failed', name: 'RDB 失败', type: 'realtime_metric', metric: 'rdb_last_bgsave_status_ok', operator: '<', threshold: 0.5, level: 'critical', period: 60, times: 1, mode: 'core', enabled: true, expr: 'rdb_last_bgsave_status_ok < 0.5' },
+  { key: 'redis_aof_failed', name: 'AOF 失败', type: 'realtime_metric', metric: 'aof_last_bgrewrite_status_ok', operator: '<', threshold: 0.5, level: 'critical', period: 60, times: 1, mode: 'core', enabled: true, expr: 'aof_last_bgrewrite_status_ok < 0.5' },
+  { key: 'redis_master_slave_lag_high', name: '主从延迟过高', type: 'periodic_metric', metric: 'master_last_io_seconds_ago', operator: '>', threshold: 5, level: 'warning', period: 300, times: 1, mode: 'core', enabled: true, expr: 'master_last_io_seconds_ago > 5' },
+  { key: 'redis_memory_usage_warn', name: '内存使用率预警', type: 'periodic_metric', metric: 'used_memory', operator: '>', threshold: 75, level: 'warning', period: 300, times: 1, mode: 'extended', enabled: false },
+  { key: 'redis_memory_fragmentation_warn', name: '内存碎片预警', type: 'periodic_metric', metric: 'mem_fragmentation_ratio', operator: '>', threshold: 1.5, level: 'warning', period: 600, times: 1, mode: 'extended', enabled: false },
+  { key: 'redis_hit_rate_drop', name: '命中率突降', type: 'periodic_metric', metric: 'keyspace_hit_rate', operator: '<', threshold: 50, level: 'warning', period: 300, times: 1, mode: 'extended', enabled: false },
+  { key: 'redis_hit_rate_abnormal', name: '命中率异常', type: 'periodic_metric', metric: 'keyspace_hit_rate', operator: '<', threshold: 30, level: 'critical', period: 300, times: 1, mode: 'extended', enabled: false },
+  { key: 'redis_master_slave_lag_warn', name: '主从延迟预警', type: 'periodic_metric', metric: 'master_last_io_seconds_ago', operator: '>', threshold: 3, level: 'warning', period: 300, times: 1, mode: 'extended', enabled: false },
+  { key: 'redis_slave_offline', name: '从节点离线', type: 'realtime_metric', metric: 'slave_online', operator: '<', threshold: 0.5, level: 'critical', period: 60, times: 1, mode: 'extended', enabled: false },
+  { key: 'redis_blocked_clients_high', name: '阻塞客户端过多', type: 'realtime_metric', metric: 'blocked_clients', operator: '>', threshold: 10, level: 'warning', period: 300, times: 1, mode: 'extended', enabled: false },
+  { key: 'redis_slowlog_high', name: '慢查询过多', type: 'periodic_metric', metric: 'slowlog_length', operator: '>', threshold: 50, level: 'warning', period: 300, times: 1, mode: 'extended', enabled: false }
+]
+
 const categories = ref<CategoryNode[]>([])
 const templates = ref<TemplateItem[]>([])
 const selectedCategoryKeys = ref<string[]>([])
@@ -203,6 +457,7 @@ const templateYaml = ref('')
 const saving = ref(false)
 const previewModalVisible = ref(false)
 const currentCategoryKey = ref('')
+const activeRightTab = ref('content')
 
 const contextMenuVisible = ref(false)
 const contextMenuPosition = ref({ x: 0, y: 0 })
@@ -213,6 +468,32 @@ const categoryModalTitle = ref('')
 const categoryForm = ref({ name: '', key: '', parentKey: '' })
 const isEditMode = ref(false)
 const isSubCategory = ref(false)
+const defaultPolicyDraft = ref<DefaultPolicyItem[]>([])
+const mutePolicySync = ref(false)
+const metricOptions = ref<MetricOption[]>([])
+const noticeRuleOptions = ref<AlertNotice[]>([])
+const policyEditorVisible = ref(false)
+const policyEditorSaving = ref(false)
+const policyEditIndex = ref(-1)
+const policyFormUseCustomExpr = ref(false)
+const policyForm = ref<DefaultPolicyItem>({
+  key: '',
+  name: '',
+  type: 'realtime_metric',
+  metric: 'value',
+  operator: '>',
+  threshold: 0,
+  level: 'warning',
+  period: 60,
+  times: 1,
+  mode: 'extended',
+  enabled: false,
+  expr: '',
+  template: '',
+  notice_rule_id: undefined,
+  labels: {}
+})
+const policyFormLabelList = ref<Array<{ key: string; value: string }>>([])
 
 const isNewTemplate = computed(() => Boolean(!selectedTemplate.value && currentCategoryKey.value))
 const categoryTreeData = computed<TreeNode[]>(() => buildDisplayTree(categories.value))
@@ -234,6 +515,322 @@ const selectedCategoryForActions = computed(() => {
   }
   return findCategoryByKey(key, categories.value)
 })
+
+const toBool = (value: any, defaultValue = false) => {
+  if (value === undefined || value === null) return defaultValue
+  if (typeof value === 'boolean') return value
+  const text = String(value).trim().toLowerCase()
+  if (['1', 'true', 'yes', 'on'].includes(text)) return true
+  if (['0', 'false', 'no', 'off'].includes(text)) return false
+  return defaultValue
+}
+
+const normalizePolicyItem = (item: any, index: number): DefaultPolicyItem | null => {
+  if (!item || typeof item !== 'object') return null
+  const name = String(item.name || '').trim()
+  if (!name) return null
+  const typeRaw = String(item.type || item.monitor_type || '').trim().toLowerCase()
+  const type = typeRaw.includes('periodic') ? 'periodic_metric' : 'realtime_metric'
+  const mode = String(item.mode || '').trim().toLowerCase() === 'core' ? 'core' : 'extended'
+  const labelsObj = item.labels && typeof item.labels === 'object' ? item.labels : {}
+  return {
+    key: String(item.key || item.id || `alert_${index + 1}`),
+    name,
+    type,
+    metric: String(item.metric || 'value').trim() || 'value',
+    operator: String(item.operator || '>').trim() || '>',
+    threshold: Number(item.threshold ?? 0) || 0,
+    level: (String(item.level || item.severity || 'warning').trim().toLowerCase() as any) || 'warning',
+    period: Math.max(Number(item.period ?? (type === 'periodic_metric' ? 300 : 60)) || 0, 0),
+    times: Math.max(Number(item.times ?? 1) || 1, 1),
+    mode,
+    enabled: toBool(item.enabled ?? item.default_enabled, mode === 'core'),
+    expr: String(item.expr || '').trim() || undefined,
+    template: String(item.template || '').trim() || undefined,
+    notice_rule_id: item.notice_rule_id !== undefined && item.notice_rule_id !== null ? Number(item.notice_rule_id) : undefined,
+    labels: labelsObj
+  }
+}
+
+const parseDefaultPoliciesFromYaml = (content: string): DefaultPolicyItem[] => {
+  try {
+    const doc = yaml.load(content || '') as any
+    if (!doc || typeof doc !== 'object' || !Array.isArray((doc as any).alerts)) return []
+    const rows: DefaultPolicyItem[] = []
+    ;(doc as any).alerts.forEach((item: any, index: number) => {
+      const normalized = normalizePolicyItem(item, index)
+      if (normalized) rows.push(normalized)
+    })
+    return rows
+  } catch {
+    return []
+  }
+}
+
+const parseTemplateMetricOptions = (content: string): MetricOption[] => {
+  try {
+    const doc = yaml.load(content || '') as any
+    if (!doc || typeof doc !== 'object') return []
+    const options = new Map<string, MetricOption>()
+    const metricsList = Array.isArray((doc as any).metrics) ? (doc as any).metrics : []
+    const localeKey = String(locale.value || 'zh-CN')
+    const pickI18nText = (node: any, fallback = '') => {
+      if (!node) return fallback
+      if (typeof node === 'string') return node
+      if (typeof node === 'object') {
+        const i18n = node.i18n && typeof node.i18n === 'object' ? node.i18n : node
+        return String(i18n[localeKey] || i18n['zh-CN'] || i18n['en-US'] || fallback)
+      }
+      return String(fallback || '')
+    }
+    for (const m of metricsList) {
+      const metricName = String(m?.field || m?.metric || m?.name || '').trim()
+      const metricTitle = pickI18nText(m?.i18n || m?.name, metricName)
+      if (metricName) {
+        options.set(metricName, { value: metricName, label: `${metricTitle} (${metricName})` })
+      }
+      const fields = Array.isArray(m?.fields) ? m.fields : []
+      for (const f of fields) {
+        const field = String(f?.field || '').trim()
+        if (!field) continue
+        const fieldTitle = pickI18nText(f?.i18n || f?.name, field)
+        const groupTitle = metricTitle || metricName
+        const label = groupTitle ? `${groupTitle} / ${fieldTitle} (${field})` : `${fieldTitle} (${field})`
+        options.set(field, { value: field, label })
+      }
+    }
+    if (!options.size) {
+      options.set('value', { value: 'value', label: 'value' })
+    }
+    return Array.from(options.values())
+  } catch {
+    return [{ value: 'value', label: 'value' }]
+  }
+}
+
+const displayMetricName = (metric: string) => {
+  const key = String(metric || '').trim()
+  const found = metricOptions.value.find((item) => item.value === key)
+  return found?.label || key || 'value'
+}
+
+const normalizeList = (payload: any) => {
+  if (Array.isArray(payload?.items)) return { items: payload.items, total: payload.total || payload.items.length }
+  if (Array.isArray(payload)) return { items: payload, total: payload.length }
+  return { items: [], total: 0 }
+}
+
+const loadNoticeRuleOptions = async () => {
+  try {
+    const res = await getAlertNotices({ page_size: 1000 })
+    const parsed = normalizeList((res as any)?.data ?? res)
+    noticeRuleOptions.value = (parsed.items || []) as AlertNotice[]
+  } catch {
+    noticeRuleOptions.value = []
+  }
+}
+
+const loadDefaultPolicyDraft = () => {
+  mutePolicySync.value = true
+  metricOptions.value = parseTemplateMetricOptions(templateYaml.value || selectedTemplate.value?.content || '')
+  const fromTemplate = parseDefaultPoliciesFromYaml(templateYaml.value || selectedTemplate.value?.content || '')
+  if (fromTemplate.length) {
+    defaultPolicyDraft.value = fromTemplate
+  } else {
+    const app = String(selectedTemplate.value?.app || '').toLowerCase()
+    defaultPolicyDraft.value = app === 'redis' ? [...REDIS_DEFAULT_POLICY] : []
+  }
+  mutePolicySync.value = false
+}
+
+const syncPolicyDraftToYaml = () => {
+  if (mutePolicySync.value) return
+  if (!selectedTemplate.value) return
+  try {
+    const baseContent = templateYaml.value || selectedTemplate.value.content || ''
+    const doc = parseYamlObject(baseContent)
+    const alerts = defaultPolicyDraft.value
+      .filter((item) => String(item.name || '').trim())
+      .map((item) => {
+        const out: any = {
+          name: item.name.trim(),
+          type: item.type,
+          metric: item.metric || 'value',
+          operator: item.operator || '>',
+          threshold: Number(item.threshold || 0),
+          level: item.level || 'warning',
+          period: Math.max(Number(item.period || 0), 0),
+          times: Math.max(Number(item.times || 1), 1),
+          mode: item.mode || 'extended',
+          enabled: Boolean(item.enabled)
+        }
+        if (item.notice_rule_id !== undefined && item.notice_rule_id !== null) out.notice_rule_id = Number(item.notice_rule_id)
+        if (item.labels && Object.keys(item.labels).length) out.labels = item.labels
+        if (item.expr && item.expr.trim()) out.expr = item.expr.trim()
+        if (item.template && item.template.trim()) out.template = item.template.trim()
+        return out
+      })
+    if (alerts.length) {
+      doc.alerts = alerts
+    } else {
+      delete doc.alerts
+    }
+    templateYaml.value = yaml.dump(doc, { noRefs: true, sortKeys: false, lineWidth: -1 })
+  } catch (error) {
+    console.error('sync policy to yaml failed', error)
+  }
+}
+
+const buildPolicyExpr = (item: Pick<DefaultPolicyItem, 'metric' | 'operator' | 'threshold'>) => {
+  const metric = String(item.metric || 'value').trim() || 'value'
+  const op = String(item.operator || '>').trim() || '>'
+  const threshold = Number(item.threshold ?? 0)
+  return `${metric} ${op} ${Number.isFinite(threshold) ? threshold : 0}`
+}
+
+const resetPolicyForm = () => {
+  policyForm.value = {
+    key: `alert_${Date.now()}`,
+    name: '',
+    type: 'realtime_metric',
+    metric: metricOptions.value[0]?.value || 'value',
+    operator: '>',
+    threshold: 0,
+    level: 'warning',
+    period: 60,
+    times: 1,
+    mode: 'extended',
+    enabled: false,
+    expr: '',
+    template: '',
+    notice_rule_id: undefined,
+    labels: {}
+  }
+  policyFormLabelList.value = []
+  policyFormUseCustomExpr.value = false
+}
+
+const addPolicyRule = async () => {
+  await loadNoticeRuleOptions()
+  policyEditIndex.value = -1
+  resetPolicyForm()
+  policyEditorVisible.value = true
+}
+
+const openPolicyRuleEditor = async (record: DefaultPolicyItem, index: number) => {
+  await loadNoticeRuleOptions()
+  policyEditIndex.value = index
+  policyForm.value = {
+    ...record,
+    labels: { ...(record.labels || {}) }
+  }
+  policyFormLabelList.value = Object.entries(record.labels || {}).map(([key, value]) => ({ key, value }))
+  policyFormUseCustomExpr.value = Boolean(String(record.expr || '').trim())
+  policyEditorVisible.value = true
+}
+
+const addPolicyLabel = () => {
+  policyFormLabelList.value.push({ key: '', value: '' })
+}
+
+const removePolicyLabel = (index: number) => {
+  if (index < 0 || index >= policyFormLabelList.value.length) return
+  policyFormLabelList.value.splice(index, 1)
+}
+
+const savePolicyRuleEditor = () => {
+  policyEditorSaving.value = true
+  try {
+    const name = String(policyForm.value.name || '').trim()
+    if (!name) {
+      message.error('规则名称不能为空')
+      return
+    }
+    const metric = String(policyForm.value.metric || '').trim()
+    if (!metric) {
+      message.error('请选择监控指标')
+      return
+    }
+    const labels: Record<string, string> = {}
+    policyFormLabelList.value.forEach((item) => {
+      const key = String(item.key || '').trim()
+      const value = String(item.value || '').trim()
+      if (key && value) labels[key] = value
+    })
+    const row: DefaultPolicyItem = {
+      key: String(policyForm.value.key || `alert_${Date.now()}`),
+      name,
+      type: policyForm.value.type === 'periodic_metric' ? 'periodic_metric' : 'realtime_metric',
+      metric,
+      operator: String(policyForm.value.operator || '>'),
+      threshold: Number(policyForm.value.threshold ?? 0),
+      level: (String(policyForm.value.level || 'warning') as any),
+      period: Math.max(Number(policyForm.value.period ?? 60), 0),
+      times: Math.max(Number(policyForm.value.times ?? 1), 1),
+      mode: policyForm.value.mode === 'core' ? 'core' : 'extended',
+      enabled: Boolean(policyForm.value.enabled),
+      template: String(policyForm.value.template || '').trim() || undefined,
+      notice_rule_id: policyForm.value.notice_rule_id !== undefined && policyForm.value.notice_rule_id !== null
+        ? Number(policyForm.value.notice_rule_id)
+        : undefined,
+      labels
+    }
+    if (policyFormUseCustomExpr.value) {
+      row.expr = String(policyForm.value.expr || '').trim() || buildPolicyExpr(row)
+    } else {
+      row.expr = buildPolicyExpr(row)
+    }
+    if (policyEditIndex.value >= 0 && policyEditIndex.value < defaultPolicyDraft.value.length) {
+      defaultPolicyDraft.value.splice(policyEditIndex.value, 1, row)
+    } else {
+      defaultPolicyDraft.value.push(row)
+    }
+    policyEditorVisible.value = false
+  } finally {
+    policyEditorSaving.value = false
+  }
+}
+
+const getNoticeRuleName = (noticeRuleId?: number) => {
+  if (!noticeRuleId) return '-'
+  const found = noticeRuleOptions.value.find((item) => Number(item.id) === Number(noticeRuleId))
+  return found?.name || `#${noticeRuleId}`
+}
+
+const removePolicyRule = (index: number) => {
+  if (index < 0 || index >= defaultPolicyDraft.value.length) return
+  defaultPolicyDraft.value.splice(index, 1)
+}
+
+const movePolicyRule = (index: number, step: number) => {
+  const target = index + step
+  if (index < 0 || index >= defaultPolicyDraft.value.length) return
+  if (target < 0 || target >= defaultPolicyDraft.value.length) return
+  const rows = [...defaultPolicyDraft.value]
+  const [row] = rows.splice(index, 1)
+  rows.splice(target, 0, row)
+  defaultPolicyDraft.value = rows
+}
+
+const clearPolicyRules = () => {
+  defaultPolicyDraft.value = []
+}
+
+const importRedisPolicyRules = () => {
+  defaultPolicyDraft.value = [...REDIS_DEFAULT_POLICY]
+}
+
+const defaultPolicyColumns = [
+  { title: '规则名称', dataIndex: 'name', key: 'name', width: 180 },
+  { title: '类型', dataIndex: 'type', key: 'type', width: 90 },
+  { title: '监控指标', dataIndex: 'metric', key: 'metric', width: 220 },
+  { title: '判断', key: 'rule', width: 220 },
+  { title: '级别', dataIndex: 'level', key: 'level', width: 100 },
+  { title: '触发配置', key: 'trigger', width: 170 },
+  { title: '通知规则', key: 'notice_rule_id', width: 180 },
+  { title: '启用', dataIndex: 'enabled', key: 'enabled', width: 90 },
+  { title: '操作', key: 'actions', width: 190, fixed: 'right' as const }
+]
 
 const normalizeCode = (name: string) => {
   const normalized = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
@@ -257,9 +854,21 @@ const getTemplateByTreeKey = (key: string) => {
   return templates.value.find((item) => item.app === app) || null
 }
 
-const buildDisplayTree = (categoryNodes: CategoryNode[]): TreeNode[] => {
-  return categoryNodes.map((cat) => {
-    const categoryChildren = buildDisplayTree(cat.children || [])
+const collectCategoryCodes = (nodes: CategoryNode[]): Set<string> => {
+  const out = new Set<string>()
+  const walk = (list: CategoryNode[]) => {
+    for (const item of list) {
+      out.add(item.key)
+      if (item.children?.length) walk(item.children)
+    }
+  }
+  walk(nodes)
+  return out
+}
+
+const buildDisplayTree = (categoryNodes: CategoryNode[], includeUncategorized = true): TreeNode[] => {
+  const treeNodes = categoryNodes.map((cat) => {
+    const categoryChildren = buildDisplayTree(cat.children || [], false)
     const templateChildren = templates.value
       .filter((t) => t.category === cat.key)
       .sort((a, b) => getTemplateDisplayName(a).localeCompare(getTemplateDisplayName(b)))
@@ -280,6 +889,27 @@ const buildDisplayTree = (categoryNodes: CategoryNode[]): TreeNode[] => {
       children: [...categoryChildren, ...templateChildren]
     }
   })
+  if (includeUncategorized) {
+    const categoryCodes = collectCategoryCodes(categoryNodes)
+    const uncategorizedTemplates = templates.value
+      .filter((t) => !categoryCodes.has(t.category))
+      .sort((a, b) => getTemplateDisplayName(a).localeCompare(getTemplateDisplayName(b)))
+      .map<TreeNode>((tpl) => ({
+        key: `tpl:${tpl.app}`,
+        name: getTemplateDisplayName(tpl),
+        nodeType: 'template'
+      }))
+    if (uncategorizedTemplates.length) {
+      treeNodes.push({
+        key: '__uncategorized__',
+        name: '未分类',
+        nodeType: 'category',
+        count: uncategorizedTemplates.length,
+        children: uncategorizedTemplates
+      })
+    }
+  }
+  return treeNodes
 }
 
 const findFirstTemplateKey = (nodes: TreeNode[]): string | null => {
@@ -557,12 +1187,14 @@ const handleSaveCategory = async () => {
 const handleCategorySelect = (keys: string[]) => {
   selectedCategoryKeys.value = keys
   hideContextMenu()
+  activeRightTab.value = 'content'
 
   const key = keys[0]
   if (!key) {
     selectedTemplate.value = null
     templateYaml.value = ''
     currentCategoryKey.value = ''
+    defaultPolicyDraft.value = []
     return
   }
 
@@ -574,21 +1206,55 @@ const handleCategorySelect = (keys: string[]) => {
     }
     selectedTemplate.value = null
     templateYaml.value = ''
+    defaultPolicyDraft.value = []
     return
   }
 
   currentCategoryKey.value = key
   selectedTemplate.value = null
   templateYaml.value = ''
+  defaultPolicyDraft.value = []
 }
 
 const selectTemplate = (template: TemplateItem) => {
   selectedTemplate.value = template
   currentCategoryKey.value = template.category
   templateYaml.value = template.content || ''
+  activeRightTab.value = 'content'
+  loadDefaultPolicyDraft()
+  loadNoticeRuleOptions()
 }
 
 const handleSave = async () => {
+  const validatePolicyDraft = (): string[] => {
+    const errs: string[] = []
+    const names = new Set<string>()
+    defaultPolicyDraft.value.forEach((item, idx) => {
+      const row = idx + 1
+      const name = String(item.name || '').trim()
+      if (!name) errs.push(`第${row}条规则名称不能为空`)
+      if (name) {
+        if (names.has(name)) errs.push(`第${row}条规则名称重复: ${name}`)
+        names.add(name)
+      }
+      if (!String(item.metric || '').trim()) errs.push(`第${row}条规则指标不能为空`)
+      if (!['realtime_metric', 'periodic_metric'].includes(String(item.type))) errs.push(`第${row}条规则类型非法`)
+      if (!['>', '>=', '<', '<=', '==', '!='].includes(String(item.operator || '').trim())) errs.push(`第${row}条规则操作符非法`)
+      if (!Number.isFinite(Number(item.threshold))) errs.push(`第${row}条规则阈值必须是数字`)
+      if (!['critical', 'warning', 'info'].includes(String(item.level || '').trim())) errs.push(`第${row}条规则级别非法`)
+      if (Number(item.period) < 0) errs.push(`第${row}条规则周期不能小于0`)
+      if (Number(item.times) < 1) errs.push(`第${row}条规则触发次数不能小于1`)
+      if (!['core', 'extended'].includes(String(item.mode || '').trim())) errs.push(`第${row}条规则分组非法`)
+    })
+    return errs
+  }
+  const policyErrors = validatePolicyDraft()
+  if (policyErrors.length) {
+    message.error(policyErrors[0])
+    return
+  }
+  syncPolicyDraftToYaml()
+
   const raw = templateYaml.value.trim()
   if (!raw) {
     message.warning('请输入模板内容')
@@ -601,14 +1267,28 @@ const handleSave = async () => {
     if (normalized.duplicates.length) {
       message.warning(`检测到重复 params 字段并自动去重: ${Array.from(new Set(normalized.duplicates)).join(', ')}`)
     }
-    templateYaml.value = normalized.content
+    const savingFromPolicyTab = activeRightTab.value === 'default-policy' && Boolean(selectedTemplate.value)
+    let finalApp = normalized.app
+    let finalCategory = normalized.category
+    let finalName = normalized.name
+    let finalContent = normalized.content
+    if (savingFromPolicyTab && selectedTemplate.value) {
+      const doc = parseYamlObject(normalized.content)
+      doc.app = selectedTemplate.value.app
+      doc.category = selectedTemplate.value.category
+      finalApp = selectedTemplate.value.app
+      finalCategory = selectedTemplate.value.category
+      finalName = getTemplateDisplayName(selectedTemplate.value) || normalized.name
+      finalContent = yaml.dump(doc, { noRefs: true, sortKeys: false, lineWidth: -1 })
+    }
+    templateYaml.value = finalContent
 
     if (isNewTemplate.value) {
       const resp = await createTemplateApi({
-        app: normalized.app,
-        name: normalized.name,
-        category: normalized.category,
-        content: normalized.content
+        app: finalApp,
+        name: finalName,
+        category: finalCategory,
+        content: finalContent
       })
       if (resp.code != 200) {
         message.error(resp.message || t('template.saveFailed'))
@@ -616,17 +1296,17 @@ const handleSave = async () => {
       }
       message.success(t('template.addSuccess') || '添加成功')
       await loadTemplates()
-      selectedCategoryKeys.value = [`tpl:${normalized.app}`]
-      const created = templates.value.find((t) => t.app === normalized.app)
+      selectedCategoryKeys.value = [`tpl:${finalApp}`]
+      const created = templates.value.find((t) => t.app === finalApp)
       if (created) selectTemplate(created)
       return
     }
 
     if (!selectedTemplate.value) return
     const resp = await updateTemplateApi(selectedTemplate.value.app, {
-      name: normalized.name,
-      category: normalized.category,
-      content: normalized.content
+      name: finalName,
+      category: finalCategory,
+      content: finalContent
     })
     if (resp.code != 200) {
       message.error(resp.message || t('template.saveFailed'))
@@ -634,6 +1314,9 @@ const handleSave = async () => {
     }
     message.success(t('template.saveSuccess'))
     await loadTemplates()
+    selectedCategoryKeys.value = [`tpl:${selectedTemplate.value.app}`]
+    const updated = templates.value.find((t) => t.app === selectedTemplate.value?.app)
+    if (updated) selectTemplate(updated)
   } catch (error: any) {
     console.error('Save template error:', error)
     message.error(error?.message || t('template.saveFailed'))
@@ -646,8 +1329,23 @@ const handlePreview = () => {
   previewModalVisible.value = true
 }
 
+watch(
+  () => defaultPolicyDraft.value,
+  () => syncPolicyDraftToYaml(),
+  { deep: true }
+)
+
+watch(
+  () => templateYaml.value,
+  (value) => {
+    if (!selectedTemplate.value) return
+    metricOptions.value = parseTemplateMetricOptions(value || selectedTemplate.value.content || '')
+  }
+)
+
 onMounted(() => {
   loadTemplates()
+  loadNoticeRuleOptions()
 })
 </script>
 
@@ -770,6 +1468,32 @@ onMounted(() => {
         padding: 16px;
         overflow: hidden;
 
+        :deep(.ant-tabs) {
+          display: flex;
+          flex-direction: column;
+          height: 100%;
+        }
+
+        :deep(.ant-tabs-content-holder) {
+          flex: 1;
+          overflow: hidden;
+        }
+
+        :deep(.ant-tabs-content) {
+          height: 100%;
+        }
+
+        :deep(.ant-tabs-tabpane) {
+          height: 100%;
+        }
+
+        .content-tab-pane {
+          height: 100%;
+          display: flex;
+          flex-direction: column;
+          min-height: 0;
+        }
+
         .editor-toolbar {
           background: #fff;
           padding: 12px 16px;
@@ -784,6 +1508,7 @@ onMounted(() => {
 
         .code-editor-wrapper {
           flex: 1;
+          min-height: 0;
           background: #1e1e1e;
           border-radius: 0 0 4px 4px;
           overflow: hidden;
@@ -803,6 +1528,19 @@ onMounted(() => {
             white-space: pre;
             overflow-wrap: normal;
             overflow: auto;
+          }
+        }
+
+        .policy-content {
+          height: 100%;
+          overflow: auto;
+          background: #fff;
+          padding: 8px 4px;
+
+          .policy-name-cell {
+            display: flex;
+            align-items: center;
+            gap: 8px;
           }
         }
       }

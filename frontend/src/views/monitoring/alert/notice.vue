@@ -20,9 +20,20 @@
         <a-button type="primary" :loading="loading" @click="loadData">查询</a-button>
         <a-button @click="reset">重置</a-button>
         <a-button v-if="canCreate" type="primary" @click="openModal()">新增</a-button>
+        <a-button :disabled="!canEdit || !selectedRowKeys.length" @click="batchToggleEnabled(true)">批量启用</a-button>
+        <a-button :disabled="!canEdit || !selectedRowKeys.length" @click="batchToggleEnabled(false)">批量禁用</a-button>
+        <a-button danger :disabled="!canDelete || !selectedRowKeys.length" @click="batchDelete">批量删除</a-button>
       </a-space>
 
-      <a-table :loading="loading" :columns="columns" :data-source="items" row-key="id" :pagination="pagination" @change="handleTableChange">
+      <a-table
+        :loading="loading"
+        :columns="columns"
+        :data-source="items"
+        row-key="id"
+        :pagination="pagination"
+        :row-selection="{ selectedRowKeys, onChange: onSelectChange }"
+        @change="handleTableChange"
+      >
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'receiver'">
             <a-space>
@@ -204,6 +215,7 @@ const receiverOptions = ref<{ label: string; value: string | number }[]>([])
 const modalOpen = ref(false)
 const editing = ref<AlertNotice | null>(null)
 const pagination = reactive({ current: 1, pageSize: 20, total: 0 })
+const selectedRowKeys = ref<number[]>([])
 
 const formState = reactive({
   name: '',
@@ -320,11 +332,16 @@ const loadData = async () => {
     const parsed = normalizeList(res?.data)
     items.value = parsed.items
     pagination.total = parsed.total
+    selectedRowKeys.value = selectedRowKeys.value.filter((id) => items.value.some((item) => Number(item.id) === Number(id)))
   } catch (error: any) {
     message.error(error?.response?.data?.message || '加载失败')
   } finally {
     loading.value = false
   }
+}
+
+const onSelectChange = (keys: (string | number)[]) => {
+  selectedRowKeys.value = keys.map((item) => Number(item))
 }
 
 const openModal = (record?: AlertNotice) => {
@@ -395,6 +412,32 @@ const removeItem = async (record: AlertNotice) => {
   loadData()
 }
 
+const batchToggleEnabled = async (enabled: boolean) => {
+  if (!selectedRowKeys.value.length) return
+  try {
+    await Promise.all(selectedRowKeys.value.map((id) => updateAlertNotice(id, { enable: enabled })))
+    message.success(enabled ? '批量启用成功' : '批量禁用成功')
+    await loadData()
+  } catch (error: any) {
+    message.error(error?.response?.data?.message || '批量更新失败')
+  }
+}
+
+const batchDelete = async () => {
+  if (!selectedRowKeys.value.length) return
+  const total = selectedRowKeys.value.length
+  try {
+    for (const id of selectedRowKeys.value) {
+      await deleteAlertNotice(id)
+    }
+    selectedRowKeys.value = []
+    message.success(`批量删除成功（${total}条）`)
+    await loadData()
+  } catch (error: any) {
+    message.error(error?.response?.data?.message || '批量删除失败')
+  }
+}
+
 const testItem = async (record: AlertNotice) => {
   await testAlertNotice(record.id)
   message.success('测试发送成功')
@@ -420,6 +463,7 @@ const reset = () => {
   keyword.value = ''
   receiverFilter.value = undefined
   pagination.current = 1
+  selectedRowKeys.value = []
   loadData()
 }
 

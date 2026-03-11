@@ -128,13 +128,33 @@ func toJob(task *pb.CollectTask) model.Job {
 		for _, tr := range mt.GetTransform() {
 			transforms = append(transforms, model.Transform{Field: tr.GetField(), Op: tr.GetOp()})
 		}
+		fieldSpecs := make([]model.FieldSpec, 0, len(mt.GetFieldSpecs()))
+		for _, spec := range mt.GetFieldSpecs() {
+			fieldSpecs = append(fieldSpecs, model.FieldSpec{
+				Field: spec.GetField(),
+				Type:  spec.GetType(),
+				Unit:  spec.GetUnit(),
+				Label: spec.GetLabel(),
+			})
+		}
+		calculateSpecs := make([]model.CalculateSpec, 0, len(mt.GetCalculateSpecs()))
+		for _, spec := range mt.GetCalculateSpecs() {
+			calculateSpecs = append(calculateSpecs, model.CalculateSpec{
+				Field:      spec.GetField(),
+				Expression: spec.GetExpression(),
+			})
+		}
 		job.Tasks = append(job.Tasks, model.MetricsTask{
-			Name:      mt.GetName(),
-			Protocol:  mt.GetProtocol(),
-			Timeout:   time.Duration(mt.GetTimeoutMs()) * time.Millisecond,
-			Priority:  int(mt.GetPriority()),
-			Params:    mt.GetParams(),
-			Transform: transforms,
+			Name:           mt.GetName(),
+			Protocol:       mt.GetProtocol(),
+			Timeout:        time.Duration(mt.GetTimeoutMs()) * time.Millisecond,
+			Priority:       int(mt.GetPriority()),
+			Params:         mt.GetParams(),
+			Transform:      transforms,
+			ExecKind:       mt.GetExecKind(),
+			SpecJSON:       mt.GetSpecJson(),
+			FieldSpecs:     fieldSpecs,
+			CalculateSpecs: calculateSpecs,
 		})
 	}
 	return job
@@ -151,6 +171,7 @@ func toCollectRep(res model.Result) *pb.CollectRep {
 		Success:      res.Success,
 		Message:      res.Message,
 		Fields:       res.Fields,
+		Debug:        res.Debug,
 		RawLatencyMs: res.RawLatency.Milliseconds(),
 	}
 }

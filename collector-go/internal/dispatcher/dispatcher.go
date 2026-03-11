@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -88,6 +89,8 @@ func (d *Dispatcher) executeJobCycle(ctx context.Context, job model.Job) {
 	if len(job.Tasks) == 0 {
 		return
 	}
+	redisCache := newRedisCycleCache()
+	jdbcCache := newJDBCCycleCache()
 	for i := 0; i < len(job.Tasks); {
 		p := job.Tasks[i].Priority
 		j := i + 1
@@ -100,7 +103,7 @@ func (d *Dispatcher) executeJobCycle(ctx context.Context, job model.Job) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				d.executeTask(ctx, job, task)
+				d.executeTask(ctx, job, task, redisCache, jdbcCache)
 			}()
 		}
 		wg.Wait()
@@ -133,7 +136,7 @@ func (d *Dispatcher) submitWithRetry(ctx context.Context, task worker.Task, job 
 	}
 }
 
-func (d *Dispatcher) executeTask(ctx context.Context, job model.Job, task model.MetricsTask) {
+func (d *Dispatcher) executeTask(ctx context.Context, job model.Job, task model.MetricsTask, redisCache *redisCycleCache, jdbcCache *jdbcCycleCache) {
 	collector, err := protocol.Get(task.Protocol)
 	if err != nil {
 		d.pushResult(ctx, model.Result{
@@ -149,15 +152,25 @@ func (d *Dispatcher) executeTask(ctx context.Context, job model.Job, task model.
 		ctx2 = cancelCtx
 	}
 	start := time.Now()
-	fields, msg, err := collector.Collect(ctx2, task)
+	fields, msg, err := d.collectWithCache(ctx2, collector, task, redisCache, jdbcCache)
 	latency := time.Since(start)
 	if err == nil {
 		fields, err = pipeline.Apply(fields, task.Transform)
 	}
+	debug := map[string]string{}
+	if err == nil {
+		var calcDebug map[string]string
+		fields, calcDebug = pipeline.ApplyCalculates(fields, task.CalculateSpecs)
+		mergeDebug(debug, calcDebug)
+		var dropDebug map[string]string
+		// whitelist is enforced only when field_specs are provided by manager compiler.
+		fields, dropDebug = pipeline.ApplyFieldWhitelist(fields, task.FieldSpecs, true)
+		mergeDebug(debug, dropDebug)
+	}
 	res := model.Result{
 		JobID: job.ID, MonitorID: job.Monitor, App: job.App, Metrics: task.Name,
 		Protocol: task.Protocol, Time: time.Now(), Success: err == nil, Code: model.CodeSuccess, Message: msg,
-		Fields: fields, RawLatency: latency,
+		Fields: fields, Debug: debug, RawLatency: latency,
 	}
 	if err != nil {
 		res.Code = model.CodeCollectFailed
@@ -177,6 +190,205 @@ func (d *Dispatcher) executeTask(ctx context.Context, job model.Job, task model.
 		}
 	}
 	d.pushResult(ctx, res)
+}
+
+func (d *Dispatcher) collectWithCache(ctx context.Context, collector protocol.Collector, task model.MetricsTask, redisCache *redisCycleCache, jdbcCache *jdbcCycleCache) (map[string]string, string, error) {
+	protocolName := strings.TrimSpace(strings.ToLower(task.Protocol))
+	if protocolName == "redis" && redisCache != nil {
+		return d.collectWithRedisCache(ctx, collector, task, redisCache)
+	}
+	if protocolName == "jdbc" && jdbcCache != nil {
+		return d.collectWithJDBCCache(ctx, collector, task, jdbcCache)
+	}
+	return collector.Collect(ctx, task)
+}
+
+func (d *Dispatcher) collectWithRedisCache(ctx context.Context, collector protocol.Collector, task model.MetricsTask, redisCache *redisCycleCache) (map[string]string, string, error) {
+	if strings.TrimSpace(strings.ToLower(task.Protocol)) != "redis" || redisCache == nil {
+		return collector.Collect(ctx, task)
+	}
+	key := redisCacheKey(task.Params)
+	if key == "" {
+		return collector.Collect(ctx, task)
+	}
+	if cached, ok := redisCache.Get(key); ok {
+		return materializeRedisFields(task, cached), "ok(cache)", nil
+	}
+
+	fetchTask := cloneMetricsTask(task)
+	if fetchTask.Params != nil {
+		delete(fetchTask.Params, "section")
+	}
+	fields, msg, err := collector.Collect(ctx, fetchTask)
+	if err != nil {
+		// Fallback to task-level section collect to keep compatibility.
+		return collector.Collect(ctx, task)
+	}
+	redisCache.Set(key, fields)
+	return materializeRedisFields(task, fields), msg, nil
+}
+
+func (d *Dispatcher) collectWithJDBCCache(ctx context.Context, collector protocol.Collector, task model.MetricsTask, jdbcCache *jdbcCycleCache) (map[string]string, string, error) {
+	if strings.TrimSpace(strings.ToLower(task.Protocol)) != "jdbc" || jdbcCache == nil {
+		return collector.Collect(ctx, task)
+	}
+	key := jdbcCacheKey(task.Params)
+	if key == "" {
+		return collector.Collect(ctx, task)
+	}
+	if cached, ok := jdbcCache.Get(key); ok {
+		return cached, "ok(cache)", nil
+	}
+	fields, msg, err := collector.Collect(ctx, task)
+	if err != nil {
+		return nil, msg, err
+	}
+	jdbcCache.Set(key, fields)
+	return cloneStringMap(fields), msg, nil
+}
+
+func materializeRedisFields(task model.MetricsTask, cached map[string]string) map[string]string {
+	out := cloneStringMap(cached)
+	if out == nil {
+		out = map[string]string{}
+	}
+	if section := strings.TrimSpace(task.Params["section"]); section != "" {
+		out["section"] = section
+	}
+	return out
+}
+
+func cloneMetricsTask(task model.MetricsTask) model.MetricsTask {
+	dup := task
+	dup.Params = cloneStringMap(task.Params)
+	dup.Transform = append([]model.Transform(nil), task.Transform...)
+	dup.FieldSpecs = append([]model.FieldSpec(nil), task.FieldSpecs...)
+	dup.CalculateSpecs = append([]model.CalculateSpec(nil), task.CalculateSpecs...)
+	return dup
+}
+
+func cloneStringMap(src map[string]string) map[string]string {
+	if len(src) == 0 {
+		return nil
+	}
+	dst := make(map[string]string, len(src))
+	for k, v := range src {
+		dst[k] = v
+	}
+	return dst
+}
+
+type redisCycleCache struct {
+	mu sync.RWMutex
+	m  map[string]map[string]string
+}
+
+func newRedisCycleCache() *redisCycleCache {
+	return &redisCycleCache{m: map[string]map[string]string{}}
+}
+
+func (c *redisCycleCache) Get(key string) (map[string]string, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	v, ok := c.m[key]
+	if !ok {
+		return nil, false
+	}
+	return cloneStringMap(v), true
+}
+
+func (c *redisCycleCache) Set(key string, fields map[string]string) {
+	if key == "" || fields == nil {
+		return
+	}
+	c.mu.Lock()
+	c.m[key] = cloneStringMap(fields)
+	c.mu.Unlock()
+}
+
+func redisCacheKey(params map[string]string) string {
+	if len(params) == 0 {
+		return ""
+	}
+	host := strings.TrimSpace(params["host"])
+	port := strings.TrimSpace(params["port"])
+	if host == "" {
+		return ""
+	}
+	if port == "" {
+		port = "6379"
+	}
+	user := strings.TrimSpace(params["username"])
+	pass := strings.TrimSpace(params["password"])
+	return strings.Join([]string{host, port, user, pass}, "|")
+}
+
+type jdbcCycleCache struct {
+	mu sync.RWMutex
+	m  map[string]map[string]string
+}
+
+func newJDBCCycleCache() *jdbcCycleCache {
+	return &jdbcCycleCache{m: map[string]map[string]string{}}
+}
+
+func (c *jdbcCycleCache) Get(key string) (map[string]string, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	v, ok := c.m[key]
+	if !ok {
+		return nil, false
+	}
+	return cloneStringMap(v), true
+}
+
+func (c *jdbcCycleCache) Set(key string, fields map[string]string) {
+	if key == "" || fields == nil {
+		return
+	}
+	c.mu.Lock()
+	c.m[key] = cloneStringMap(fields)
+	c.mu.Unlock()
+}
+
+func jdbcCacheKey(params map[string]string) string {
+	if len(params) == 0 {
+		return ""
+	}
+	sqlText := strings.TrimSpace(params["sql"])
+	queryType := strings.TrimSpace(strings.ToLower(params["queryType"]))
+	if sqlText == "" {
+		return ""
+	}
+	if queryType == "" {
+		queryType = "columns"
+	}
+	platform := strings.TrimSpace(strings.ToLower(params["platform"]))
+	if platform == "" {
+		platform = strings.TrimSpace(strings.ToLower(params["driver"]))
+	}
+	if platform == "" {
+		platform = "mysql"
+	}
+	if rawURL := strings.TrimSpace(params["url"]); rawURL != "" {
+		return strings.Join([]string{"url", rawURL, queryType, sqlText}, "|")
+	}
+	host := strings.TrimSpace(params["host"])
+	port := strings.TrimSpace(params["port"])
+	db := strings.TrimSpace(params["database"])
+	user := strings.TrimSpace(params["username"])
+	pass := strings.TrimSpace(params["password"])
+	timeout := strings.TrimSpace(params["timeout"])
+	return strings.Join([]string{platform, host, port, db, user, pass, timeout, queryType, sqlText}, "|")
+}
+
+func mergeDebug(target map[string]string, extra map[string]string) {
+	if len(extra) == 0 {
+		return
+	}
+	for k, v := range extra {
+		target[k] = v
+	}
 }
 
 func (d *Dispatcher) pushResult(ctx context.Context, result model.Result) {

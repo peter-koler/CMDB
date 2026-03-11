@@ -16,6 +16,7 @@ import (
 	"manager-go/internal/model"
 	pb "manager-go/internal/pb/proto"
 	"manager-go/internal/store"
+	templ "manager-go/internal/template"
 )
 
 // Manager 管理所有 Collector 连接
@@ -26,6 +27,7 @@ type Manager struct {
 	// 依赖
 	monitorStore   *store.MonitorStore
 	collectorStore *store.CollectorStore
+	templateReg    *templ.Registry
 
 	// 配置
 	heartbeatInterval    time.Duration
@@ -72,6 +74,12 @@ func WithManagerReportHandler(fn func(string, *pb.CollectRep)) ManagerOption {
 func WithManagerAckHandler(fn func(string, *pb.CommandAck)) ManagerOption {
 	return func(m *Manager) {
 		m.onAck = fn
+	}
+}
+
+func WithManagerTemplateRegistry(reg *templ.Registry) ManagerOption {
+	return func(m *Manager) {
+		m.templateReg = reg
 	}
 }
 
@@ -348,6 +356,30 @@ func (m *Manager) BuildCollectTask(monitor *model.Monitor) (*pb.CollectTask, int
 	return task, jobID
 }
 
+func (m *Manager) BuildCollectTaskStrict(monitor *model.Monitor) (*pb.CollectTask, int64, error) {
+	jobID := monitor.ID
+	task := &pb.CollectTask{
+		JobId:      jobID,
+		MonitorId:  monitor.ID,
+		App:        monitor.App,
+		IntervalMs: int64(monitor.IntervalSeconds) * 1000,
+		CommandId:  time.Now().UnixNano(),
+		Version:    monitor.Version,
+		TraceId:    fmt.Sprintf("%d-%d", monitor.ID, time.Now().Unix()),
+	}
+	tasks, err := m.compileMetricsTasksStrict(monitor)
+	if err != nil {
+		return nil, jobID, err
+	}
+	task.Tasks = tasks
+	return task, jobID, nil
+}
+
+func (m *Manager) ValidateMonitorTemplate(monitor *model.Monitor) error {
+	_, err := m.compileMetricsTasksStrict(monitor)
+	return err
+}
+
 // SyncAllMonitors 同步所有启用的 Monitor 到 Collector
 func (m *Manager) SyncAllMonitors() error {
 	monitors := m.monitorStore.List()
@@ -536,6 +568,15 @@ func (m *Manager) persistBind(collectorID string, monitorID int64, pinned bool) 
 }
 
 func (m *Manager) buildMetricsTasks(monitor *model.Monitor) []*pb.MetricsTask {
+	if m.templateReg != nil {
+		if rt, ok := m.getTemplateForMonitor(monitor); ok {
+			if tasks, err := templ.CompileMetricsTasks(rt, monitor); err == nil && len(tasks) > 0 {
+				return tasks
+			} else if err != nil {
+				log.Printf("[Manager] template compile fallback app=%s monitor=%d template_id=%d err=%v", monitor.App, monitor.ID, monitor.TemplateID, err)
+			}
+		}
+	}
 	app := strings.TrimSpace(strings.ToLower(monitor.App))
 	switch app {
 	case "redis":
@@ -545,10 +586,50 @@ func (m *Manager) buildMetricsTasks(monitor *model.Monitor) []*pb.MetricsTask {
 	}
 }
 
+func (m *Manager) compileMetricsTasksStrict(monitor *model.Monitor) ([]*pb.MetricsTask, error) {
+	if m.templateReg == nil {
+		return nil, errors.New("template registry not configured")
+	}
+	rt, ok := m.getTemplateForMonitor(monitor)
+	if !ok {
+		if monitor.TemplateID > 0 {
+			return nil, fmt.Errorf("template not loaded for template_id=%d app=%s", monitor.TemplateID, strings.TrimSpace(monitor.App))
+		}
+		return nil, fmt.Errorf("template not loaded for app=%s", strings.TrimSpace(monitor.App))
+	}
+	if strings.TrimSpace(strings.ToLower(rt.App)) != strings.TrimSpace(strings.ToLower(monitor.App)) {
+		return nil, fmt.Errorf("template app mismatch: monitor=%s template=%s", strings.TrimSpace(monitor.App), strings.TrimSpace(rt.App))
+	}
+	tasks, err := templ.CompileMetricsTasks(rt, monitor)
+	if err != nil {
+		return nil, err
+	}
+	if len(tasks) == 0 {
+		return nil, errors.New("compiled metrics tasks are empty")
+	}
+	return tasks, nil
+}
+
+func (m *Manager) getTemplateForMonitor(monitor *model.Monitor) (templ.RuntimeTemplate, bool) {
+	if m.templateReg == nil || monitor == nil {
+		return templ.RuntimeTemplate{}, false
+	}
+	if monitor.TemplateID > 0 {
+		if rt, ok := m.templateReg.GetByID(monitor.TemplateID); ok {
+			return rt, true
+		}
+	}
+	return m.templateReg.Get(monitor.App)
+}
+
 func buildDefaultTasks(monitor *model.Monitor) []*pb.MetricsTask {
 	protocolName := strings.TrimSpace(strings.ToLower(monitor.App))
 	if protocolName == "" {
 		protocolName = "http"
+	}
+	switch protocolName {
+	case "mysql", "mariadb", "postgres", "postgresql":
+		protocolName = "jdbc"
 	}
 	params := cloneStringMap(monitor.Params)
 	if params == nil {
@@ -566,6 +647,7 @@ func buildDefaultTasks(monitor *model.Monitor) []*pb.MetricsTask {
 			TimeoutMs: int64(readIntParam(params, "timeout", 5000)),
 			Priority:  0,
 			Params:    params,
+			ExecKind:  "pull",
 		},
 	}
 }
@@ -618,6 +700,7 @@ func buildRedisTasks(monitor *model.Monitor) []*pb.MetricsTask {
 			TimeoutMs: int64(timeout),
 			Priority:  int32(idx),
 			Params:    taskParams,
+			ExecKind:  "pull",
 		})
 	}
 	return tasks

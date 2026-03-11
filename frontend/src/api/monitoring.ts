@@ -104,6 +104,8 @@ export interface AlertItem {
   status?: string
   monitor_name?: string
   monitor_id?: number
+  app?: string
+  instance?: string
   metric?: string
   metric_value?: number | string
   threshold?: number | string
@@ -290,6 +292,59 @@ export const getAlertRules = (params?: Record<string, any>) => {
     url: '/monitoring/alert-rules',
     method: 'GET',
     params
+  })
+}
+
+export const getTargetAlertRules = (monitorId: number, params?: Record<string, any>) => {
+  return request({
+    url: `/monitoring/targets/${monitorId}/alerts/rules`,
+    method: 'GET',
+    params
+  })
+}
+
+export const createTargetAlertRule = (monitorId: number, data: Partial<AlertRule>) => {
+  return request({
+    url: `/monitoring/targets/${monitorId}/alerts/rules`,
+    method: 'POST',
+    data
+  })
+}
+
+export const updateTargetAlertRule = (monitorId: number, ruleId: number, data: Partial<AlertRule>) => {
+  return request({
+    url: `/monitoring/targets/${monitorId}/alerts/rules/${ruleId}`,
+    method: 'PUT',
+    data
+  })
+}
+
+export const deleteTargetAlertRule = (monitorId: number, ruleId: number) => {
+  return request({
+    url: `/monitoring/targets/${monitorId}/alerts/rules/${ruleId}`,
+    method: 'DELETE'
+  })
+}
+
+export const applyTargetDefaultAlertRules = (monitorId: number) => {
+  return request({
+    url: `/monitoring/targets/${monitorId}/alerts/rules/apply-defaults`,
+    method: 'POST'
+  })
+}
+
+export const applyTemplateAlertRules = (templateId: number, data?: { monitor_ids?: number[]; monitor_id?: number }) => {
+  return request({
+    url: `/monitoring/templates/${templateId}/alerts/apply`,
+    method: 'POST',
+    data
+  })
+}
+
+export const reloadTargetAlertRules = (monitorId: number) => {
+  return request({
+    url: `/monitoring/targets/${monitorId}/alerts/reload`,
+    method: 'POST'
   })
 }
 

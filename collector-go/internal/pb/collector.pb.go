@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        v7.34.0
-// source: proto/collector.proto
+// source: collector.proto
 
 package pb
 
@@ -21,6 +21,197 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type AckStatus int32
+
+const (
+	AckStatus_ACK_STATUS_UNSPECIFIED AckStatus = 0
+	AckStatus_ACK_STATUS_RECEIVED    AckStatus = 1
+	AckStatus_ACK_STATUS_APPLIED     AckStatus = 2
+	AckStatus_ACK_STATUS_REJECTED    AckStatus = 3
+	AckStatus_ACK_STATUS_NOT_FOUND   AckStatus = 4
+)
+
+// Enum value maps for AckStatus.
+var (
+	AckStatus_name = map[int32]string{
+		0: "ACK_STATUS_UNSPECIFIED",
+		1: "ACK_STATUS_RECEIVED",
+		2: "ACK_STATUS_APPLIED",
+		3: "ACK_STATUS_REJECTED",
+		4: "ACK_STATUS_NOT_FOUND",
+	}
+	AckStatus_value = map[string]int32{
+		"ACK_STATUS_UNSPECIFIED": 0,
+		"ACK_STATUS_RECEIVED":    1,
+		"ACK_STATUS_APPLIED":     2,
+		"ACK_STATUS_REJECTED":    3,
+		"ACK_STATUS_NOT_FOUND":   4,
+	}
+)
+
+func (x AckStatus) Enum() *AckStatus {
+	p := new(AckStatus)
+	*p = x
+	return p
+}
+
+func (x AckStatus) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (AckStatus) Descriptor() protoreflect.EnumDescriptor {
+	return file_collector_proto_enumTypes[0].Descriptor()
+}
+
+func (AckStatus) Type() protoreflect.EnumType {
+	return &file_collector_proto_enumTypes[0]
+}
+
+func (x AckStatus) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use AckStatus.Descriptor instead.
+func (AckStatus) EnumDescriptor() ([]byte, []int) {
+	return file_collector_proto_rawDescGZIP(), []int{0}
+}
+
+type CommandAck struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	CommandId     int64                  `protobuf:"varint,1,opt,name=command_id,json=commandId,proto3" json:"command_id,omitempty"`
+	JobId         int64                  `protobuf:"varint,2,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
+	CommandType   string                 `protobuf:"bytes,3,opt,name=command_type,json=commandType,proto3" json:"command_type,omitempty"` // upsert | delete
+	Status        AckStatus              `protobuf:"varint,4,opt,name=status,proto3,enum=collector.v1.AckStatus" json:"status,omitempty"`
+	Reason        string                 `protobuf:"bytes,5,opt,name=reason,proto3" json:"reason,omitempty"`
+	UnixMs        int64                  `protobuf:"varint,6,opt,name=unix_ms,json=unixMs,proto3" json:"unix_ms,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CommandAck) Reset() {
+	*x = CommandAck{}
+	mi := &file_collector_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CommandAck) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CommandAck) ProtoMessage() {}
+
+func (x *CommandAck) ProtoReflect() protoreflect.Message {
+	mi := &file_collector_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CommandAck.ProtoReflect.Descriptor instead.
+func (*CommandAck) Descriptor() ([]byte, []int) {
+	return file_collector_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *CommandAck) GetCommandId() int64 {
+	if x != nil {
+		return x.CommandId
+	}
+	return 0
+}
+
+func (x *CommandAck) GetJobId() int64 {
+	if x != nil {
+		return x.JobId
+	}
+	return 0
+}
+
+func (x *CommandAck) GetCommandType() string {
+	if x != nil {
+		return x.CommandType
+	}
+	return ""
+}
+
+func (x *CommandAck) GetStatus() AckStatus {
+	if x != nil {
+		return x.Status
+	}
+	return AckStatus_ACK_STATUS_UNSPECIFIED
+}
+
+func (x *CommandAck) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+func (x *CommandAck) GetUnixMs() int64 {
+	if x != nil {
+		return x.UnixMs
+	}
+	return 0
+}
+
+type DeleteJobCommand struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	CommandId     int64                  `protobuf:"varint,1,opt,name=command_id,json=commandId,proto3" json:"command_id,omitempty"`
+	JobId         int64                  `protobuf:"varint,2,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeleteJobCommand) Reset() {
+	*x = DeleteJobCommand{}
+	mi := &file_collector_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteJobCommand) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteJobCommand) ProtoMessage() {}
+
+func (x *DeleteJobCommand) ProtoReflect() protoreflect.Message {
+	mi := &file_collector_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteJobCommand.ProtoReflect.Descriptor instead.
+func (*DeleteJobCommand) Descriptor() ([]byte, []int) {
+	return file_collector_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *DeleteJobCommand) GetCommandId() int64 {
+	if x != nil {
+		return x.CommandId
+	}
+	return 0
+}
+
+func (x *DeleteJobCommand) GetJobId() int64 {
+	if x != nil {
+		return x.JobId
+	}
+	return 0
+}
+
 type CollectTask struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	JobId         int64                  `protobuf:"varint,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
@@ -28,13 +219,16 @@ type CollectTask struct {
 	App           string                 `protobuf:"bytes,3,opt,name=app,proto3" json:"app,omitempty"`
 	IntervalMs    int64                  `protobuf:"varint,4,opt,name=interval_ms,json=intervalMs,proto3" json:"interval_ms,omitempty"`
 	Tasks         []*MetricsTask         `protobuf:"bytes,5,rep,name=tasks,proto3" json:"tasks,omitempty"`
+	CommandId     int64                  `protobuf:"varint,6,opt,name=command_id,json=commandId,proto3" json:"command_id,omitempty"`
+	Version       int64                  `protobuf:"varint,7,opt,name=version,proto3" json:"version,omitempty"`
+	TraceId       string                 `protobuf:"bytes,8,opt,name=trace_id,json=traceId,proto3" json:"trace_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *CollectTask) Reset() {
 	*x = CollectTask{}
-	mi := &file_proto_collector_proto_msgTypes[0]
+	mi := &file_collector_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -46,7 +240,7 @@ func (x *CollectTask) String() string {
 func (*CollectTask) ProtoMessage() {}
 
 func (x *CollectTask) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_collector_proto_msgTypes[0]
+	mi := &file_collector_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -59,7 +253,7 @@ func (x *CollectTask) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CollectTask.ProtoReflect.Descriptor instead.
 func (*CollectTask) Descriptor() ([]byte, []int) {
-	return file_proto_collector_proto_rawDescGZIP(), []int{0}
+	return file_collector_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *CollectTask) GetJobId() int64 {
@@ -97,21 +291,46 @@ func (x *CollectTask) GetTasks() []*MetricsTask {
 	return nil
 }
 
+func (x *CollectTask) GetCommandId() int64 {
+	if x != nil {
+		return x.CommandId
+	}
+	return 0
+}
+
+func (x *CollectTask) GetVersion() int64 {
+	if x != nil {
+		return x.Version
+	}
+	return 0
+}
+
+func (x *CollectTask) GetTraceId() string {
+	if x != nil {
+		return x.TraceId
+	}
+	return ""
+}
+
 type MetricsTask struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	Protocol      string                 `protobuf:"bytes,2,opt,name=protocol,proto3" json:"protocol,omitempty"`
-	TimeoutMs     int64                  `protobuf:"varint,3,opt,name=timeout_ms,json=timeoutMs,proto3" json:"timeout_ms,omitempty"`
-	Priority      int32                  `protobuf:"varint,4,opt,name=priority,proto3" json:"priority,omitempty"`
-	Params        map[string]string      `protobuf:"bytes,5,rep,name=params,proto3" json:"params,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	Transform     []*Transform           `protobuf:"bytes,6,rep,name=transform,proto3" json:"transform,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Name           string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Protocol       string                 `protobuf:"bytes,2,opt,name=protocol,proto3" json:"protocol,omitempty"`
+	TimeoutMs      int64                  `protobuf:"varint,3,opt,name=timeout_ms,json=timeoutMs,proto3" json:"timeout_ms,omitempty"`
+	Priority       int32                  `protobuf:"varint,4,opt,name=priority,proto3" json:"priority,omitempty"`
+	Params         map[string]string      `protobuf:"bytes,5,rep,name=params,proto3" json:"params,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Transform      []*Transform           `protobuf:"bytes,6,rep,name=transform,proto3" json:"transform,omitempty"`
+	ExecKind       string                 `protobuf:"bytes,7,opt,name=exec_kind,json=execKind,proto3" json:"exec_kind,omitempty"`
+	SpecJson       string                 `protobuf:"bytes,8,opt,name=spec_json,json=specJson,proto3" json:"spec_json,omitempty"`
+	FieldSpecs     []*FieldSpec           `protobuf:"bytes,9,rep,name=field_specs,json=fieldSpecs,proto3" json:"field_specs,omitempty"`
+	CalculateSpecs []*CalculateSpec       `protobuf:"bytes,10,rep,name=calculate_specs,json=calculateSpecs,proto3" json:"calculate_specs,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *MetricsTask) Reset() {
 	*x = MetricsTask{}
-	mi := &file_proto_collector_proto_msgTypes[1]
+	mi := &file_collector_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -123,7 +342,7 @@ func (x *MetricsTask) String() string {
 func (*MetricsTask) ProtoMessage() {}
 
 func (x *MetricsTask) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_collector_proto_msgTypes[1]
+	mi := &file_collector_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -136,7 +355,7 @@ func (x *MetricsTask) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MetricsTask.ProtoReflect.Descriptor instead.
 func (*MetricsTask) Descriptor() ([]byte, []int) {
-	return file_proto_collector_proto_rawDescGZIP(), []int{1}
+	return file_collector_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *MetricsTask) GetName() string {
@@ -181,6 +400,34 @@ func (x *MetricsTask) GetTransform() []*Transform {
 	return nil
 }
 
+func (x *MetricsTask) GetExecKind() string {
+	if x != nil {
+		return x.ExecKind
+	}
+	return ""
+}
+
+func (x *MetricsTask) GetSpecJson() string {
+	if x != nil {
+		return x.SpecJson
+	}
+	return ""
+}
+
+func (x *MetricsTask) GetFieldSpecs() []*FieldSpec {
+	if x != nil {
+		return x.FieldSpecs
+	}
+	return nil
+}
+
+func (x *MetricsTask) GetCalculateSpecs() []*CalculateSpec {
+	if x != nil {
+		return x.CalculateSpecs
+	}
+	return nil
+}
+
 type Transform struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Field         string                 `protobuf:"bytes,1,opt,name=field,proto3" json:"field,omitempty"`
@@ -191,7 +438,7 @@ type Transform struct {
 
 func (x *Transform) Reset() {
 	*x = Transform{}
-	mi := &file_proto_collector_proto_msgTypes[2]
+	mi := &file_collector_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -203,7 +450,7 @@ func (x *Transform) String() string {
 func (*Transform) ProtoMessage() {}
 
 func (x *Transform) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_collector_proto_msgTypes[2]
+	mi := &file_collector_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -216,7 +463,7 @@ func (x *Transform) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Transform.ProtoReflect.Descriptor instead.
 func (*Transform) Descriptor() ([]byte, []int) {
-	return file_proto_collector_proto_rawDescGZIP(), []int{2}
+	return file_collector_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *Transform) GetField() string {
@@ -233,6 +480,126 @@ func (x *Transform) GetOp() string {
 	return ""
 }
 
+type FieldSpec struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Field         string                 `protobuf:"bytes,1,opt,name=field,proto3" json:"field,omitempty"`
+	Type          string                 `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`
+	Unit          string                 `protobuf:"bytes,3,opt,name=unit,proto3" json:"unit,omitempty"`
+	Label         bool                   `protobuf:"varint,4,opt,name=label,proto3" json:"label,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FieldSpec) Reset() {
+	*x = FieldSpec{}
+	mi := &file_collector_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FieldSpec) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FieldSpec) ProtoMessage() {}
+
+func (x *FieldSpec) ProtoReflect() protoreflect.Message {
+	mi := &file_collector_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FieldSpec.ProtoReflect.Descriptor instead.
+func (*FieldSpec) Descriptor() ([]byte, []int) {
+	return file_collector_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *FieldSpec) GetField() string {
+	if x != nil {
+		return x.Field
+	}
+	return ""
+}
+
+func (x *FieldSpec) GetType() string {
+	if x != nil {
+		return x.Type
+	}
+	return ""
+}
+
+func (x *FieldSpec) GetUnit() string {
+	if x != nil {
+		return x.Unit
+	}
+	return ""
+}
+
+func (x *FieldSpec) GetLabel() bool {
+	if x != nil {
+		return x.Label
+	}
+	return false
+}
+
+type CalculateSpec struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Field         string                 `protobuf:"bytes,1,opt,name=field,proto3" json:"field,omitempty"`
+	Expression    string                 `protobuf:"bytes,2,opt,name=expression,proto3" json:"expression,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CalculateSpec) Reset() {
+	*x = CalculateSpec{}
+	mi := &file_collector_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CalculateSpec) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CalculateSpec) ProtoMessage() {}
+
+func (x *CalculateSpec) ProtoReflect() protoreflect.Message {
+	mi := &file_collector_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CalculateSpec.ProtoReflect.Descriptor instead.
+func (*CalculateSpec) Descriptor() ([]byte, []int) {
+	return file_collector_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *CalculateSpec) GetField() string {
+	if x != nil {
+		return x.Field
+	}
+	return ""
+}
+
+func (x *CalculateSpec) GetExpression() string {
+	if x != nil {
+		return x.Expression
+	}
+	return ""
+}
+
 type CollectRep struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	JobId         int64                  `protobuf:"varint,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
@@ -245,13 +612,14 @@ type CollectRep struct {
 	Message       string                 `protobuf:"bytes,8,opt,name=message,proto3" json:"message,omitempty"`
 	Fields        map[string]string      `protobuf:"bytes,9,rep,name=fields,proto3" json:"fields,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	RawLatencyMs  int64                  `protobuf:"varint,10,opt,name=raw_latency_ms,json=rawLatencyMs,proto3" json:"raw_latency_ms,omitempty"`
+	Debug         map[string]string      `protobuf:"bytes,11,rep,name=debug,proto3" json:"debug,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *CollectRep) Reset() {
 	*x = CollectRep{}
-	mi := &file_proto_collector_proto_msgTypes[3]
+	mi := &file_collector_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -263,7 +631,7 @@ func (x *CollectRep) String() string {
 func (*CollectRep) ProtoMessage() {}
 
 func (x *CollectRep) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_collector_proto_msgTypes[3]
+	mi := &file_collector_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -276,7 +644,7 @@ func (x *CollectRep) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CollectRep.ProtoReflect.Descriptor instead.
 func (*CollectRep) Descriptor() ([]byte, []int) {
-	return file_proto_collector_proto_rawDescGZIP(), []int{3}
+	return file_collector_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *CollectRep) GetJobId() int64 {
@@ -349,6 +717,13 @@ func (x *CollectRep) GetRawLatencyMs() int64 {
 	return 0
 }
 
+func (x *CollectRep) GetDebug() map[string]string {
+	if x != nil {
+		return x.Debug
+	}
+	return nil
+}
+
 type Heartbeat struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	UnixMs        int64                  `protobuf:"varint,1,opt,name=unix_ms,json=unixMs,proto3" json:"unix_ms,omitempty"`
@@ -358,7 +733,7 @@ type Heartbeat struct {
 
 func (x *Heartbeat) Reset() {
 	*x = Heartbeat{}
-	mi := &file_proto_collector_proto_msgTypes[4]
+	mi := &file_collector_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -370,7 +745,7 @@ func (x *Heartbeat) String() string {
 func (*Heartbeat) ProtoMessage() {}
 
 func (x *Heartbeat) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_collector_proto_msgTypes[4]
+	mi := &file_collector_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -383,7 +758,7 @@ func (x *Heartbeat) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Heartbeat.ProtoReflect.Descriptor instead.
 func (*Heartbeat) Descriptor() ([]byte, []int) {
-	return file_proto_collector_proto_rawDescGZIP(), []int{4}
+	return file_collector_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *Heartbeat) GetUnixMs() int64 {
@@ -398,6 +773,7 @@ type ManagerFrame struct {
 	// Types that are valid to be assigned to Payload:
 	//
 	//	*ManagerFrame_Report
+	//	*ManagerFrame_Ack
 	//	*ManagerFrame_Heartbeat
 	Payload       isManagerFrame_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
@@ -406,7 +782,7 @@ type ManagerFrame struct {
 
 func (x *ManagerFrame) Reset() {
 	*x = ManagerFrame{}
-	mi := &file_proto_collector_proto_msgTypes[5]
+	mi := &file_collector_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -418,7 +794,7 @@ func (x *ManagerFrame) String() string {
 func (*ManagerFrame) ProtoMessage() {}
 
 func (x *ManagerFrame) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_collector_proto_msgTypes[5]
+	mi := &file_collector_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -431,7 +807,7 @@ func (x *ManagerFrame) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ManagerFrame.ProtoReflect.Descriptor instead.
 func (*ManagerFrame) Descriptor() ([]byte, []int) {
-	return file_proto_collector_proto_rawDescGZIP(), []int{5}
+	return file_collector_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ManagerFrame) GetPayload() isManagerFrame_Payload {
@@ -445,6 +821,15 @@ func (x *ManagerFrame) GetReport() *CollectRep {
 	if x != nil {
 		if x, ok := x.Payload.(*ManagerFrame_Report); ok {
 			return x.Report
+		}
+	}
+	return nil
+}
+
+func (x *ManagerFrame) GetAck() *CommandAck {
+	if x != nil {
+		if x, ok := x.Payload.(*ManagerFrame_Ack); ok {
+			return x.Ack
 		}
 	}
 	return nil
@@ -467,11 +852,17 @@ type ManagerFrame_Report struct {
 	Report *CollectRep `protobuf:"bytes,1,opt,name=report,proto3,oneof"`
 }
 
+type ManagerFrame_Ack struct {
+	Ack *CommandAck `protobuf:"bytes,2,opt,name=ack,proto3,oneof"`
+}
+
 type ManagerFrame_Heartbeat struct {
 	Heartbeat *Heartbeat `protobuf:"bytes,3,opt,name=heartbeat,proto3,oneof"`
 }
 
 func (*ManagerFrame_Report) isManagerFrame_Payload() {}
+
+func (*ManagerFrame_Ack) isManagerFrame_Payload() {}
 
 func (*ManagerFrame_Heartbeat) isManagerFrame_Payload() {}
 
@@ -482,6 +873,7 @@ type CollectorFrame struct {
 	//	*CollectorFrame_Upsert
 	//	*CollectorFrame_DeleteJobId
 	//	*CollectorFrame_Heartbeat
+	//	*CollectorFrame_Delete
 	Payload       isCollectorFrame_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -489,7 +881,7 @@ type CollectorFrame struct {
 
 func (x *CollectorFrame) Reset() {
 	*x = CollectorFrame{}
-	mi := &file_proto_collector_proto_msgTypes[6]
+	mi := &file_collector_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -501,7 +893,7 @@ func (x *CollectorFrame) String() string {
 func (*CollectorFrame) ProtoMessage() {}
 
 func (x *CollectorFrame) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_collector_proto_msgTypes[6]
+	mi := &file_collector_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -514,7 +906,7 @@ func (x *CollectorFrame) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CollectorFrame.ProtoReflect.Descriptor instead.
 func (*CollectorFrame) Descriptor() ([]byte, []int) {
-	return file_proto_collector_proto_rawDescGZIP(), []int{6}
+	return file_collector_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *CollectorFrame) GetPayload() isCollectorFrame_Payload {
@@ -533,6 +925,7 @@ func (x *CollectorFrame) GetUpsert() *CollectTask {
 	return nil
 }
 
+// Deprecated: Marked as deprecated in collector.proto.
 func (x *CollectorFrame) GetDeleteJobId() int64 {
 	if x != nil {
 		if x, ok := x.Payload.(*CollectorFrame_DeleteJobId); ok {
@@ -551,6 +944,15 @@ func (x *CollectorFrame) GetHeartbeat() *Heartbeat {
 	return nil
 }
 
+func (x *CollectorFrame) GetDelete() *DeleteJobCommand {
+	if x != nil {
+		if x, ok := x.Payload.(*CollectorFrame_Delete); ok {
+			return x.Delete
+		}
+	}
+	return nil
+}
+
 type isCollectorFrame_Payload interface {
 	isCollectorFrame_Payload()
 }
@@ -560,11 +962,16 @@ type CollectorFrame_Upsert struct {
 }
 
 type CollectorFrame_DeleteJobId struct {
+	// Deprecated: Marked as deprecated in collector.proto.
 	DeleteJobId int64 `protobuf:"varint,2,opt,name=delete_job_id,json=deleteJobId,proto3,oneof"`
 }
 
 type CollectorFrame_Heartbeat struct {
 	Heartbeat *Heartbeat `protobuf:"bytes,3,opt,name=heartbeat,proto3,oneof"`
+}
+
+type CollectorFrame_Delete struct {
+	Delete *DeleteJobCommand `protobuf:"bytes,4,opt,name=delete,proto3,oneof"`
 }
 
 func (*CollectorFrame_Upsert) isCollectorFrame_Payload() {}
@@ -573,11 +980,26 @@ func (*CollectorFrame_DeleteJobId) isCollectorFrame_Payload() {}
 
 func (*CollectorFrame_Heartbeat) isCollectorFrame_Payload() {}
 
-var File_proto_collector_proto protoreflect.FileDescriptor
+func (*CollectorFrame_Delete) isCollectorFrame_Payload() {}
 
-const file_proto_collector_proto_rawDesc = "" +
+var File_collector_proto protoreflect.FileDescriptor
+
+const file_collector_proto_rawDesc = "" +
 	"\n" +
-	"\x15proto/collector.proto\x12\fcollector.v1\"\xa7\x01\n" +
+	"\x0fcollector.proto\x12\fcollector.v1\"\xc7\x01\n" +
+	"\n" +
+	"CommandAck\x12\x1d\n" +
+	"\n" +
+	"command_id\x18\x01 \x01(\x03R\tcommandId\x12\x15\n" +
+	"\x06job_id\x18\x02 \x01(\x03R\x05jobId\x12!\n" +
+	"\fcommand_type\x18\x03 \x01(\tR\vcommandType\x12/\n" +
+	"\x06status\x18\x04 \x01(\x0e2\x17.collector.v1.AckStatusR\x06status\x12\x16\n" +
+	"\x06reason\x18\x05 \x01(\tR\x06reason\x12\x17\n" +
+	"\aunix_ms\x18\x06 \x01(\x03R\x06unixMs\"H\n" +
+	"\x10DeleteJobCommand\x12\x1d\n" +
+	"\n" +
+	"command_id\x18\x01 \x01(\x03R\tcommandId\x12\x15\n" +
+	"\x06job_id\x18\x02 \x01(\x03R\x05jobId\"\xfb\x01\n" +
 	"\vCollectTask\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\x03R\x05jobId\x12\x1d\n" +
 	"\n" +
@@ -585,7 +1007,11 @@ const file_proto_collector_proto_rawDesc = "" +
 	"\x03app\x18\x03 \x01(\tR\x03app\x12\x1f\n" +
 	"\vinterval_ms\x18\x04 \x01(\x03R\n" +
 	"intervalMs\x12/\n" +
-	"\x05tasks\x18\x05 \x03(\v2\x19.collector.v1.MetricsTaskR\x05tasks\"\xa9\x02\n" +
+	"\x05tasks\x18\x05 \x03(\v2\x19.collector.v1.MetricsTaskR\x05tasks\x12\x1d\n" +
+	"\n" +
+	"command_id\x18\x06 \x01(\x03R\tcommandId\x12\x18\n" +
+	"\aversion\x18\a \x01(\x03R\aversion\x12\x19\n" +
+	"\btrace_id\x18\b \x01(\tR\atraceId\"\xe3\x03\n" +
 	"\vMetricsTask\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1a\n" +
 	"\bprotocol\x18\x02 \x01(\tR\bprotocol\x12\x1d\n" +
@@ -593,13 +1019,29 @@ const file_proto_collector_proto_rawDesc = "" +
 	"timeout_ms\x18\x03 \x01(\x03R\ttimeoutMs\x12\x1a\n" +
 	"\bpriority\x18\x04 \x01(\x05R\bpriority\x12=\n" +
 	"\x06params\x18\x05 \x03(\v2%.collector.v1.MetricsTask.ParamsEntryR\x06params\x125\n" +
-	"\ttransform\x18\x06 \x03(\v2\x17.collector.v1.TransformR\ttransform\x1a9\n" +
+	"\ttransform\x18\x06 \x03(\v2\x17.collector.v1.TransformR\ttransform\x12\x1b\n" +
+	"\texec_kind\x18\a \x01(\tR\bexecKind\x12\x1b\n" +
+	"\tspec_json\x18\b \x01(\tR\bspecJson\x128\n" +
+	"\vfield_specs\x18\t \x03(\v2\x17.collector.v1.FieldSpecR\n" +
+	"fieldSpecs\x12D\n" +
+	"\x0fcalculate_specs\x18\n" +
+	" \x03(\v2\x1b.collector.v1.CalculateSpecR\x0ecalculateSpecs\x1a9\n" +
 	"\vParamsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"1\n" +
 	"\tTransform\x12\x14\n" +
 	"\x05field\x18\x01 \x01(\tR\x05field\x12\x0e\n" +
-	"\x02op\x18\x02 \x01(\tR\x02op\"\xff\x02\n" +
+	"\x02op\x18\x02 \x01(\tR\x02op\"_\n" +
+	"\tFieldSpec\x12\x14\n" +
+	"\x05field\x18\x01 \x01(\tR\x05field\x12\x12\n" +
+	"\x04type\x18\x02 \x01(\tR\x04type\x12\x12\n" +
+	"\x04unit\x18\x03 \x01(\tR\x04unit\x12\x14\n" +
+	"\x05label\x18\x04 \x01(\bR\x05label\"E\n" +
+	"\rCalculateSpec\x12\x14\n" +
+	"\x05field\x18\x01 \x01(\tR\x05field\x12\x1e\n" +
+	"\n" +
+	"expression\x18\x02 \x01(\tR\n" +
+	"expression\"\xf4\x03\n" +
 	"\n" +
 	"CollectRep\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\x03R\x05jobId\x12\x1d\n" +
@@ -614,95 +1056,124 @@ const file_proto_collector_proto_rawDesc = "" +
 	"\amessage\x18\b \x01(\tR\amessage\x12<\n" +
 	"\x06fields\x18\t \x03(\v2$.collector.v1.CollectRep.FieldsEntryR\x06fields\x12$\n" +
 	"\x0eraw_latency_ms\x18\n" +
-	" \x01(\x03R\frawLatencyMs\x1a9\n" +
+	" \x01(\x03R\frawLatencyMs\x129\n" +
+	"\x05debug\x18\v \x03(\v2#.collector.v1.CollectRep.DebugEntryR\x05debug\x1a9\n" +
 	"\vFieldsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a8\n" +
+	"\n" +
+	"DebugEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"$\n" +
 	"\tHeartbeat\x12\x17\n" +
-	"\aunix_ms\x18\x01 \x01(\x03R\x06unixMs\"\x86\x01\n" +
+	"\aunix_ms\x18\x01 \x01(\x03R\x06unixMs\"\xb4\x01\n" +
 	"\fManagerFrame\x122\n" +
-	"\x06report\x18\x01 \x01(\v2\x18.collector.v1.CollectRepH\x00R\x06report\x127\n" +
+	"\x06report\x18\x01 \x01(\v2\x18.collector.v1.CollectRepH\x00R\x06report\x12,\n" +
+	"\x03ack\x18\x02 \x01(\v2\x18.collector.v1.CommandAckH\x00R\x03ack\x127\n" +
 	"\theartbeat\x18\x03 \x01(\v2\x17.collector.v1.HeartbeatH\x00R\theartbeatB\t\n" +
-	"\apayload\"\xaf\x01\n" +
+	"\apayload\"\xed\x01\n" +
 	"\x0eCollectorFrame\x123\n" +
-	"\x06upsert\x18\x01 \x01(\v2\x19.collector.v1.CollectTaskH\x00R\x06upsert\x12$\n" +
-	"\rdelete_job_id\x18\x02 \x01(\x03H\x00R\vdeleteJobId\x127\n" +
-	"\theartbeat\x18\x03 \x01(\v2\x17.collector.v1.HeartbeatH\x00R\theartbeatB\t\n" +
-	"\apayload2[\n" +
+	"\x06upsert\x18\x01 \x01(\v2\x19.collector.v1.CollectTaskH\x00R\x06upsert\x12(\n" +
+	"\rdelete_job_id\x18\x02 \x01(\x03B\x02\x18\x01H\x00R\vdeleteJobId\x127\n" +
+	"\theartbeat\x18\x03 \x01(\v2\x17.collector.v1.HeartbeatH\x00R\theartbeat\x128\n" +
+	"\x06delete\x18\x04 \x01(\v2\x1e.collector.v1.DeleteJobCommandH\x00R\x06deleteB\t\n" +
+	"\apayload*\x8b\x01\n" +
+	"\tAckStatus\x12\x1a\n" +
+	"\x16ACK_STATUS_UNSPECIFIED\x10\x00\x12\x17\n" +
+	"\x13ACK_STATUS_RECEIVED\x10\x01\x12\x16\n" +
+	"\x12ACK_STATUS_APPLIED\x10\x02\x12\x17\n" +
+	"\x13ACK_STATUS_REJECTED\x10\x03\x12\x18\n" +
+	"\x14ACK_STATUS_NOT_FOUND\x10\x042[\n" +
 	"\x10CollectorService\x12G\n" +
 	"\aConnect\x12\x1c.collector.v1.CollectorFrame\x1a\x1a.collector.v1.ManagerFrame(\x010\x01B\x1dZ\x1bcollector-go/internal/pb;pbb\x06proto3"
 
 var (
-	file_proto_collector_proto_rawDescOnce sync.Once
-	file_proto_collector_proto_rawDescData []byte
+	file_collector_proto_rawDescOnce sync.Once
+	file_collector_proto_rawDescData []byte
 )
 
-func file_proto_collector_proto_rawDescGZIP() []byte {
-	file_proto_collector_proto_rawDescOnce.Do(func() {
-		file_proto_collector_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_proto_collector_proto_rawDesc), len(file_proto_collector_proto_rawDesc)))
+func file_collector_proto_rawDescGZIP() []byte {
+	file_collector_proto_rawDescOnce.Do(func() {
+		file_collector_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_collector_proto_rawDesc), len(file_collector_proto_rawDesc)))
 	})
-	return file_proto_collector_proto_rawDescData
+	return file_collector_proto_rawDescData
 }
 
-var file_proto_collector_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
-var file_proto_collector_proto_goTypes = []any{
-	(*CollectTask)(nil),    // 0: collector.v1.CollectTask
-	(*MetricsTask)(nil),    // 1: collector.v1.MetricsTask
-	(*Transform)(nil),      // 2: collector.v1.Transform
-	(*CollectRep)(nil),     // 3: collector.v1.CollectRep
-	(*Heartbeat)(nil),      // 4: collector.v1.Heartbeat
-	(*ManagerFrame)(nil),   // 5: collector.v1.ManagerFrame
-	(*CollectorFrame)(nil), // 6: collector.v1.CollectorFrame
-	nil,                    // 7: collector.v1.MetricsTask.ParamsEntry
-	nil,                    // 8: collector.v1.CollectRep.FieldsEntry
+var file_collector_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_collector_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_collector_proto_goTypes = []any{
+	(AckStatus)(0),           // 0: collector.v1.AckStatus
+	(*CommandAck)(nil),       // 1: collector.v1.CommandAck
+	(*DeleteJobCommand)(nil), // 2: collector.v1.DeleteJobCommand
+	(*CollectTask)(nil),      // 3: collector.v1.CollectTask
+	(*MetricsTask)(nil),      // 4: collector.v1.MetricsTask
+	(*Transform)(nil),        // 5: collector.v1.Transform
+	(*FieldSpec)(nil),        // 6: collector.v1.FieldSpec
+	(*CalculateSpec)(nil),    // 7: collector.v1.CalculateSpec
+	(*CollectRep)(nil),       // 8: collector.v1.CollectRep
+	(*Heartbeat)(nil),        // 9: collector.v1.Heartbeat
+	(*ManagerFrame)(nil),     // 10: collector.v1.ManagerFrame
+	(*CollectorFrame)(nil),   // 11: collector.v1.CollectorFrame
+	nil,                      // 12: collector.v1.MetricsTask.ParamsEntry
+	nil,                      // 13: collector.v1.CollectRep.FieldsEntry
+	nil,                      // 14: collector.v1.CollectRep.DebugEntry
 }
-var file_proto_collector_proto_depIdxs = []int32{
-	1, // 0: collector.v1.CollectTask.tasks:type_name -> collector.v1.MetricsTask
-	7, // 1: collector.v1.MetricsTask.params:type_name -> collector.v1.MetricsTask.ParamsEntry
-	2, // 2: collector.v1.MetricsTask.transform:type_name -> collector.v1.Transform
-	8, // 3: collector.v1.CollectRep.fields:type_name -> collector.v1.CollectRep.FieldsEntry
-	3, // 4: collector.v1.ManagerFrame.report:type_name -> collector.v1.CollectRep
-	4, // 5: collector.v1.ManagerFrame.heartbeat:type_name -> collector.v1.Heartbeat
-	0, // 6: collector.v1.CollectorFrame.upsert:type_name -> collector.v1.CollectTask
-	4, // 7: collector.v1.CollectorFrame.heartbeat:type_name -> collector.v1.Heartbeat
-	6, // 8: collector.v1.CollectorService.Connect:input_type -> collector.v1.CollectorFrame
-	5, // 9: collector.v1.CollectorService.Connect:output_type -> collector.v1.ManagerFrame
-	9, // [9:10] is the sub-list for method output_type
-	8, // [8:9] is the sub-list for method input_type
-	8, // [8:8] is the sub-list for extension type_name
-	8, // [8:8] is the sub-list for extension extendee
-	0, // [0:8] is the sub-list for field type_name
+var file_collector_proto_depIdxs = []int32{
+	0,  // 0: collector.v1.CommandAck.status:type_name -> collector.v1.AckStatus
+	4,  // 1: collector.v1.CollectTask.tasks:type_name -> collector.v1.MetricsTask
+	12, // 2: collector.v1.MetricsTask.params:type_name -> collector.v1.MetricsTask.ParamsEntry
+	5,  // 3: collector.v1.MetricsTask.transform:type_name -> collector.v1.Transform
+	6,  // 4: collector.v1.MetricsTask.field_specs:type_name -> collector.v1.FieldSpec
+	7,  // 5: collector.v1.MetricsTask.calculate_specs:type_name -> collector.v1.CalculateSpec
+	13, // 6: collector.v1.CollectRep.fields:type_name -> collector.v1.CollectRep.FieldsEntry
+	14, // 7: collector.v1.CollectRep.debug:type_name -> collector.v1.CollectRep.DebugEntry
+	8,  // 8: collector.v1.ManagerFrame.report:type_name -> collector.v1.CollectRep
+	1,  // 9: collector.v1.ManagerFrame.ack:type_name -> collector.v1.CommandAck
+	9,  // 10: collector.v1.ManagerFrame.heartbeat:type_name -> collector.v1.Heartbeat
+	3,  // 11: collector.v1.CollectorFrame.upsert:type_name -> collector.v1.CollectTask
+	9,  // 12: collector.v1.CollectorFrame.heartbeat:type_name -> collector.v1.Heartbeat
+	2,  // 13: collector.v1.CollectorFrame.delete:type_name -> collector.v1.DeleteJobCommand
+	11, // 14: collector.v1.CollectorService.Connect:input_type -> collector.v1.CollectorFrame
+	10, // 15: collector.v1.CollectorService.Connect:output_type -> collector.v1.ManagerFrame
+	15, // [15:16] is the sub-list for method output_type
+	14, // [14:15] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
-func init() { file_proto_collector_proto_init() }
-func file_proto_collector_proto_init() {
-	if File_proto_collector_proto != nil {
+func init() { file_collector_proto_init() }
+func file_collector_proto_init() {
+	if File_collector_proto != nil {
 		return
 	}
-	file_proto_collector_proto_msgTypes[5].OneofWrappers = []any{
+	file_collector_proto_msgTypes[9].OneofWrappers = []any{
 		(*ManagerFrame_Report)(nil),
+		(*ManagerFrame_Ack)(nil),
 		(*ManagerFrame_Heartbeat)(nil),
 	}
-	file_proto_collector_proto_msgTypes[6].OneofWrappers = []any{
+	file_collector_proto_msgTypes[10].OneofWrappers = []any{
 		(*CollectorFrame_Upsert)(nil),
 		(*CollectorFrame_DeleteJobId)(nil),
 		(*CollectorFrame_Heartbeat)(nil),
+		(*CollectorFrame_Delete)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_collector_proto_rawDesc), len(file_proto_collector_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   9,
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_collector_proto_rawDesc), len(file_collector_proto_rawDesc)),
+			NumEnums:      1,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_proto_collector_proto_goTypes,
-		DependencyIndexes: file_proto_collector_proto_depIdxs,
-		MessageInfos:      file_proto_collector_proto_msgTypes,
+		GoTypes:           file_collector_proto_goTypes,
+		DependencyIndexes: file_collector_proto_depIdxs,
+		EnumInfos:         file_collector_proto_enumTypes,
+		MessageInfos:      file_collector_proto_msgTypes,
 	}.Build()
-	File_proto_collector_proto = out.File
-	file_proto_collector_proto_goTypes = nil
-	file_proto_collector_proto_depIdxs = nil
+	File_collector_proto = out.File
+	file_collector_proto_goTypes = nil
+	file_collector_proto_depIdxs = nil
 }

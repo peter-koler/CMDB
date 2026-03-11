@@ -53,10 +53,19 @@ func (s *Store) ListVisibleTemplates() ([]TemplateRow, error) {
 		return nil, fmt.Errorf("template store db is nil")
 	}
 	rows, err := s.db.Query(`
-SELECT id, app, name, category, content, version, is_hidden, created_at, updated_at
+SELECT
+  id,
+  app,
+  name,
+  category,
+  content,
+  version,
+  CAST(COALESCE(is_hidden, 0) AS INTEGER) AS is_hidden_norm,
+  created_at,
+  updated_at
 FROM monitor_templates
-WHERE is_hidden = 0
-ORDER BY app ASC
+WHERE CAST(COALESCE(is_hidden, 0) AS INTEGER) = 0
+ORDER BY app ASC, version ASC, id ASC
 `)
 	if err != nil {
 		return nil, err
@@ -78,4 +87,3 @@ ORDER BY app ASC
 	}
 	return out, nil
 }
-

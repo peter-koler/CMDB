@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -25,10 +26,18 @@ import (
 	pb "manager-go/internal/pb/proto"
 	"manager-go/internal/scheduler"
 	"manager-go/internal/store"
+	templ "manager-go/internal/template"
 )
 
 func main() {
-	st := store.NewMonitorStore()
+	pythonWebDB := getenv("PYTHON_WEB_DB", "../backend/instance/it_ops.db")
+	st, stErr := store.NewMonitorStoreWithPath(pythonWebDB)
+	if stErr != nil {
+		log.Printf("[Manager] Failed to create persistent monitor store: %v, fallback to memory store", stErr)
+		st = store.NewMonitorStore()
+	} else {
+		log.Printf("[Manager] Persistent monitor store enabled: %s", pythonWebDB)
+	}
 	registry := collector.NewRegistry()
 	alertStore := alert.NewAlertStore()
 	deadLetters := alert.NewDeadLetterStore()
@@ -45,7 +54,6 @@ func main() {
 
 	// 初始化 Collector Store 和 Manager
 	// 使用与 Python Web 相同的数据库
-	pythonWebDB := getenv("PYTHON_WEB_DB", "../backend/instance/it_ops.db")
 	collectorStore, err := store.NewCollectorStoreWithPath(pythonWebDB)
 	if err != nil {
 		log.Printf("[Manager] Failed to create collector store: %v, using memory registry only", err)
@@ -58,6 +66,21 @@ func main() {
 		log.Printf("[Manager] Connected to Python Web database: %s", pythonWebDB)
 	}
 
+	// 初始化模板运行时（monitor_templates -> in-memory registry）
+	var templateReg *templ.Registry
+	templateStore, tplErr := templ.NewStoreWithPath(pythonWebDB)
+	if tplErr != nil {
+		log.Printf("[Manager] Failed to create template store: %v", tplErr)
+	} else {
+		templateReg = templ.NewRegistry()
+		if err := templateReg.ReloadFromStore(templateStore); err != nil {
+			log.Printf("[Manager] Failed to initial template reload: %v", err)
+		} else {
+			log.Printf("[Manager] Loaded %d templates into runtime registry", len(templateReg.List()))
+		}
+		go reloadTemplateRegistry(ctx, templateReg, templateStore, 60*time.Second)
+	}
+
 	// 创建 Collector Manager
 	var collectorManager *collector.Manager
 	if collectorStore != nil {
@@ -67,6 +90,7 @@ func main() {
 			collector.WithManagerHeartbeatInterval(5*time.Second),
 			collector.WithManagerReconnectBackoff(5*time.Second),
 			collector.WithManagerMaxReconnectAttempts(10),
+			collector.WithManagerTemplateRegistry(templateReg),
 		)
 		log.Printf("[Manager] Collector manager created with database storage")
 	}
@@ -88,48 +112,147 @@ func main() {
 	pipeline.Start(ctx)
 
 	alertEngine := alert.NewEngine()
-	alertRules := []alert.Rule{
-		{
-			ID:              1,
-			Name:            "manager_dispatch_tick_high",
-			Expression:      "manager_dispatch_tick > 900",
-			DurationSeconds: 5,
-			Severity:        "warning",
-			Enabled:         true,
-		},
+	alertRuntimeStore, arsErr := store.NewAlertRuntimeStoreWithPath(pythonWebDB)
+	if arsErr != nil {
+		log.Printf("[Manager] Failed to create alert runtime store: %v", arsErr)
+		alertRuntimeStore = nil
 	}
-	periodicEvaluator := alert.NewPeriodicEvaluator(
-		alertEngine,
-		alert.NewVMClient(vmURL, 1200*time.Millisecond),
-		[]alert.PeriodicRule{
-			{
-				ID:              1001,
-				Name:            "manager_dispatch_tick_avg_5m_high",
-				PromQL:          `avg_over_time(manager_dispatch_tick[5m])`,
-				Expression:      "value > 800",
-				DurationSeconds: 300,
-				Severity:        "warning",
-				Interval:        30 * time.Second,
-				Enabled:         true,
-			},
-		},
+	var (
+		alertRulesMu       sync.RWMutex
+		alertRules         []alert.Rule
+		alertRuleDefsByID  map[int64]store.RuntimeAlertRule
+		periodicRuleDefs   []store.RuntimeAlertRule
+		realtimeReloadedAt time.Time
+		reducerRef         *alert.Reducer
 	)
+	reloadRealtimeAlertRules := func() {
+		if alertRuntimeStore == nil {
+			return
+		}
+		rows, err := alertRuntimeStore.LoadEnabledRealtimeMetricRules()
+		if err != nil {
+			log.Printf("[Manager] reload realtime alert rules failed: %v", err)
+			return
+		}
+		nextRules := make([]alert.Rule, 0, len(rows))
+		nextDefs := make(map[int64]store.RuntimeAlertRule, len(rows))
+		for _, row := range rows {
+			expr := store.BuildRuleExpression(row)
+			if strings.TrimSpace(expr) == "" {
+				continue
+			}
+			nextRules = append(nextRules, alert.Rule{
+				ID:              row.ID,
+				Name:            row.Name,
+				Expression:      expr,
+				DurationSeconds: store.BuildRuleDurationSeconds(row),
+				Severity:        store.BuildRuleSeverity(row),
+				Enabled:         row.Enabled,
+			})
+			nextDefs[row.ID] = row
+		}
+		periodicRows, err := alertRuntimeStore.LoadEnabledPeriodicMetricRules()
+		if err != nil {
+			log.Printf("[Manager] reload periodic alert rules failed: %v", err)
+			periodicRows = nil
+		}
+		for _, row := range periodicRows {
+			nextDefs[row.ID] = row
+		}
+		groupRows, err := alertRuntimeStore.LoadEnabledAlertGroups()
+		if err != nil {
+			log.Printf("[Manager] reload alert groups failed: %v", err)
+		}
+		inhibitRows, err := alertRuntimeStore.LoadEnabledAlertInhibits()
+		if err != nil {
+			log.Printf("[Manager] reload alert inhibits failed: %v", err)
+		}
+		silenceRows, err := alertRuntimeStore.LoadEnabledAlertSilences()
+		if err != nil {
+			log.Printf("[Manager] reload alert silences failed: %v", err)
+		}
+		if reducerRef != nil {
+			reducerRef.UpdateRules(
+				convertGroupRules(groupRows),
+				convertInhibitRules(inhibitRows),
+				convertSilenceRules(silenceRows),
+			)
+		}
+
+		alertRulesMu.Lock()
+		alertRules = nextRules
+		alertRuleDefsByID = nextDefs
+		periodicRuleDefs = periodicRows
+		realtimeReloadedAt = time.Now()
+		alertRulesMu.Unlock()
+		log.Printf("[Manager] alert rules reloaded realtime=%d periodic=%d", len(nextRules), len(periodicRows))
+	}
+	reloadRealtimeAlertRules()
+	go func() {
+		ticker := time.NewTicker(60 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				reloadRealtimeAlertRules()
+			}
+		}
+	}()
+
+	periodicVM := alert.NewVMClient(vmURL, 1200*time.Millisecond)
 	reducer := alert.NewReducer(
 		60*time.Second,
 		5*time.Minute,
 		[]alert.SilenceRule{},
 	)
+	reducerRef = reducer
+	reloadRealtimeAlertRules()
 	queues := alert.NewQueues(
 		2048,
 		[]time.Duration{time.Minute, 5 * time.Minute, 15 * time.Minute, time.Hour},
 		5,
 	)
 	queues.SetDeadLetterSink(deadLetters)
-	sender := newNotifySender()
+	sender := newNotifySender(alertRuntimeStore)
 	queues.Start(ctx, sender, 2, 2)
 
-	handleFiring := func(ev alert.Event, grouped int) {
+	handleFiring := func(ev alert.Event, grouped int, point model.MetricPoint) {
 		alertStore.Fire(ev)
+		if alertRuntimeStore != nil {
+			alertRulesMu.RLock()
+			def := alertRuleDefsByID[ev.RuleID]
+			alertRulesMu.RUnlock()
+			ev.NoticeRuleID = def.NoticeRule
+			ev.App = point.App
+			ev.Instance = point.Instance
+			metric := store.BuildRuleMetric(def)
+			metricValue := point.Value
+			pointVarsMap := pointVars(point)
+			if v, ok := pointVarsMap[metric]; ok {
+				metricValue = v
+			}
+			ev.Content = renderAlertContent(def, ev, metric, metricValue)
+			if err := alertRuntimeStore.UpsertFiringAlert(store.RuntimeAlertEvent{
+				RuleID:      ev.RuleID,
+				RuleName:    ev.RuleName,
+				MonitorID:   ev.MonitorID,
+				Severity:    ev.Severity,
+				Expression:  ev.Expression,
+				Metric:      metric,
+				Value:       metricValue,
+				Threshold:   store.BuildRuleThreshold(def),
+				MonitorName: readStringLabel(point.Labels, "job", point.Instance),
+				App:         point.App,
+				Instance:    point.Instance,
+				Content:     ev.Content,
+				TriggeredAt: ev.TriggeredAt,
+				ElapsedMs:   ev.ElapsedMs,
+			}); err != nil {
+				log.Printf("alert runtime upsert failed rule=%d monitor=%d err=%v", ev.RuleID, ev.MonitorID, err)
+			}
+		}
 		if !queues.EnqueueAlert(ev) {
 			log.Printf("alert queue full rule=%s monitor=%d", ev.RuleName, ev.MonitorID)
 		}
@@ -137,22 +260,76 @@ func main() {
 			ev.RuleName, ev.MonitorID, ev.Severity, ev.ElapsedMs, grouped)
 	}
 
-	runRealtimeAlerts := func(monitorID int64, vars map[string]float64) {
-		for _, rule := range alertRules {
-			ev, matched, err := alertEngine.Evaluate(rule, monitorID, vars, time.Now())
-			if err != nil {
-				log.Printf("alert eval error rule=%s monitor=%d err=%v", rule.Name, monitorID, err)
+	runRealtimeAlerts := func(point model.MetricPoint, vars map[string]float64) {
+		alertRulesMu.RLock()
+		rulesSnapshot := make([]alert.Rule, len(alertRules))
+		copy(rulesSnapshot, alertRules)
+		_ = realtimeReloadedAt
+		alertRulesMu.RUnlock()
+		for _, rule := range rulesSnapshot {
+			def := alertRuleDefsByID[rule.ID]
+			if !store.RuleAppliesToTarget(def, point.MonitorID, point.App, point.Instance) {
 				continue
 			}
+			ev, matched, err := alertEngine.Evaluate(rule, point.MonitorID, vars, time.Now())
+			if err != nil {
+				log.Printf("alert eval error rule=%s monitor=%d err=%v", rule.Name, point.MonitorID, err)
+				continue
+			}
+			ev.Labels = buildEventLabels(def, point)
 			if matched && ev.State == alert.StateFiring {
 				d := reducer.Process(ev, time.Now())
 				if d.Emit {
-					handleFiring(ev, d.GroupedCount)
+					handleFiring(ev, d.GroupedCount, point)
 				} else {
 					log.Printf("alert reduced rule=%s monitor=%d by=%s", ev.RuleName, ev.MonitorID, d.SuppressedBy)
 				}
+				continue
+			}
+			if matched && ev.State == alert.StateNormal && alertRuntimeStore != nil {
+				if err := alertRuntimeStore.ResolveAlert(rule.ID, point.MonitorID, time.Now()); err != nil {
+					log.Printf("alert resolve failed rule=%d monitor=%d err=%v", rule.ID, point.MonitorID, err)
+				}
 			}
 		}
+	}
+
+	var (
+		metricSnapshotMu sync.RWMutex
+		metricSnapshot   = map[int64]map[string]float64{}
+		metricSnapshotAt = map[int64]time.Time{}
+	)
+	updateMetricSnapshot := func(point model.MetricPoint) map[string]float64 {
+		base := pointVars(point)
+		// direct aliases for expression convenience, e.g. used_memory > 0
+		base[strings.TrimSpace(point.Field)] = point.Value
+		base[strings.TrimSpace(point.Metrics)] = point.Value
+
+		now := time.Now()
+		metricSnapshotMu.Lock()
+		cur := metricSnapshot[point.MonitorID]
+		if cur == nil {
+			cur = map[string]float64{}
+		}
+		// 5m snapshot TTL for cross-field realtime expressions.
+		if ts, ok := metricSnapshotAt[point.MonitorID]; ok && now.Sub(ts) > 5*time.Minute {
+			cur = map[string]float64{}
+		}
+		for k, v := range base {
+			key := strings.TrimSpace(k)
+			if key == "" {
+				continue
+			}
+			cur[key] = v
+		}
+		metricSnapshot[point.MonitorID] = cur
+		metricSnapshotAt[point.MonitorID] = now
+		merged := make(map[string]float64, len(cur))
+		for k, v := range cur {
+			merged[k] = v
+		}
+		metricSnapshotMu.Unlock()
+		return merged
 	}
 
 	ingestPoint := func(point model.MetricPoint) error {
@@ -162,8 +339,8 @@ func main() {
 		if !pipeline.Submit(point) {
 			return fmt.Errorf("dispatch queue full")
 		}
-		vars := pointVars(point)
-		runRealtimeAlerts(point.MonitorID, vars)
+		vars := updateMetricSnapshot(point)
+		runRealtimeAlerts(point, vars)
 		return nil
 	}
 
@@ -248,26 +425,87 @@ func main() {
 	go func() {
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
+		nextPeriodicRun := map[string]time.Time{}
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case now := <-ticker.C:
+				alertRulesMu.RLock()
+				periodicSnapshot := make([]store.RuntimeAlertRule, len(periodicRuleDefs))
+				copy(periodicSnapshot, periodicRuleDefs)
+				alertRulesMu.RUnlock()
+				if len(periodicSnapshot) == 0 {
+					continue
+				}
 				monitors := st.List()
 				for _, m := range monitors {
 					if !m.Enabled {
 						continue
 					}
-					results := periodicEvaluator.RunDue(ctx, m.ID, now)
-					for _, r := range results {
-						if r.Event.State == alert.StateFiring {
-							d := reducer.Process(r.Event, now)
+					for _, def := range periodicSnapshot {
+						periodSeconds := def.Period
+						if periodSeconds <= 0 {
+							periodSeconds = 60
+						}
+						key := periodicRunKey(m.ID, def.ID)
+						if nr, ok := nextPeriodicRun[key]; ok && now.Before(nr) {
+							continue
+						}
+						nextPeriodicRun[key] = now.Add(time.Duration(periodSeconds) * time.Second)
+
+						promql := store.BuildPeriodicPromQL(def, m.ID)
+						if strings.TrimSpace(promql) == "" {
+							continue
+						}
+						if !store.RuleAppliesToTarget(def, m.ID, m.App, m.Target) {
+							continue
+						}
+						value, err := periodicVM.QueryValue(ctx, promql, now)
+						if err != nil {
+							if errors.Is(err, alert.ErrVMQueryEmptyResult) {
+								continue
+							}
+							log.Printf("periodic alert query error rule=%s monitor=%d err=%v", def.Name, m.ID, err)
+							continue
+						}
+						rule := alert.Rule{
+							ID:              def.ID,
+							Name:            def.Name,
+							Expression:      store.BuildRuleExpression(def),
+							DurationSeconds: maxInt(def.Times, 1),
+							Severity:        store.BuildRuleSeverity(def),
+							Enabled:         def.Enabled,
+						}
+						point := model.MetricPoint{
+							MonitorID: m.ID,
+							App:       m.App,
+							Instance:  m.Target,
+							Metrics:   "periodic",
+							Field:     store.BuildRuleMetric(def),
+							Value:     value,
+							UnixMs:    now.UnixMilli(),
+						}
+						ev, matched, err := alertEngine.Evaluate(rule, m.ID, map[string]float64{"value": value, store.BuildRuleMetric(def): value}, now)
+						if err != nil {
+							log.Printf("periodic alert eval error rule=%s monitor=%d err=%v", def.Name, m.ID, err)
+							continue
+						}
+						ev.Labels = buildEventLabels(def, point)
+						if matched && ev.State == alert.StateFiring {
+							d := reducer.Process(ev, now)
 							if d.Emit {
-								handleFiring(r.Event, d.GroupedCount)
+								handleFiring(ev, d.GroupedCount, point)
 								log.Printf("periodic alert firing rule=%s monitor=%d value=%.4f elapsed_ms=%d query=%s grouped=%d",
-									r.Rule.Name, m.ID, r.Value, r.Event.ElapsedMs, r.Rule.PromQL, d.GroupedCount)
+									def.Name, m.ID, value, ev.ElapsedMs, promql, d.GroupedCount)
 							} else {
-								log.Printf("periodic alert reduced rule=%s monitor=%d by=%s", r.Rule.Name, m.ID, d.SuppressedBy)
+								log.Printf("periodic alert reduced rule=%s monitor=%d by=%s", def.Name, m.ID, d.SuppressedBy)
+							}
+							continue
+						}
+						if matched && ev.State == alert.StateNormal && alertRuntimeStore != nil {
+							if err := alertRuntimeStore.ResolveAlert(def.ID, m.ID, now); err != nil {
+								log.Printf("periodic alert resolve failed rule=%d monitor=%d err=%v", def.ID, m.ID, err)
 							}
 						}
 					}
@@ -314,6 +552,26 @@ func reapCollectors(ctx context.Context, registry *collector.Registry, timeout t
 			for _, id := range expired {
 				log.Printf("collector expired id=%s timeout=%s", id, timeout)
 			}
+		}
+	}
+}
+
+func reloadTemplateRegistry(ctx context.Context, reg *templ.Registry, st *templ.Store, interval time.Duration) {
+	if reg == nil || st == nil || interval <= 0 {
+		return
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := reg.ReloadFromStore(st); err != nil {
+				log.Printf("[Manager] template registry reload failed: %v", err)
+				continue
+			}
+			log.Printf("[Manager] template registry reloaded, templates=%d", len(reg.List()))
 		}
 	}
 }
@@ -454,6 +712,142 @@ func pointVars(p model.MetricPoint) map[string]float64 {
 	return out
 }
 
+func renderAlertContent(def store.RuntimeAlertRule, ev alert.Event, metric string, value float64) string {
+	tpl := strings.TrimSpace(def.Template)
+	if tpl == "" {
+		return ev.RuleName
+	}
+	labels := map[string]string{
+		"monitor_id": strconv.FormatInt(ev.MonitorID, 10),
+		"severity":   strings.TrimSpace(ev.Severity),
+		"app":        strings.TrimSpace(ev.App),
+		"instance":   strings.TrimSpace(ev.Instance),
+		"metric":     strings.TrimSpace(metric),
+	}
+	repl := map[string]string{
+		"$value":           strconv.FormatFloat(value, 'f', -1, 64),
+		"$rule_name":       ev.RuleName,
+		"$monitor_id":      strconv.FormatInt(ev.MonitorID, 10),
+		"$severity":        ev.Severity,
+		"$expression":      ev.Expression,
+		"$labels.instance": labels["instance"],
+		"$labels.app":      labels["app"],
+		"$labels.metric":   labels["metric"],
+	}
+	content := tpl
+	for key, val := range repl {
+		content = strings.ReplaceAll(content, "{{"+key+"}}", val)
+		content = strings.ReplaceAll(content, "{{ "+key+" }}", val)
+	}
+	for key, val := range labels {
+		token := "$labels." + key
+		content = strings.ReplaceAll(content, "{{"+token+"}}", val)
+		content = strings.ReplaceAll(content, "{{ "+token+" }}", val)
+	}
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return ev.RuleName
+	}
+	return content
+}
+
+func buildEventLabels(def store.RuntimeAlertRule, point model.MetricPoint) map[string]string {
+	out := map[string]string{
+		"monitor_id": strconv.FormatInt(point.MonitorID, 10),
+		"app":        strings.TrimSpace(point.App),
+		"instance":   strings.TrimSpace(point.Instance),
+		"metric":     strings.TrimSpace(point.Field),
+		"metrics":    strings.TrimSpace(point.Metrics),
+	}
+	for key, raw := range def.Labels {
+		k := strings.TrimSpace(key)
+		if k == "" {
+			continue
+		}
+		out[k] = strings.TrimSpace(fmt.Sprintf("%v", raw))
+	}
+	return out
+}
+
+func readStringLabel(labels map[string]string, key string, def string) string {
+	if len(labels) == 0 {
+		return def
+	}
+	v := strings.TrimSpace(labels[key])
+	if v == "" {
+		return def
+	}
+	return v
+}
+
+func periodicRunKey(monitorID int64, ruleID int64) string {
+	return fmt.Sprintf("%d:%d", monitorID, ruleID)
+}
+
+func convertGroupRules(rows []store.RuntimeAlertGroup) []alert.GroupRule {
+	out := make([]alert.GroupRule, 0, len(rows))
+	for _, row := range rows {
+		interval := row.GroupInterval
+		if interval <= 0 {
+			interval = row.GroupWaitSec
+		}
+		if interval <= 0 {
+			interval = 60
+		}
+		out = append(out, alert.GroupRule{
+			ID:             row.ID,
+			GroupKey:       strings.TrimSpace(row.GroupKey),
+			MatchType:      row.MatchType,
+			GroupLabels:    row.GroupLabels,
+			GroupInterval:  time.Duration(interval) * time.Second,
+			RepeatInterval: time.Duration(maxInt(row.RepeatInterval, 0)) * time.Second,
+		})
+	}
+	return out
+}
+
+func convertInhibitRules(rows []store.RuntimeAlertInhibit) []alert.InhibitRule {
+	out := make([]alert.InhibitRule, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, alert.InhibitRule{
+			ID:           row.ID,
+			SourceLabels: row.SourceLabels,
+			TargetLabels: row.TargetLabels,
+			EqualLabels:  row.EqualLabels,
+		})
+	}
+	return out
+}
+
+func convertSilenceRules(rows []store.RuntimeAlertSilence) []alert.SilenceRule {
+	out := make([]alert.SilenceRule, 0, len(rows))
+	for _, row := range rows {
+		days := map[int]struct{}{}
+		for _, day := range row.Days {
+			if day >= 1 && day <= 7 {
+				days[day] = struct{}{}
+			}
+		}
+		out = append(out, alert.SilenceRule{
+			ID:        row.ID,
+			Type:      row.Type,
+			MatchType: row.MatchType,
+			Labels:    row.Labels,
+			Days:      days,
+			StartAtMs: row.StartAtMs,
+			EndAtMs:   row.EndAtMs,
+		})
+	}
+	return out
+}
+
+func maxInt(a, b int) int {
+	if a >= b {
+		return a
+	}
+	return b
+}
+
 func getenv(key, def string) string {
 	v := os.Getenv(key)
 	if v == "" {
@@ -481,49 +875,154 @@ func strconvAtoi(raw string) (int, error) {
 }
 
 type notifySender struct {
-	service  *notify.Service
-	template string
-	title    string
-	channels []notify.ChannelType
-	configs  map[notify.ChannelType]json.RawMessage
+	service       *notify.Service
+	template      string
+	batchTemplate string
+	title         string
+	channels      []notify.ChannelType
+	configs       map[notify.ChannelType]json.RawMessage
+	runtimeStore  *store.AlertRuntimeStore
+	cacheMu       sync.Mutex
+	noticeCache   map[int64]cachedNoticeDispatch
+	cacheTTL      time.Duration
+	limitMu       sync.Mutex
+	notifyLimits  map[string]notifyLimitState
+	limitTTL      time.Duration
+	batchMu       sync.Mutex
+	batchWindow   time.Duration
+	batchBuckets  map[int64]*batchBucket
 }
 
-func newNotifySender() *notifySender {
+type cachedNoticeDispatch struct {
+	dispatch store.NoticeDispatch
+	expireAt time.Time
+}
+
+type notifyLimitState struct {
+	count   int
+	updated time.Time
+}
+
+type batchBucket struct {
+	dispatch store.NoticeDispatch
+	channel  notify.ChannelType
+	config   json.RawMessage
+	template string
+	firstAt  time.Time
+	lastAt   time.Time
+	alerts   []map[string]any
+}
+
+func newNotifySender(runtimeStore *store.AlertRuntimeStore) *notifySender {
 	channels := parseNotifyChannels(getenv("MANAGER_NOTIFY_CHANNELS", "webhook"))
 	configs := map[notify.ChannelType]json.RawMessage{
 		notify.ChannelWebhook: json.RawMessage(getenv("MANAGER_NOTIFY_WEBHOOK_CONFIG", "{}")),
 		notify.ChannelEmail:   json.RawMessage(getenv("MANAGER_NOTIFY_EMAIL_CONFIG", "{}")),
 		notify.ChannelWeCom:   json.RawMessage(getenv("MANAGER_NOTIFY_WECOM_CONFIG", "{}")),
 	}
-	return &notifySender{
-		service:  notify.NewService(),
-		template: getenv("MANAGER_NOTIFY_TEMPLATE", "告警 {{.rule_name}} monitor={{.monitor_id}} severity={{.severity}}"),
-		title:    getenv("MANAGER_NOTIFY_TITLE", "Arco Monitoring Alert"),
-		channels: channels,
-		configs:  configs,
+	sender := &notifySender{
+		service:       notify.NewService(),
+		template:      getenv("MANAGER_NOTIFY_TEMPLATE", "告警 {{.rule_name}} monitor={{.monitor_id}} severity={{.severity}}"),
+		batchTemplate: getenv("MANAGER_NOTIFY_BATCH_TEMPLATE", "批量告警 {{.count}} 条，最近一条：{{.last_rule_name}} monitor={{.last_monitor_id}} severity={{.last_severity}}"),
+		title:         getenv("MANAGER_NOTIFY_TITLE", "Arco Monitoring Alert"),
+		channels:      channels,
+		configs:       configs,
+		runtimeStore:  runtimeStore,
+		noticeCache:   map[int64]cachedNoticeDispatch{},
+		cacheTTL:      30 * time.Second,
+		notifyLimits:  map[string]notifyLimitState{},
+		limitTTL:      24 * time.Hour,
+		batchWindow:   10 * time.Second,
+		batchBuckets:  map[int64]*batchBucket{},
 	}
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			_ = sender.flushDueBatches(context.Background(), false)
+		}
+	}()
+	return sender
 }
 
 func (s *notifySender) Send(ctx context.Context, task alert.NotifyTask) error {
-	if len(s.channels) == 0 {
+	var (
+		channels     []notify.ChannelType
+		configs      map[notify.ChannelType]json.RawMessage
+		templateText = s.template
+	)
+	if task.Event.NoticeRuleID > 0 {
+		dispatch, err := s.loadNoticeDispatch(task.Event.NoticeRuleID)
+		if err != nil {
+			return fmt.Errorf("load notice dispatch failed notice_rule_id=%d: %w", task.Event.NoticeRuleID, err)
+		}
+		eventLabels := map[string]string{
+			"severity":   strings.TrimSpace(task.Event.Severity),
+			"monitor_id": strconv.FormatInt(task.Event.MonitorID, 10),
+			"app":        strings.TrimSpace(task.Event.App),
+			"instance":   strings.TrimSpace(task.Event.Instance),
+			"rule_name":  strings.TrimSpace(task.Event.RuleName),
+		}
+		for k, v := range task.Event.Labels {
+			key := strings.TrimSpace(k)
+			if key == "" {
+				continue
+			}
+			eventLabels[key] = strings.TrimSpace(v)
+		}
+		if !dispatch.MatchTime(time.Now()) {
+			return nil
+		}
+		if !dispatch.MatchEventLabels(eventLabels) {
+			return nil
+		}
+		if !s.allowNotify(task.Event, dispatch) {
+			return nil
+		}
+		ch, ok := parseNotifyChannel(dispatch.Channel)
+		if !ok {
+			return fmt.Errorf("unsupported notice dispatch channel=%s notice_rule_id=%d", dispatch.Channel, dispatch.NoticeRuleID)
+		}
+		if dispatch.NotifyScale == "batch" {
+			template := dispatch.Template
+			if strings.TrimSpace(template) == "" {
+				template = s.batchTemplate
+			}
+			s.enqueueBatch(dispatch, ch, dispatch.Config, template, task.Event)
+			return s.flushDueBatches(ctx, false)
+		}
+		channels = []notify.ChannelType{ch}
+		configs = map[notify.ChannelType]json.RawMessage{ch: dispatch.Config}
+		if strings.TrimSpace(dispatch.Template) != "" {
+			templateText = dispatch.Template
+		}
+	} else {
+		channels = s.channels
+		configs = s.configs
+	}
+	if len(channels) == 0 {
 		return fmt.Errorf("no notify channel configured")
 	}
 	payload := map[string]any{
-		"rule_name":    task.Event.RuleName,
-		"monitor_id":   task.Event.MonitorID,
-		"severity":     task.Event.Severity,
-		"expression":   task.Event.Expression,
-		"elapsed_ms":   task.Event.ElapsedMs,
-		"triggered_at": task.Event.TriggeredAt.Format(time.RFC3339),
+		"rule_name":      task.Event.RuleName,
+		"notice_rule_id": task.Event.NoticeRuleID,
+		"monitor_id":     task.Event.MonitorID,
+		"app":            task.Event.App,
+		"instance":       task.Event.Instance,
+		"severity":       task.Event.Severity,
+		"content":        task.Event.Content,
+		"expression":     task.Event.Expression,
+		"elapsed_ms":     task.Event.ElapsedMs,
+		"triggered_at":   task.Event.TriggeredAt.Format(time.RFC3339),
 	}
 	var errs []string
-	for _, ch := range s.channels {
+	for _, ch := range channels {
 		req := notify.TestSendRequest{
 			Channel:  ch,
 			Title:    s.title,
-			Template: s.template,
+			Template: templateText,
 			Data:     payload,
-			Config:   s.configs[ch],
+			Config:   configs[ch],
 		}
 		if err := s.service.TestSend(ctx, req); err != nil {
 			errs = append(errs, string(ch)+": "+err.Error())
@@ -533,6 +1032,146 @@ func (s *notifySender) Send(ctx context.Context, task alert.NotifyTask) error {
 		return errors.New(strings.Join(errs, "; "))
 	}
 	return nil
+}
+
+func (s *notifySender) allowNotify(ev alert.Event, dispatch store.NoticeDispatch) bool {
+	limit := dispatch.NotifyTimes
+	if limit <= 0 {
+		limit = 1
+	}
+	now := time.Now()
+	key := fmt.Sprintf("%d:%d:%d", dispatch.NoticeRuleID, ev.RuleID, ev.MonitorID)
+	s.limitMu.Lock()
+	defer s.limitMu.Unlock()
+	cur, ok := s.notifyLimits[key]
+	if ok && now.Sub(cur.updated) > s.limitTTL {
+		cur = notifyLimitState{}
+	}
+	if cur.count >= limit {
+		return false
+	}
+	cur.count++
+	cur.updated = now
+	s.notifyLimits[key] = cur
+	return true
+}
+
+func (s *notifySender) enqueueBatch(dispatch store.NoticeDispatch, channel notify.ChannelType, cfg json.RawMessage, template string, ev alert.Event) {
+	now := time.Now()
+	item := map[string]any{
+		"rule_name":      ev.RuleName,
+		"notice_rule_id": ev.NoticeRuleID,
+		"monitor_id":     ev.MonitorID,
+		"app":            ev.App,
+		"instance":       ev.Instance,
+		"severity":       ev.Severity,
+		"content":        ev.Content,
+		"expression":     ev.Expression,
+		"elapsed_ms":     ev.ElapsedMs,
+		"triggered_at":   ev.TriggeredAt.Format(time.RFC3339),
+	}
+	s.batchMu.Lock()
+	defer s.batchMu.Unlock()
+	b := s.batchBuckets[dispatch.NoticeRuleID]
+	if b == nil {
+		b = &batchBucket{
+			dispatch: dispatch,
+			channel:  channel,
+			config:   cfg,
+			template: template,
+			firstAt:  now,
+			lastAt:   now,
+			alerts:   make([]map[string]any, 0, 8),
+		}
+		s.batchBuckets[dispatch.NoticeRuleID] = b
+	}
+	b.lastAt = now
+	b.alerts = append(b.alerts, item)
+}
+
+func (s *notifySender) flushDueBatches(ctx context.Context, force bool) error {
+	now := time.Now()
+	var pending []*batchBucket
+	s.batchMu.Lock()
+	for noticeID, bucket := range s.batchBuckets {
+		if bucket == nil || len(bucket.alerts) == 0 {
+			delete(s.batchBuckets, noticeID)
+			continue
+		}
+		if !force && now.Sub(bucket.firstAt) < s.batchWindow && len(bucket.alerts) < 20 {
+			continue
+		}
+		pending = append(pending, bucket)
+		delete(s.batchBuckets, noticeID)
+	}
+	s.batchMu.Unlock()
+	if len(pending) == 0 {
+		return nil
+	}
+	var errs []string
+	for _, bucket := range pending {
+		last := bucket.alerts[len(bucket.alerts)-1]
+		data := map[string]any{
+			"count":           len(bucket.alerts),
+			"alerts":          bucket.alerts,
+			"last_rule_name":  last["rule_name"],
+			"last_monitor_id": last["monitor_id"],
+			"last_severity":   last["severity"],
+			"last_content":    last["content"],
+		}
+		req := notify.TestSendRequest{
+			Channel:  bucket.channel,
+			Title:    s.title,
+			Template: bucket.template,
+			Data:     data,
+			Config:   bucket.config,
+		}
+		if err := s.service.TestSend(ctx, req); err != nil {
+			errs = append(errs, fmt.Sprintf("notice_rule_id=%d channel=%s err=%v", bucket.dispatch.NoticeRuleID, bucket.channel, err))
+		}
+	}
+	if len(errs) > 0 {
+		return errors.New(strings.Join(errs, "; "))
+	}
+	return nil
+}
+
+func (s *notifySender) loadNoticeDispatch(noticeRuleID int64) (store.NoticeDispatch, error) {
+	if s.runtimeStore == nil {
+		return store.NoticeDispatch{}, fmt.Errorf("notice runtime store unavailable")
+	}
+	now := time.Now()
+	s.cacheMu.Lock()
+	if cached, ok := s.noticeCache[noticeRuleID]; ok && now.Before(cached.expireAt) {
+		s.cacheMu.Unlock()
+		return cached.dispatch, nil
+	}
+	s.cacheMu.Unlock()
+
+	dispatch, err := s.runtimeStore.LoadNoticeDispatch(noticeRuleID)
+	if err != nil {
+		return store.NoticeDispatch{}, err
+	}
+	s.cacheMu.Lock()
+	s.noticeCache[noticeRuleID] = cachedNoticeDispatch{
+		dispatch: dispatch,
+		expireAt: now.Add(s.cacheTTL),
+	}
+	s.cacheMu.Unlock()
+	return dispatch, nil
+}
+
+func parseNotifyChannel(raw string) (notify.ChannelType, bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case string(notify.ChannelWebhook):
+		return notify.ChannelWebhook, true
+	case string(notify.ChannelEmail):
+		return notify.ChannelEmail, true
+	case string(notify.ChannelWeCom):
+		return notify.ChannelWeCom, true
+	default:
+		return "", false
+	}
 }
 
 func parseNotifyChannels(raw string) []notify.ChannelType {

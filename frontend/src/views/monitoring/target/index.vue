@@ -254,6 +254,15 @@
           </a-space>
         </a-form-item>
 
+        <a-form-item v-if="!editing?.id" label="告警策略">
+          <a-space direction="vertical" style="width: 100%" :size="4">
+            <a-checkbox v-model:checked="formState.apply_default_alerts">
+              创建后自动应用模板默认告警策略
+            </a-checkbox>
+            <span class="sub-text">当前默认策略优先覆盖 Redis 模板，可在详情页“告警”Tab继续调整。</span>
+          </a-space>
+        </a-form-item>
+
         <a-form-item label="启用">
           <a-switch v-model:checked="formState.enabled" />
         </a-form-item>
@@ -353,6 +362,234 @@
               </a-spin>
             </a-space>
           </a-tab-pane>
+
+          <a-tab-pane key="alerts" tab="告警">
+            <a-space direction="vertical" style="width: 100%" :size="12">
+              <a-spin :spinning="targetAlertSummaryLoading">
+                <a-row :gutter="12">
+                  <a-col :span="4">
+                    <a-statistic title="当前告警" :value="targetAlertSummary.open_total" />
+                  </a-col>
+                  <a-col :span="4">
+                    <a-statistic title="Critical" :value="targetAlertSummary.critical_total" value-style="color: #cf1322" />
+                  </a-col>
+                  <a-col :span="4">
+                    <a-statistic title="Warning" :value="targetAlertSummary.warning_total" value-style="color: #d48806" />
+                  </a-col>
+                  <a-col :span="4">
+                    <a-statistic title="Info" :value="targetAlertSummary.info_total" value-style="color: #1677ff" />
+                  </a-col>
+                  <a-col :span="8">
+                    <a-statistic title="最近24h历史告警" :value="targetAlertSummary.history_24h" />
+                  </a-col>
+                </a-row>
+              </a-spin>
+              <a-space>
+                <a-button :loading="targetAlertLoading || targetAlertSummaryLoading" @click="refreshTargetAlerts">刷新规则</a-button>
+                <a-button type="primary" :disabled="!canEdit || !detailTarget?.id" @click="applyDefaultAlertRulesForTarget">
+                  应用默认规则
+                </a-button>
+                <a-button type="primary" ghost :disabled="!canEdit || !detailTarget?.id" @click="openCreateTargetAlertRule">
+                  新增规则
+                </a-button>
+                <a-button :disabled="!canEdit || !detailTarget?.id" @click="restoreDefaultAlertRulesForTarget">
+                  恢复默认
+                </a-button>
+                <a-button :disabled="!canEdit || !targetAlertSelectedRuleIds.length" @click="batchUpdateTargetAlertRules(true)">
+                  批量启用
+                </a-button>
+                <a-button :disabled="!canEdit || !targetAlertSelectedRuleIds.length" @click="batchUpdateTargetAlertRules(false)">
+                  批量禁用
+                </a-button>
+                <a-button danger :disabled="!canEdit || !targetAlertSelectedRuleIds.length" @click="batchDeleteTargetAlertRules">
+                  批量删除
+                </a-button>
+              </a-space>
+              <a-card size="small" title="最近告警变更">
+                <a-empty v-if="!targetAlertSummary.recent.length" description="暂无告警变更" />
+                <a-table
+                  v-else
+                  size="small"
+                  :pagination="false"
+                  :data-source="targetAlertSummary.recent"
+                  :row-key="(record: any) => `${record.id}-${record.status || 'unknown'}`"
+                >
+                  <a-table-column title="级别" data-index="level" key="level" width="90" />
+                  <a-table-column title="状态" data-index="status" key="status" width="90" />
+                  <a-table-column title="名称" data-index="name" key="name" />
+                  <a-table-column title="触发时间" data-index="triggered_at" key="triggered_at" width="180" />
+                </a-table>
+              </a-card>
+              <a-table
+                :loading="targetAlertLoading"
+                :data-source="targetAlertRules"
+                :pagination="false"
+                row-key="id"
+                size="small"
+                :row-selection="targetAlertRowSelection"
+              >
+                <a-table-column title="规则名称" data-index="name" key="name" />
+                <a-table-column title="类型" data-index="monitor_type" key="monitor_type" width="120" />
+                <a-table-column title="分组" key="rule_group" width="100">
+                  <template #default="{ record }">
+                    <a-tag :color="ruleGroupTagColor(record)">{{ ruleGroupText(record) }}</a-tag>
+                  </template>
+                </a-table-column>
+                <a-table-column title="表达式" data-index="expr" key="expr" ellipsis />
+                <a-table-column title="级别" data-index="level" key="level" width="90" />
+                <a-table-column title="来源" data-index="scope" key="scope" width="80" />
+                <a-table-column title="启用" key="enabled" width="90">
+                  <template #default="{ record }">
+                    <a-switch
+                      :checked="record.enabled !== false"
+                      :disabled="!canEdit"
+                      @change="(checked: boolean) => toggleTargetAlertRule(record, checked)"
+                    />
+                  </template>
+                </a-table-column>
+                <a-table-column title="操作" key="actions" width="130">
+                  <template #default="{ record }">
+                    <a-space :size="4">
+                      <a-button type="link" size="small" :disabled="!canEdit" @click="openTargetAlertRuleEditor(record)">
+                        编辑
+                      </a-button>
+                      <a-popconfirm title="确认删除该规则？" @confirm="removeTargetAlertRule(record)">
+                        <a-button type="link" size="small" danger :disabled="!canEdit">删除</a-button>
+                      </a-popconfirm>
+                    </a-space>
+                  </template>
+                </a-table-column>
+              </a-table>
+            </a-space>
+            <a-modal
+              v-model:open="targetAlertEditorOpen"
+              :title="editingTargetAlertRule?.id ? '编辑实例告警规则' : '新增实例告警规则'"
+              width="640px"
+              :confirm-loading="targetAlertSaving"
+              @ok="saveTargetAlertRule"
+            >
+              <a-form layout="vertical">
+                <a-row :gutter="12">
+                  <a-col :span="12">
+                    <a-form-item label="规则名称" required>
+                      <a-input v-model:value="targetAlertForm.name" />
+                    </a-form-item>
+                  </a-col>
+                  <a-col :span="12">
+                    <a-form-item label="规则类型">
+                      <a-select v-model:value="targetAlertForm.type">
+                        <a-select-option value="realtime_metric">实时指标</a-select-option>
+                        <a-select-option value="periodic_metric">周期指标</a-select-option>
+                      </a-select>
+                    </a-form-item>
+                  </a-col>
+                </a-row>
+                <a-row :gutter="12">
+                  <a-col :span="10">
+                    <a-form-item label="监控指标">
+                      <a-select
+                        v-model:value="targetAlertForm.metric"
+                        show-search
+                        option-filter-prop="label"
+                        placeholder="请选择模板指标"
+                      >
+                        <a-select-option
+                          v-for="opt in targetAlertMetricOptions"
+                          :key="opt.value"
+                          :value="opt.value"
+                          :label="opt.label"
+                        >
+                          {{ opt.label }}
+                        </a-select-option>
+                      </a-select>
+                    </a-form-item>
+                  </a-col>
+                  <a-col :span="6">
+                    <a-form-item label="操作符">
+                      <a-select v-model:value="targetAlertForm.operator">
+                        <a-select-option value=">">&gt;</a-select-option>
+                        <a-select-option value=">=">&gt;=</a-select-option>
+                        <a-select-option value="<">&lt;</a-select-option>
+                        <a-select-option value="<=">&lt;=</a-select-option>
+                        <a-select-option value="==">==</a-select-option>
+                        <a-select-option value="!=">!=</a-select-option>
+                      </a-select>
+                    </a-form-item>
+                  </a-col>
+                  <a-col :span="8">
+                    <a-form-item label="阈值">
+                      <a-input-number v-model:value="targetAlertForm.threshold" style="width: 100%" />
+                    </a-form-item>
+                  </a-col>
+                </a-row>
+                <a-row :gutter="12">
+                  <a-col :span="8">
+                    <a-form-item label="级别">
+                      <a-select v-model:value="targetAlertForm.level">
+                        <a-select-option value="critical">critical</a-select-option>
+                        <a-select-option value="warning">warning</a-select-option>
+                        <a-select-option value="info">info</a-select-option>
+                      </a-select>
+                    </a-form-item>
+                  </a-col>
+                  <a-col :span="8">
+                    <a-form-item label="评估周期(秒)">
+                      <a-input-number v-model:value="targetAlertForm.period" :min="0" style="width: 100%" />
+                    </a-form-item>
+                  </a-col>
+                  <a-col :span="8">
+                    <a-form-item label="触发次数(times)">
+                      <a-input-number v-model:value="targetAlertForm.times" :min="1" style="width: 100%" />
+                    </a-form-item>
+                  </a-col>
+                </a-row>
+                <a-row :gutter="12">
+                  <a-col :span="20">
+                    <a-form-item label="通知规则">
+                      <a-select v-model:value="targetAlertForm.notice_rule_id" allow-clear placeholder="不指定则沿用默认通知策略">
+                        <a-select-option v-for="item in targetAlertNoticeOptions" :key="item.id" :value="Number(item.id)">
+                          {{ item.name }}
+                        </a-select-option>
+                      </a-select>
+                    </a-form-item>
+                  </a-col>
+                  <a-col :span="4">
+                    <a-form-item label="启用">
+                      <a-switch v-model:checked="targetAlertForm.enabled" />
+                    </a-form-item>
+                  </a-col>
+                </a-row>
+                <a-form-item label="监控标签">
+                  <a-space direction="vertical" style="width: 100%">
+                    <a-row v-for="(tag, idx) in targetAlertFormLabelList" :key="idx" :gutter="8">
+                      <a-col :span="10">
+                        <a-input v-model:value="tag.key" placeholder="标签名" />
+                      </a-col>
+                      <a-col :span="10">
+                        <a-input v-model:value="tag.value" placeholder="标签值" />
+                      </a-col>
+                      <a-col :span="4">
+                        <a-button type="link" danger @click="removeTargetAlertLabel(idx)">删除</a-button>
+                      </a-col>
+                    </a-row>
+                    <a-button type="dashed" block @click="addTargetAlertLabel">添加标签</a-button>
+                  </a-space>
+                </a-form-item>
+                <a-form-item label="告警内容模板">
+                  <a-textarea v-model:value="targetAlertForm.template" :rows="2" placeholder="支持模板变量，如 {{$labels.instance}} {{$value}}" />
+                </a-form-item>
+                <a-form-item>
+                  <a-space>
+                    <a-switch v-model:checked="targetAlertFormUseCustomExpr" />
+                    <span>高级模式：自定义表达式</span>
+                  </a-space>
+                </a-form-item>
+                <a-form-item v-if="targetAlertFormUseCustomExpr" label="表达式">
+                  <a-textarea v-model:value="targetAlertForm.expr" :rows="3" placeholder="例如：(used_memory / maxmemory) * 100 > 85" />
+                </a-form-item>
+              </a-form>
+            </a-modal>
+          </a-tab-pane>
         </a-tabs>
       </template>
     </a-drawer>
@@ -367,14 +604,24 @@ import dayjs, { type Dayjs } from 'dayjs'
 import * as yaml from 'js-yaml'
 import { useUserStore } from '@/stores/user'
 import {
+  applyTargetDefaultAlertRules,
   assignCollectorToMonitor,
+  getAlertHistory,
+  type AlertNotice,
+  type AlertItem,
+  type AlertRule,
   createMonitoringTarget,
   deleteMonitoringTarget,
   disableMonitoringTarget,
   enableMonitoringTarget,
+  getCurrentAlerts,
   getCategories,
   getCollectors,
   getMonitoringTargets,
+  getAlertNotices,
+  getTargetAlertRules,
+  createTargetAlertRule,
+  deleteTargetAlertRule,
   getTargetMetricSeries,
   getTemplates,
   queryTargetMetricRange,
@@ -384,6 +631,7 @@ import {
   type MonitoringTarget,
   type MonitorTemplate,
   unassignCollectorFromMonitor,
+  updateTargetAlertRule,
   updateMonitoringTarget
 } from '@/api/monitoring'
 import { getModels } from '@/api/cmdb'
@@ -425,6 +673,11 @@ interface ChartSeriesView {
   fromText: string
   toText: string
   polyline: string
+}
+
+interface MetricOption {
+  value: string
+  label: string
 }
 
 interface CategoryTreeNode {
@@ -488,6 +741,7 @@ const formState = reactive({
   ci_id: undefined as number | undefined,
   collector_id: undefined as string | undefined,
   pin_collector: false,
+  apply_default_alerts: true,
   params: {} as Record<string, any>
 })
 
@@ -500,8 +754,53 @@ const collectors = ref<Array<{ id: string; name?: string; host?: string; status?
 const collectorsLoading = ref(false)
 
 const detailOpen = ref(false)
-const detailTab = ref<'basic' | 'metrics'>('basic')
+const detailTab = ref<'basic' | 'metrics' | 'alerts'>('basic')
 const detailTarget = ref<MonitoringTarget | null>(null)
+const targetAlertLoading = ref(false)
+const targetAlertRules = ref<AlertRule[]>([])
+const targetAlertSelectedRuleIds = ref<number[]>([])
+const targetAlertSummaryLoading = ref(false)
+const targetAlertSummary = reactive({
+  open_total: 0,
+  critical_total: 0,
+  warning_total: 0,
+  info_total: 0,
+  history_24h: 0,
+  recent: [] as AlertItem[]
+})
+const targetAlertEditorOpen = ref(false)
+const targetAlertSaving = ref(false)
+const editingTargetAlertRule = ref<AlertRule | null>(null)
+const targetAlertNoticeOptions = ref<AlertNotice[]>([])
+const targetAlertForm = reactive({
+  name: '',
+  type: 'realtime_metric' as 'realtime_metric' | 'periodic_metric',
+  expr: '',
+  template: '',
+  metric: 'value',
+  operator: '>',
+  threshold: 0,
+  level: 'warning',
+  period: 60,
+  times: 1,
+  notice_rule_id: undefined as number | undefined,
+  labels: {} as Record<string, string>,
+  enabled: true
+})
+const targetAlertMetricOptions = ref<MetricOption[]>([{ value: 'value', label: 'value' }])
+const targetAlertFormLabelList = ref<Array<{ key: string; value: string }>>([])
+const targetAlertFormUseCustomExpr = ref(false)
+
+const CORE_RULE_HINTS = [
+  '实例不可用',
+  '内存使用率过高',
+  '内存碎片严重',
+  '连接数饱和',
+  '拒绝连接',
+  'RDB',
+  'AOF',
+  '主从延迟过高'
+]
 
 const metricLoading = ref(false)
 const metricRangePreset = ref<'5m' | '1h' | '24h' | '7d' | '30d' | 'custom'>('1h')
@@ -546,6 +845,13 @@ const rowSelection = computed(() => ({
   selectedRowKeys: selectedRowKeys.value,
   onChange: (keys: (string | number)[]) => {
     selectedRowKeys.value = keys.map((item) => Number(item))
+  }
+}))
+
+const targetAlertRowSelection = computed(() => ({
+  selectedRowKeys: targetAlertSelectedRuleIds.value,
+  onChange: (keys: (string | number)[]) => {
+    targetAlertSelectedRuleIds.value = keys.map((item) => Number(item))
   }
 }))
 
@@ -639,6 +945,33 @@ function pickI18nText(value: any): string {
   }
   const fallback = Object.values(obj).find((item) => typeof item === 'string' && String(item).trim())
   return typeof fallback === 'string' ? fallback.trim() : ''
+}
+
+function parseTemplateMetricOptions(content: string): MetricOption[] {
+  try {
+    const doc = (yaml.load(content || '') || {}) as any
+    if (!doc || typeof doc !== 'object') return [{ value: 'value', label: 'value' }]
+    const options = new Map<string, MetricOption>()
+    const groups = Array.isArray(doc.metrics) ? doc.metrics : []
+    for (const group of groups) {
+      const groupName = String(group?.name || '').trim()
+      const groupTitle = pickI18nText(group?.i18n || group?.name) || groupName
+      const fields = Array.isArray(group?.fields) ? group.fields : []
+      for (const field of fields) {
+        const fieldName = String(field?.field || field?.metric || '').trim()
+        if (!fieldName) continue
+        const fieldTitle = pickI18nText(field?.i18n || field?.name) || fieldName
+        const label = groupTitle
+          ? `${groupTitle} / ${fieldTitle} (${fieldName})`
+          : `${fieldTitle} (${fieldName})`
+        options.set(fieldName, { value: fieldName, label })
+      }
+    }
+    if (!options.size) options.set('value', { value: 'value', label: 'value' })
+    return Array.from(options.values())
+  } catch {
+    return [{ value: 'value', label: 'value' }]
+  }
 }
 
 function buildMetricLabelMapFromTemplate(content: string): Record<string, string> {
@@ -1003,6 +1336,7 @@ function resetForm() {
   formState.ci_id = undefined
   formState.collector_id = undefined
   formState.pin_collector = false
+  formState.apply_default_alerts = true
   formState.params = {}
   ciOptions.value = []
 }
@@ -1092,6 +1426,9 @@ async function saveTarget() {
     ci_code: currentCi?.code || '',
     ci_name: currentCi?.display || '',
     params: paramsPayload
+  }
+  if (!editing.value?.id) {
+    payload.apply_default_alerts = Boolean(formState.apply_default_alerts)
   }
   let resolvedTarget = formState.target.trim()
   if (!resolvedTarget && paramsPayload.host) {
@@ -1315,6 +1652,309 @@ async function refreshMetricData() {
   }
 }
 
+async function loadTargetAlertRules() {
+  if (!detailTarget.value?.id) return
+  targetAlertLoading.value = true
+  try {
+    const res = await getTargetAlertRules(detailTarget.value.id)
+    const parsed = normalizeList((res as any)?.data || res)
+    targetAlertRules.value = (parsed.items || []) as AlertRule[]
+    targetAlertSelectedRuleIds.value = targetAlertSelectedRuleIds.value.filter((id) =>
+      targetAlertRules.value.some((item) => Number(item.id) === Number(id))
+    )
+  } catch (error: any) {
+    message.error(error?.response?.data?.message || '加载实例告警规则失败')
+  } finally {
+    targetAlertLoading.value = false
+  }
+}
+
+function ruleGroupText(record: AlertRule): string {
+  const source = String((record as any)?.labels?.source || '').toLowerCase()
+  if (source === 'template_default') {
+    const name = String(record?.name || '')
+    const isCore = CORE_RULE_HINTS.some((hint) => name.includes(hint))
+    return isCore ? '核心' : '扩展'
+  }
+  if (String((record as any)?.scope || '').toLowerCase() === 'target') return '实例覆写'
+  return '自定义'
+}
+
+function ruleGroupTagColor(record: AlertRule): string {
+  const text = ruleGroupText(record)
+  if (text === '核心') return 'green'
+  if (text === '扩展') return 'orange'
+  if (text === '实例覆写') return 'blue'
+  return 'default'
+}
+
+async function refreshTargetAlerts() {
+  await Promise.all([loadTargetAlertRules(), loadTargetAlertSummary()])
+}
+
+function resetTargetAlertSummary() {
+  targetAlertSummary.open_total = 0
+  targetAlertSummary.critical_total = 0
+  targetAlertSummary.warning_total = 0
+  targetAlertSummary.info_total = 0
+  targetAlertSummary.history_24h = 0
+  targetAlertSummary.recent = []
+}
+
+async function loadTargetAlertSummary() {
+  if (!detailTarget.value?.id) return
+  targetAlertSummaryLoading.value = true
+  try {
+    const monitorId = detailTarget.value.id
+    const [currentRes, historyRes] = await Promise.all([
+      getCurrentAlerts({ monitor_id: monitorId, page: 1, page_size: 200 }),
+      getAlertHistory({ monitor_id: monitorId, page: 1, page_size: 100 })
+    ])
+    const currentParsed = normalizeList((currentRes as any)?.data || currentRes)
+    const historyParsed = normalizeList((historyRes as any)?.data || historyRes)
+    const currentItems = (currentParsed.items || []) as AlertItem[]
+    const historyItems = (historyParsed.items || []) as AlertItem[]
+    targetAlertSummary.open_total = currentItems.length
+    targetAlertSummary.critical_total = currentItems.filter((item) => String(item.level || '').toLowerCase() === 'critical').length
+    targetAlertSummary.warning_total = currentItems.filter((item) => String(item.level || '').toLowerCase() === 'warning').length
+    targetAlertSummary.info_total = currentItems.filter((item) => String(item.level || '').toLowerCase() === 'info').length
+    const now = dayjs()
+    targetAlertSummary.history_24h = historyItems.filter((item) => {
+      const ts = item.triggered_at ? dayjs(item.triggered_at) : null
+      return Boolean(ts && ts.isValid() && now.diff(ts, 'hour', true) <= 24)
+    }).length
+    const recent = [...currentItems, ...historyItems]
+      .sort((a, b) => dayjs(b.triggered_at || 0).valueOf() - dayjs(a.triggered_at || 0).valueOf())
+      .slice(0, 8)
+    targetAlertSummary.recent = recent
+  } catch (error: any) {
+    resetTargetAlertSummary()
+    message.error(error?.response?.data?.message || '加载告警摘要失败')
+  } finally {
+    targetAlertSummaryLoading.value = false
+  }
+}
+
+async function toggleTargetAlertRule(record: AlertRule, enabled: boolean) {
+  if (!detailTarget.value?.id || !record?.id) return
+  try {
+    await updateTargetAlertRule(detailTarget.value.id, Number(record.id), { enabled })
+    message.success('规则状态已更新')
+    await refreshTargetAlerts()
+  } catch (error: any) {
+    message.error(error?.response?.data?.message || '更新规则失败')
+  }
+}
+
+async function applyDefaultAlertRulesForTarget(): Promise<boolean> {
+  if (!detailTarget.value?.id) return false
+  try {
+    const res = await applyTargetDefaultAlertRules(detailTarget.value.id)
+    const payload = (res as any)?.data || {}
+    message.success(`默认规则应用完成: 新增 ${payload.created || 0}，更新 ${payload.updated || 0}`)
+    await refreshTargetAlerts()
+    return true
+  } catch (error: any) {
+    message.error(error?.response?.data?.message || '应用默认规则失败')
+    return false
+  }
+}
+
+async function restoreDefaultAlertRulesForTarget() {
+  if (!detailTarget.value?.id) return
+  const ok = await applyDefaultAlertRulesForTarget()
+  if (ok) {
+    message.success('已恢复为模板默认策略')
+  }
+}
+
+async function batchUpdateTargetAlertRules(enabled: boolean) {
+  if (!detailTarget.value?.id || !targetAlertSelectedRuleIds.value.length) return
+  const monitorId = detailTarget.value.id
+  const selected = targetAlertRules.value.filter((item) => targetAlertSelectedRuleIds.value.includes(Number(item.id)))
+  if (!selected.length) return
+  try {
+    await Promise.all(
+      selected.map((item) => updateTargetAlertRule(monitorId, Number(item.id), { enabled } as any))
+    )
+    message.success(enabled ? '批量启用成功' : '批量禁用成功')
+    await refreshTargetAlerts()
+  } catch (error: any) {
+    message.error(error?.response?.data?.message || '批量更新规则失败')
+  }
+}
+
+async function loadTargetAlertNoticeOptions() {
+  try {
+    const res = await getAlertNotices({ page_size: 1000 })
+    const parsed = normalizeList((res as any)?.data || res)
+    targetAlertNoticeOptions.value = (parsed.items || []) as AlertNotice[]
+  } catch {
+    targetAlertNoticeOptions.value = []
+  }
+}
+
+async function loadTargetAlertMetricOptions() {
+  const appName = String(detailTarget.value?.app || '').trim()
+  if (!appName) {
+    targetAlertMetricOptions.value = [{ value: 'value', label: 'value' }]
+    return
+  }
+  await loadTemplates()
+  const tpl = templates.value.find((item) => item.app === appName)
+  targetAlertMetricOptions.value = parseTemplateMetricOptions(String(tpl?.content || ''))
+}
+
+function buildTargetAlertExpr() {
+  const metric = String(targetAlertForm.metric || 'value').trim() || 'value'
+  const op = String(targetAlertForm.operator || '>').trim() || '>'
+  const threshold = Number(targetAlertForm.threshold ?? 0)
+  return `${metric} ${op} ${Number.isFinite(threshold) ? threshold : 0}`
+}
+
+function addTargetAlertLabel() {
+  targetAlertFormLabelList.value.push({ key: '', value: '' })
+}
+
+function removeTargetAlertLabel(index: number) {
+  if (index < 0 || index >= targetAlertFormLabelList.value.length) return
+  targetAlertFormLabelList.value.splice(index, 1)
+}
+
+async function openTargetAlertRuleEditor(record: AlertRule) {
+  editingTargetAlertRule.value = record
+  targetAlertForm.name = String(record.name || '')
+  targetAlertForm.type = String((record as any).type || (record as any).monitor_type || '').includes('periodic')
+    ? 'periodic_metric'
+    : 'realtime_metric'
+  targetAlertForm.expr = String((record as any).expr || '')
+  targetAlertForm.template = String((record as any).template || '')
+  targetAlertForm.metric = String((record as any).metric || 'value')
+  targetAlertForm.operator = String((record as any).operator || '>')
+  targetAlertForm.threshold = Number((record as any).threshold || 0)
+  targetAlertForm.level = String((record as any).level || 'warning')
+  targetAlertForm.period = Number((record as any).period || 60)
+  targetAlertForm.times = Number((record as any).times || 1)
+  targetAlertForm.notice_rule_id = (record as any).notice_rule_id ? Number((record as any).notice_rule_id) : undefined
+  targetAlertForm.labels = { ...((record as any).labels || {}) }
+  targetAlertFormLabelList.value = Object.entries(targetAlertForm.labels || {})
+    .filter(([key]) => !['monitor_id', 'app', 'instance', 'metric', 'operator', 'threshold', 'severity'].includes(String(key)))
+    .map(([key, value]) => ({ key: String(key), value: String(value) }))
+  targetAlertForm.enabled = (record as any).enabled !== false
+  targetAlertFormUseCustomExpr.value = Boolean(String(targetAlertForm.expr || '').trim())
+  await Promise.all([loadTargetAlertNoticeOptions(), loadTargetAlertMetricOptions()])
+  if (!targetAlertMetricOptions.value.some((item) => item.value === targetAlertForm.metric)) {
+    targetAlertMetricOptions.value = [
+      ...targetAlertMetricOptions.value,
+      { value: targetAlertForm.metric, label: formatMetricDisplayName(targetAlertForm.metric) }
+    ]
+  }
+  targetAlertEditorOpen.value = true
+}
+
+async function openCreateTargetAlertRule() {
+  if (!detailTarget.value?.id) return
+  editingTargetAlertRule.value = null
+  targetAlertForm.name = ''
+  targetAlertForm.type = 'realtime_metric'
+  targetAlertForm.expr = ''
+  targetAlertForm.template = ''
+  targetAlertForm.metric = 'value'
+  targetAlertForm.operator = '>'
+  targetAlertForm.threshold = 0
+  targetAlertForm.level = 'warning'
+  targetAlertForm.period = 60
+  targetAlertForm.times = 1
+  targetAlertForm.notice_rule_id = undefined
+  targetAlertForm.labels = {}
+  targetAlertFormLabelList.value = []
+  targetAlertForm.enabled = true
+  targetAlertFormUseCustomExpr.value = false
+  await Promise.all([loadTargetAlertNoticeOptions(), loadTargetAlertMetricOptions()])
+  if (targetAlertMetricOptions.value.length) {
+    targetAlertForm.metric = targetAlertMetricOptions.value[0].value
+  }
+  targetAlertEditorOpen.value = true
+}
+
+async function saveTargetAlertRule() {
+  if (!detailTarget.value?.id) return
+  if (!targetAlertForm.name.trim()) {
+    message.warning('规则名称不能为空')
+    return
+  }
+  targetAlertSaving.value = true
+  try {
+    const metric = String(targetAlertForm.metric || '').trim()
+    if (!metric) {
+      message.warning('请选择监控指标')
+      return
+    }
+    const labels: Record<string, string> = {}
+    targetAlertFormLabelList.value.forEach((item) => {
+      const key = String(item.key || '').trim()
+      const value = String(item.value || '').trim()
+      if (key && value) labels[key] = value
+    })
+    const expr = targetAlertFormUseCustomExpr.value
+      ? String(targetAlertForm.expr || '').trim() || buildTargetAlertExpr()
+      : buildTargetAlertExpr()
+    const payload = {
+      name: targetAlertForm.name.trim(),
+      type: targetAlertForm.type,
+      expr,
+      template: String(targetAlertForm.template || '').trim() || undefined,
+      metric,
+      operator: targetAlertForm.operator,
+      threshold: Number(targetAlertForm.threshold),
+      level: targetAlertForm.level,
+      period: Number(targetAlertForm.period),
+      times: Number(targetAlertForm.times),
+      notice_rule_id: targetAlertForm.notice_rule_id,
+      labels,
+      enabled: targetAlertForm.enabled
+    } as any
+    if (editingTargetAlertRule.value?.id) {
+      await updateTargetAlertRule(detailTarget.value.id, Number(editingTargetAlertRule.value.id), payload)
+      message.success('规则已更新')
+    } else {
+      await createTargetAlertRule(detailTarget.value.id, payload)
+      message.success('规则已新增')
+    }
+    targetAlertEditorOpen.value = false
+    await refreshTargetAlerts()
+  } catch (error: any) {
+    message.error(error?.response?.data?.message || '更新规则失败')
+  } finally {
+    targetAlertSaving.value = false
+  }
+}
+
+async function removeTargetAlertRule(record: AlertRule) {
+  if (!detailTarget.value?.id || !record?.id) return
+  try {
+    await deleteTargetAlertRule(detailTarget.value.id, Number(record.id))
+    message.success('规则已删除')
+    await refreshTargetAlerts()
+  } catch (error: any) {
+    message.error(error?.response?.data?.message || '删除规则失败')
+  }
+}
+
+async function batchDeleteTargetAlertRules() {
+  if (!detailTarget.value?.id || !targetAlertSelectedRuleIds.value.length) return
+  try {
+    await Promise.all(
+      targetAlertSelectedRuleIds.value.map((id) => deleteTargetAlertRule(detailTarget.value!.id!, Number(id)))
+    )
+    targetAlertSelectedRuleIds.value = []
+    message.success('批量删除成功')
+    await refreshTargetAlerts()
+  } catch (error: any) {
+    message.error(error?.response?.data?.message || '批量删除失败')
+  }
+}
+
 function clearMetricTimer() {
   if (metricTimer) {
     window.clearInterval(metricTimer)
@@ -1340,6 +1980,9 @@ function resetMetricState() {
   selectedMetricNames.value = []
   metricSeries.value = []
   metricLastLoadedAt.value = ''
+  targetAlertRules.value = []
+  targetAlertSelectedRuleIds.value = []
+  resetTargetAlertSummary()
 }
 
 function openDetail(record: MonitoringTarget) {
@@ -1421,6 +2064,9 @@ watch(
     if (tab === 'metrics') {
       await refreshMetricData()
       setupMetricTimer()
+    } else if (tab === 'alerts') {
+      clearMetricTimer()
+      await refreshTargetAlerts()
     } else {
       clearMetricTimer()
     }

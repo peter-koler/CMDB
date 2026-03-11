@@ -2,6 +2,7 @@ from functools import wraps
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 import json
+import re
 
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
@@ -10,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from app import db
 from app.models import (
     User,
+    MonitorTemplate,
     SingleAlert,
     AlertHistory,
     AlertDefine,
@@ -285,6 +287,8 @@ def _extract_alert_item(
         monitor_id = None
     assignee = labels.get("assignee") or annotations.get("assignee")
     note = annotations.get("note")
+    app = str(labels.get("app") or "")
+    instance = str(labels.get("instance") or labels.get("target") or "")
     triggered_ms = start_at or (int(created_at.replace(tzinfo=timezone.utc).timestamp() * 1000) if created_at else None)
     recovered_ms = end_at
     duration_seconds = 0
@@ -298,6 +302,8 @@ def _extract_alert_item(
         "status": "open" if status == "firing" else "closed",
         "monitor_name": str(monitor_name),
         "monitor_id": monitor_id,
+        "app": app,
+        "instance": instance,
         "metric": labels.get("metric"),
         "metric_value": labels.get("value"),
         "threshold": labels.get("threshold"),
@@ -312,12 +318,23 @@ def _extract_alert_item(
 def _filter_alert_items(items: list[dict]) -> list[dict]:
     level = (request.args.get("level") or "").strip().lower()
     q = (request.args.get("q") or "").strip().lower()
+    monitor_id = (request.args.get("monitor_id") or "").strip()
+    app = (request.args.get("app") or "").strip().lower()
+    instance = (request.args.get("instance") or "").strip().lower()
     start_ms = _parse_rfc3339_to_ms(request.args.get("start_at"))
     end_ms = _parse_rfc3339_to_ms(request.args.get("end_at"))
     out: list[dict] = []
     for item in items:
         if level and str(item.get("level", "")).lower() != level:
             continue
+        if monitor_id and str(item.get("monitor_id") or "") != monitor_id:
+            continue
+        if app and str(item.get("app") or "").strip().lower() != app:
+            continue
+        if instance:
+            item_instance = str(item.get("instance") or "").strip().lower()
+            if instance not in item_instance:
+                continue
         if q:
             hay = " ".join(
                 [
@@ -370,6 +387,425 @@ def _rule_from_model(row: AlertDefine) -> dict:
         "notice_rule_id": row.notice_rule_id,
         "notice_rule": notice_rule_info,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
+
+
+def _monitor_payload(monitor_id: int) -> dict:
+    try:
+        payload = _fetch_manager_payload(f"/api/v1/monitors/{monitor_id}")
+        if isinstance(payload, dict):
+            return payload
+    except Exception:
+        return {}
+    return {}
+
+
+def _rule_match_monitor(row: AlertDefine, monitor: dict) -> bool:
+    labels = _json_load(row.labels_json, {})
+    if not isinstance(labels, dict):
+        labels = {}
+    monitor_id = str(monitor.get("id") or "").strip()
+    app = str(monitor.get("app") or "").strip().lower()
+    target = str(monitor.get("target") or "").strip().lower()
+
+    want_monitor_id = str(labels.get("monitor_id") or "").strip()
+    if want_monitor_id and want_monitor_id != monitor_id:
+        return False
+    want_app = str(labels.get("app") or "").strip().lower()
+    if want_app and app and want_app != app:
+        return False
+    want_instance = str(labels.get("instance") or "").strip().lower()
+    if want_instance and target and want_instance != target:
+        return False
+    return True
+
+
+def _rule_scope(row: AlertDefine, monitor_id: int) -> str:
+    labels = _json_load(row.labels_json, {})
+    if not isinstance(labels, dict):
+        labels = {}
+    want_monitor_id = str(labels.get("monitor_id") or "").strip()
+    if want_monitor_id == str(monitor_id):
+        return "target"
+    return "global"
+
+
+def _redis_default_alert_rules() -> list[dict]:
+    # Core-first defaults for commercial usability.
+    return [
+        {
+            "name": "Redis实例不可用",
+            "type": "realtime_metric",
+            "metric": "redis_server_up",
+            "operator": "<",
+            "threshold": 0.5,
+            "level": "critical",
+            "period": 60,
+            "times": 1,
+            "expr": "redis_server_up < 0.5",
+            "enabled": True,
+            "template": "实例不可用",
+        },
+        {
+            "name": "Redis内存使用率过高",
+            "type": "periodic_metric",
+            "metric": "used_memory",
+            "operator": ">",
+            "threshold": 85,
+            "level": "warning",
+            "period": 300,
+            "times": 1,
+            "expr": "(maxmemory > 0) && ((used_memory / maxmemory) * 100 > 85)",
+            "enabled": True,
+            "template": "内存使用率过高",
+        },
+        {
+            "name": "Redis内存碎片严重",
+            "type": "periodic_metric",
+            "metric": "mem_fragmentation_ratio",
+            "operator": ">",
+            "threshold": 2.0,
+            "level": "warning",
+            "period": 600,
+            "times": 1,
+            "expr": "mem_fragmentation_ratio > 2.0",
+            "enabled": True,
+            "template": "内存碎片严重",
+        },
+        {
+            "name": "Redis连接数饱和",
+            "type": "realtime_metric",
+            "metric": "connected_clients",
+            "operator": ">",
+            "threshold": 90,
+            "level": "critical",
+            "period": 300,
+            "times": 1,
+            "expr": "(maxclients > 0) && ((connected_clients / maxclients) * 100 > 90)",
+            "enabled": True,
+            "template": "连接数饱和",
+        },
+        {
+            "name": "Redis拒绝连接",
+            "type": "realtime_metric",
+            "metric": "rejected_connections",
+            "operator": ">",
+            "threshold": 0,
+            "level": "critical",
+            "period": 300,
+            "times": 1,
+            "expr": "rejected_connections > 0",
+            "enabled": True,
+            "template": "拒绝连接",
+        },
+        {
+            "name": "Redis主从延迟过高",
+            "type": "periodic_metric",
+            "metric": "master_last_io_seconds_ago",
+            "operator": ">",
+            "threshold": 5,
+            "level": "warning",
+            "period": 300,
+            "times": 1,
+            "expr": "master_last_io_seconds_ago > 5",
+            "enabled": True,
+            "template": "主从延迟",
+        },
+        {
+            "name": "RedisRDB失败",
+            "type": "realtime_metric",
+            "metric": "rdb_last_bgsave_status_ok",
+            "operator": "<",
+            "threshold": 0.5,
+            "level": "critical",
+            "period": 60,
+            "times": 1,
+            "expr": "rdb_last_bgsave_status_ok < 0.5",
+            "enabled": True,
+            "template": "RDB失败",
+        },
+        {
+            "name": "RedisAOF失败",
+            "type": "realtime_metric",
+            "metric": "aof_last_bgrewrite_status_ok",
+            "operator": "<",
+            "threshold": 0.5,
+            "level": "critical",
+            "period": 60,
+            "times": 1,
+            "expr": "aof_last_bgrewrite_status_ok < 0.5",
+            "enabled": True,
+            "template": "AOF失败",
+        },
+    ]
+
+
+def _parse_scalar(value: str):
+    raw = str(value or "").strip()
+    if raw == "":
+        return ""
+    if (raw.startswith("'") and raw.endswith("'")) or (raw.startswith('"') and raw.endswith('"')):
+        return raw[1:-1]
+    lowered = raw.lower()
+    if lowered in {"true", "yes", "on"}:
+        return True
+    if lowered in {"false", "no", "off"}:
+        return False
+    if lowered in {"null", "none", "~"}:
+        return None
+    try:
+        if "." in raw:
+            return float(raw)
+        return int(raw)
+    except (TypeError, ValueError):
+        return raw
+
+
+def _extract_yaml_list_section(content: str, section_name: str) -> list[dict]:
+    lines = (content or "").splitlines()
+    section_index = -1
+    section_indent = 0
+    section_pattern = re.compile(rf"^(\s*){re.escape(section_name)}\s*:\s*$")
+    for idx, line in enumerate(lines):
+        if line.strip().startswith("#"):
+            continue
+        matched = section_pattern.match(line)
+        if matched:
+            section_index = idx
+            section_indent = len(matched.group(1))
+            break
+    if section_index < 0:
+        return []
+
+    section_lines: list[str] = []
+    for line in lines[section_index + 1 :]:
+        stripped = line.strip()
+        if stripped == "" or stripped.startswith("#"):
+            section_lines.append(line)
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        if indent <= section_indent:
+            break
+        section_lines.append(line)
+
+    items: list[dict] = []
+    current: dict | None = None
+    current_indent = None
+    for line in section_lines:
+        stripped = line.strip()
+        if stripped == "" or stripped.startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        if stripped.startswith("- "):
+            if current:
+                items.append(current)
+            current = {}
+            current_indent = indent
+            rest = stripped[2:].strip()
+            if rest and ":" in rest:
+                key, value = rest.split(":", 1)
+                current[key.strip()] = _parse_scalar(value)
+            continue
+        if current is None:
+            continue
+        if current_indent is not None and indent <= current_indent:
+            items.append(current)
+            current = None
+            current_indent = None
+            continue
+        if ":" not in stripped:
+            continue
+        key, value = stripped.split(":", 1)
+        current[key.strip()] = _parse_scalar(value)
+    if current:
+        items.append(current)
+    return items
+
+
+def _to_bool(value, default=False) -> bool:
+    if value is None:
+        return bool(default)
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
+def _to_float(value, default=0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _to_int(value, default=0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return int(default)
+
+
+def _normalize_template_alert_rule(item: dict) -> dict | None:
+    if not isinstance(item, dict):
+        return None
+    name = str(item.get("name") or "").strip()
+    if not name:
+        return None
+
+    kind = str(item.get("type") or item.get("monitor_type") or "").strip().lower()
+    schedule = str(item.get("schedule") or "").strip().lower()
+    if not kind:
+        if schedule in {"periodic", "period"}:
+            kind = "periodic_metric"
+        else:
+            kind = "realtime_metric"
+    elif kind in {"realtime", "periodic"}:
+        kind = f"{kind}_metric"
+    if kind not in {"realtime_metric", "periodic_metric"}:
+        kind = "realtime_metric"
+
+    metric = str(item.get("metric") or "value").strip() or "value"
+    operator = str(item.get("operator") or ">").strip() or ">"
+    threshold = _to_float(item.get("threshold"), 0)
+    level = str(item.get("level") or item.get("severity") or "warning").strip() or "warning"
+    period = max(_to_int(item.get("period"), 300 if kind == "periodic_metric" else 60), 0)
+    times = max(_to_int(item.get("times"), 1), 1)
+    mode = str(item.get("mode") or "").strip().lower()
+    enabled = _to_bool(
+        item.get("enabled") if item.get("enabled") is not None else item.get("default_enabled"),
+        default=(mode == "core"),
+    )
+    expr = str(item.get("expr") or "").strip()
+    if not expr:
+        expr = f"{metric} {operator} {threshold}"
+    template_text = str(item.get("template") or name).strip() or name
+    return {
+        "name": name,
+        "type": kind,
+        "metric": metric,
+        "operator": operator,
+        "threshold": threshold,
+        "level": level,
+        "period": period,
+        "times": times,
+        "expr": expr,
+        "enabled": enabled,
+        "template": template_text,
+    }
+
+
+def _template_default_alert_rules(template_content: str) -> list[dict]:
+    raw_items = _extract_yaml_list_section(template_content, "alerts")
+    out: list[dict] = []
+    for item in raw_items:
+        normalized = _normalize_template_alert_rule(item)
+        if normalized:
+            out.append(normalized)
+    return out
+
+
+def _load_monitor_default_alert_rules(monitor: dict) -> list[dict]:
+    template = None
+    template_id = monitor.get("template_id")
+    if template_id is not None:
+        try:
+            template = MonitorTemplate.query.get(int(template_id))
+        except (TypeError, ValueError):
+            template = None
+    if template is None:
+        app = str(monitor.get("app") or "").strip().lower()
+        if app:
+            template = MonitorTemplate.query.filter_by(app=app).first()
+
+    if template and template.content:
+        rules = _template_default_alert_rules(template.content)
+        if rules:
+            return rules
+
+    app = str(monitor.get("app") or "").strip().lower()
+    if app == "redis":
+        return _redis_default_alert_rules()
+    return []
+
+
+def _apply_default_rules_for_monitor(monitor_id: int, monitor: dict | None = None) -> dict:
+    monitor = monitor or _monitor_payload(monitor_id)
+    if not monitor:
+        raise ValueError("监控任务不存在")
+
+    app = str(monitor.get("app") or "").strip().lower()
+    defaults = _load_monitor_default_alert_rules(monitor)
+    if not defaults:
+        raise ValueError("当前模板未配置默认告警策略")
+    monitor_target = str(monitor.get("target") or "")
+    existing_rows = AlertDefine.query.order_by(AlertDefine.id.asc()).all()
+    existing_map: dict[str, AlertDefine] = {}
+    for row in existing_rows:
+        labels = _json_load(row.labels_json, {})
+        if not isinstance(labels, dict):
+            continue
+        if str(labels.get("monitor_id") or "").strip() != str(monitor_id):
+            continue
+        existing_map[row.name] = row
+
+    created = 0
+    updated = 0
+    for item in defaults:
+        labels = {
+            "monitor_id": monitor_id,
+            "app": app,
+            "instance": monitor_target,
+            "metric": item["metric"],
+            "operator": item["operator"],
+            "threshold": item["threshold"],
+            "severity": item["level"],
+            "source": "template_default",
+        }
+        annotations = {
+            "summary": item["name"],
+            "template": item["template"],
+            "app": app,
+        }
+        row = existing_map.get(item["name"])
+        if row is None:
+            row = AlertDefine(
+                name=item["name"],
+                type=item["type"],
+                expr=item["expr"],
+                period=item["period"],
+                times=item["times"],
+                labels_json=_json_dump(labels),
+                annotations_json=_json_dump(annotations),
+                template=item["template"],
+                enabled=bool(item["enabled"]),
+                creator="python-web",
+                modifier="python-web",
+            )
+            db.session.add(row)
+            created += 1
+        else:
+            row.type = item["type"]
+            row.expr = item["expr"]
+            row.period = item["period"]
+            row.times = item["times"]
+            row.labels_json = _json_dump(labels)
+            row.annotations_json = _json_dump(annotations)
+            row.template = item["template"]
+            row.enabled = bool(item["enabled"])
+            row.modifier = "python-web"
+            row.updated_at = _now_naive_utc()
+            updated += 1
+    db.session.commit()
+    return {
+        "monitor_id": monitor_id,
+        "app": app,
+        "created": created,
+        "updated": updated,
+        "total": created + updated,
     }
 
 
@@ -452,6 +888,7 @@ def list_targets():
 @require_any_permission("monitoring:target:create", "monitoring:list:create")
 def create_target():
     payload = request.get_json() or {}
+    apply_default_alerts = bool(payload.pop("apply_default_alerts", False))
 
     # 前端兼容字段：interval -> interval_seconds
     if "interval_seconds" not in payload and "interval" in payload:
@@ -476,7 +913,44 @@ def create_target():
         elif payload.get("ci_id"):
             payload["target"] = f"ci:{payload.get('ci_id')}"
 
-    return _manager_call("POST", "/api/v1/monitors", payload=payload)
+    response = _manager_call("POST", "/api/v1/monitors", payload=payload)
+    if not apply_default_alerts:
+        return response
+
+    status_code = getattr(response, "status_code", 200)
+    if status_code >= 300:
+        return response
+
+    body = response.get_json(silent=True) or {}
+    data = body.get("data") if isinstance(body, dict) else None
+    monitor_id = 0
+    if isinstance(data, dict):
+        try:
+            monitor_id = int(data.get("id") or data.get("monitor_id") or 0)
+        except (TypeError, ValueError):
+            monitor_id = 0
+
+    if monitor_id <= 0:
+        return response
+
+    try:
+        apply_result = _apply_default_rules_for_monitor(monitor_id)
+        if isinstance(data, dict):
+            data["alert_defaults"] = {
+                "applied": True,
+                **apply_result,
+            }
+            body["data"] = data
+            return jsonify(body)
+    except Exception as exc:
+        if isinstance(data, dict):
+            data["alert_defaults"] = {
+                "applied": False,
+                "reason": str(exc),
+            }
+            body["data"] = data
+            return jsonify(body)
+    return response
 
 
 @monitoring_target_bp.route("/targets/<int:monitor_id>", methods=["GET"])
@@ -560,6 +1034,369 @@ def query_target_metric_range(monitor_id: int):
         "/api/v1/metrics/query-range",
         params=params,
         fallback=lambda: {"items": [], "total": 0},
+    )
+
+
+@monitoring_target_bp.route("/targets/<int:monitor_id>/alerts/rules", methods=["GET"])
+@jwt_required()
+@require_any_permission("monitoring:alert:rule", "monitoring:alert:setting", "monitoring:target:view", "monitoring:list:view")
+def list_target_alert_rules(monitor_id: int):
+    monitor = _monitor_payload(monitor_id)
+    if not monitor:
+        return jsonify({"code": 404, "message": "监控任务不存在"}), 404
+    rows = AlertDefine.query.order_by(AlertDefine.updated_at.desc(), AlertDefine.id.desc()).all()
+    items = []
+    for row in rows:
+        if not _rule_match_monitor(row, monitor):
+            continue
+        item = _rule_from_model(row)
+        item["scope"] = _rule_scope(row, monitor_id)
+        items.append(item)
+    page, page_size = _page_args()
+    page_items, total = _paginate_items(items, page, page_size)
+    return _list_response(page_items, total, page, page_size)
+
+
+@monitoring_target_bp.route("/targets/<int:monitor_id>/alerts/rules", methods=["POST"])
+@jwt_required()
+@require_any_permission("monitoring:alert:rule", "monitoring:alert:setting", "monitoring:target:update", "monitoring:list:edit")
+def create_target_alert_rule(monitor_id: int):
+    monitor = _monitor_payload(monitor_id)
+    if not monitor:
+        return jsonify({"code": 404, "message": "监控任务不存在"}), 404
+    payload = request.get_json() or {}
+
+    name = str(payload.get("name") or "").strip()
+    if not name:
+        return jsonify({"code": 400, "message": "规则名称不能为空"}), 400
+
+    metric = str(payload.get("metric") or "value").strip() or "value"
+    operator = str(payload.get("operator") or ">").strip() or ">"
+    level = str(payload.get("level") or "warning").strip() or "warning"
+    rule_type = str(payload.get("type") or payload.get("monitor_type") or "realtime_metric").strip() or "realtime_metric"
+    period = 0
+    times = 1
+    threshold_val = 0.0
+    try:
+        threshold_val = float(payload.get("threshold", 0))
+    except (TypeError, ValueError):
+        return jsonify({"code": 400, "message": "threshold 必须是数字"}), 400
+    try:
+        period = max(int(payload.get("period") or 0), 0)
+    except (TypeError, ValueError):
+        return jsonify({"code": 400, "message": "period 必须是整数"}), 400
+    try:
+        times = max(int(payload.get("times") or 1), 1)
+    except (TypeError, ValueError):
+        return jsonify({"code": 400, "message": "times 必须是整数"}), 400
+
+    notice_rule_id = payload.get("notice_rule_id")
+    if notice_rule_id is not None:
+        try:
+            notice_rule_id = int(notice_rule_id)
+            notice_rule = NoticeRule.query.get(notice_rule_id)
+            if not notice_rule:
+                return jsonify({"code": 400, "message": "指定的通知规则不存在"}), 400
+        except (TypeError, ValueError):
+            return jsonify({"code": 400, "message": "notice_rule_id 必须是整数"}), 400
+
+    labels = {
+        "monitor_id": monitor_id,
+        "app": monitor.get("app"),
+        "instance": monitor.get("target"),
+        "metric": metric,
+        "operator": operator,
+        "threshold": threshold_val,
+        "severity": level,
+    }
+    custom_labels = payload.get("labels")
+    if isinstance(custom_labels, dict):
+        for key, value in custom_labels.items():
+            label_key = str(key or "").strip()
+            if not label_key:
+                continue
+            if label_key in {"monitor_id", "app", "instance", "metric", "operator", "threshold", "severity"}:
+                continue
+            labels[label_key] = str(value or "").strip()
+    annotations = {"summary": name}
+    expr = str(payload.get("expr") or "").strip() or f"{metric} {operator} {threshold_val}"
+
+    row = AlertDefine(
+        name=name,
+        type=rule_type,
+        expr=expr,
+        period=period,
+        times=times,
+        labels_json=_json_dump(labels),
+        annotations_json=_json_dump(annotations),
+        template=str(payload.get("template") or "").strip() or None,
+        datasource_type=payload.get("datasource_type"),
+        enabled=bool(payload.get("enabled", True)),
+        notice_rule_id=notice_rule_id,
+        creator=(payload.get("creator") or "python-web"),
+        modifier=(payload.get("modifier") or "python-web"),
+    )
+    db.session.add(row)
+    db.session.commit()
+    item = _rule_from_model(row)
+    item["scope"] = "target"
+    return jsonify({"code": 200, "data": item})
+
+
+@monitoring_target_bp.route("/targets/<int:monitor_id>/alerts/rules/<int:rule_id>", methods=["PUT"])
+@jwt_required()
+@require_any_permission("monitoring:alert:rule", "monitoring:alert:setting", "monitoring:target:update", "monitoring:list:edit")
+def update_target_alert_rule(monitor_id: int, rule_id: int):
+    monitor = _monitor_payload(monitor_id)
+    if not monitor:
+        return jsonify({"code": 404, "message": "监控任务不存在"}), 404
+    row = AlertDefine.query.get(rule_id)
+    if not row:
+        return jsonify({"code": 404, "message": "规则不存在"}), 404
+    payload = request.get_json() or {}
+
+    if "name" in payload:
+        row.name = str(payload.get("name") or "").strip() or row.name
+    if "type" in payload:
+        row.type = str(payload.get("type") or row.type).strip() or row.type
+    if "enabled" in payload:
+        row.enabled = bool(payload.get("enabled"))
+    if "period" in payload:
+        try:
+            row.period = max(int(payload.get("period") or 0), 0)
+        except (TypeError, ValueError):
+            return jsonify({"code": 400, "message": "period 必须是整数"}), 400
+    if "times" in payload:
+        try:
+            row.times = max(int(payload.get("times") or 1), 1)
+        except (TypeError, ValueError):
+            return jsonify({"code": 400, "message": "times 必须是整数"}), 400
+    if "template" in payload:
+        row.template = str(payload.get("template") or "").strip() or None
+
+    labels = _json_load(row.labels_json, {})
+    if not isinstance(labels, dict):
+        labels = {}
+    labels["monitor_id"] = monitor_id
+    labels["app"] = monitor.get("app")
+    labels["instance"] = monitor.get("target")
+    if "metric" in payload:
+        labels["metric"] = str(payload.get("metric") or "value").strip() or "value"
+    if "operator" in payload:
+        labels["operator"] = str(payload.get("operator") or ">").strip() or ">"
+    if "threshold" in payload:
+        try:
+            labels["threshold"] = float(payload.get("threshold"))
+        except (TypeError, ValueError):
+            return jsonify({"code": 400, "message": "threshold 必须是数字"}), 400
+    if "level" in payload:
+        labels["severity"] = str(payload.get("level") or "warning").strip() or "warning"
+    if "labels" in payload and isinstance(payload.get("labels"), dict):
+        for key, value in payload.get("labels").items():
+            label_key = str(key or "").strip()
+            if not label_key:
+                continue
+            if label_key in {"monitor_id", "app", "instance", "metric", "operator", "threshold", "severity"}:
+                continue
+            labels[label_key] = str(value or "").strip()
+    row.labels_json = _json_dump(labels)
+
+    if "expr" in payload:
+        row.expr = str(payload.get("expr") or "").strip() or row.expr
+    else:
+        metric = labels.get("metric") or "value"
+        operator = labels.get("operator") or ">"
+        threshold = labels.get("threshold", 0)
+        row.expr = f"{metric} {operator} {threshold}"
+
+    if "notice_rule_id" in payload:
+        notice_rule_id = payload.get("notice_rule_id")
+        if notice_rule_id is not None:
+            try:
+                notice_rule_id = int(notice_rule_id)
+                notice_rule = NoticeRule.query.get(notice_rule_id)
+                if not notice_rule:
+                    return jsonify({"code": 400, "message": "指定的通知规则不存在"}), 400
+                row.notice_rule_id = notice_rule_id
+            except (TypeError, ValueError):
+                return jsonify({"code": 400, "message": "notice_rule_id 必须是整数"}), 400
+        else:
+            row.notice_rule_id = None
+
+    row.updated_at = _now_naive_utc()
+    db.session.commit()
+    item = _rule_from_model(row)
+    item["scope"] = "target"
+    return jsonify({"code": 200, "data": item})
+
+
+@monitoring_target_bp.route("/targets/<int:monitor_id>/alerts/rules/<int:rule_id>", methods=["DELETE"])
+@jwt_required()
+@require_any_permission("monitoring:alert:rule", "monitoring:alert:setting", "monitoring:target:update", "monitoring:list:edit")
+def delete_target_alert_rule(monitor_id: int, rule_id: int):
+    monitor = _monitor_payload(monitor_id)
+    if not monitor:
+        return jsonify({"code": 404, "message": "监控任务不存在"}), 404
+    row = AlertDefine.query.get(rule_id)
+    if not row:
+        return jsonify({"code": 404, "message": "规则不存在"}), 404
+    if not _rule_match_monitor(row, monitor):
+        return jsonify({"code": 403, "message": "规则不属于该监控实例"}), 403
+    db.session.delete(row)
+    db.session.commit()
+    return jsonify({"code": 200, "data": {"deleted": True, "id": rule_id}})
+
+
+@monitoring_target_bp.route("/targets/<int:monitor_id>/alerts/rules/apply-defaults", methods=["POST"])
+@jwt_required()
+@require_any_permission("monitoring:alert:rule", "monitoring:alert:setting", "monitoring:target:update", "monitoring:list:edit")
+def apply_target_default_alert_rules(monitor_id: int):
+    monitor = _monitor_payload(monitor_id)
+    if not monitor:
+        return jsonify({"code": 404, "message": "监控任务不存在"}), 404
+    try:
+        result = _apply_default_rules_for_monitor(monitor_id, monitor)
+    except ValueError as exc:
+        return jsonify({"code": 400, "message": str(exc)}), 400
+    return jsonify({"code": 200, "data": result})
+
+
+@monitoring_target_bp.route("/templates/<int:template_id>/alerts/apply", methods=["POST"])
+@jwt_required()
+@require_any_permission("monitoring:alert:rule", "monitoring:alert:setting", "monitoring:target:update", "monitoring:list:edit")
+def apply_template_alert_rules(template_id: int):
+    template = MonitorTemplate.query.get(template_id)
+    if not template:
+        return jsonify({"code": 404, "message": "模板不存在"}), 404
+
+    payload = request.get_json() or {}
+    monitor_ids_raw = payload.get("monitor_ids")
+    monitor_ids: list[int] = []
+    if isinstance(monitor_ids_raw, list):
+        for item in monitor_ids_raw:
+            try:
+                monitor_id = int(item)
+            except (TypeError, ValueError):
+                continue
+            if monitor_id > 0 and monitor_id not in monitor_ids:
+                monitor_ids.append(monitor_id)
+
+    if not monitor_ids:
+        single_monitor_id = payload.get("monitor_id")
+        try:
+            if single_monitor_id is not None:
+                parsed_single_id = int(single_monitor_id)
+                if parsed_single_id > 0:
+                    monitor_ids.append(parsed_single_id)
+        except (TypeError, ValueError):
+            pass
+
+    if not monitor_ids:
+        monitor_payload = _fetch_manager_payload("/api/v1/monitors", params={"page": 1, "page_size": 10000})
+        for item in _normalize_items(monitor_payload):
+            try:
+                monitor_id = int(item.get("id") or 0)
+            except (TypeError, ValueError):
+                continue
+            if monitor_id <= 0:
+                continue
+            monitor_template_id = item.get("template_id")
+            if monitor_template_id is not None:
+                try:
+                    if int(monitor_template_id) == template_id:
+                        monitor_ids.append(monitor_id)
+                except (TypeError, ValueError):
+                    continue
+            else:
+                app = str(item.get("app") or "").strip().lower()
+                if app and app == str(template.app or "").strip().lower():
+                    monitor_ids.append(monitor_id)
+
+    if not monitor_ids:
+        return jsonify(
+            {
+                "code": 200,
+                "data": {
+                    "template_id": template_id,
+                    "template_app": template.app,
+                    "monitor_total": 0,
+                    "created": 0,
+                    "updated": 0,
+                    "applied": 0,
+                    "failed": [],
+                },
+            }
+        )
+
+    created = 0
+    updated = 0
+    applied = 0
+    failed: list[dict] = []
+    expected_app = str(template.app or "").strip().lower()
+    for monitor_id in monitor_ids:
+        monitor = _monitor_payload(monitor_id)
+        if not monitor:
+            failed.append({"monitor_id": monitor_id, "reason": "监控任务不存在"})
+            continue
+
+        monitor_template_id = monitor.get("template_id")
+        if monitor_template_id is not None:
+            try:
+                if int(monitor_template_id) != template_id:
+                    failed.append({"monitor_id": monitor_id, "reason": "监控任务与模板不匹配"})
+                    continue
+            except (TypeError, ValueError):
+                failed.append({"monitor_id": monitor_id, "reason": "监控任务模板ID非法"})
+                continue
+
+        app = str(monitor.get("app") or "").strip().lower()
+        if expected_app and app and app != expected_app:
+            failed.append({"monitor_id": monitor_id, "reason": "监控任务应用类型与模板不匹配"})
+            continue
+
+        try:
+            result = _apply_default_rules_for_monitor(monitor_id, monitor)
+        except Exception as exc:
+            failed.append({"monitor_id": monitor_id, "reason": str(exc)})
+            continue
+
+        created += int(result.get("created") or 0)
+        updated += int(result.get("updated") or 0)
+        applied += 1
+
+    return jsonify(
+        {
+            "code": 200,
+            "data": {
+                "template_id": template_id,
+                "template_app": template.app,
+                "monitor_total": len(monitor_ids),
+                "created": created,
+                "updated": updated,
+                "applied": applied,
+                "failed": failed,
+            },
+        }
+    )
+
+
+@monitoring_target_bp.route("/targets/<int:monitor_id>/alerts/reload", methods=["POST"])
+@jwt_required()
+@require_any_permission("monitoring:alert:rule", "monitoring:alert:setting", "monitoring:target:update", "monitoring:list:edit")
+def reload_target_alert_rules(monitor_id: int):
+    monitor = _monitor_payload(monitor_id)
+    if not monitor:
+        return jsonify({"code": 404, "message": "监控任务不存在"}), 404
+    return jsonify(
+        {
+            "code": 200,
+            "data": {
+                "monitor_id": monitor_id,
+                "reloaded": True,
+                "strategy": "manager-auto-reload-60s",
+                "reloaded_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            },
+        }
     )
 
 
@@ -760,6 +1597,12 @@ def close_alert(alert_id: int):
 @require_any_permission("monitoring:alert:rule", "monitoring:alert:setting")
 def list_alert_rules():
     q = (request.args.get("q") or "").strip()
+    include_bound = _to_bool(request.args.get("include_bound"), default=False)
+    scope = str(request.args.get("scope") or "global").strip().lower()
+    if scope not in {"global", "bound", "all"}:
+        scope = "global"
+    if include_bound and scope == "global":
+        scope = "all"
     query = AlertDefine.query
     if q:
         query = query.filter(
@@ -771,7 +1614,24 @@ def list_alert_rules():
         )
     rows = query.order_by(AlertDefine.updated_at.desc(), AlertDefine.id.desc()).all()
     page, page_size = _page_args()
-    items = [_rule_from_model(row) for row in rows]
+    items = []
+    for row in rows:
+        item = _rule_from_model(row)
+        labels = item.get("labels") if isinstance(item, dict) else {}
+        monitor_id = ""
+        source = ""
+        instance = ""
+        if isinstance(labels, dict):
+            monitor_id = str(labels.get("monitor_id") or "").strip()
+            source = str(labels.get("source") or "").strip().lower()
+            instance = str(labels.get("instance") or "").strip()
+        is_bound_rule = bool(monitor_id) or source in {"template_default", "instance_override", "target"} or bool(instance)
+        # 默认仅展示全局告警规则，实例绑定规则在“监控任务详情-告警”里管理
+        if scope == "global" and is_bound_rule:
+            continue
+        if scope == "bound" and (not is_bound_rule):
+            continue
+        items.append(item)
     page_items, total = _paginate_items(items, page, page_size)
     return _list_response(page_items, total, page, page_size)
 

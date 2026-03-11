@@ -32,8 +32,8 @@ func TestExpressionOperatorsCoverage(t *testing.T) {
 		if !matched {
 			t.Fatalf("rule %s expected matched", r.Name)
 		}
-		if ev.State != StatePending {
-			t.Fatalf("rule %s first hit should be pending, got=%s", r.Name, ev.State)
+		if ev.State != StateFiring {
+			t.Fatalf("rule %s first hit should be firing when times=1, got=%s", r.Name, ev.State)
 		}
 	}
 }
@@ -67,5 +67,44 @@ func TestDurationDebounceWindow(t *testing.T) {
 	ev, matched, err = e.Evaluate(rule, 1, map[string]float64{"cpu": 20}, t0.Add(4*time.Second))
 	if err != nil || !matched || ev.State != StateNormal {
 		t.Fatalf("recover expect normal, got state=%s matched=%v err=%v", ev.State, matched, err)
+	}
+}
+
+func TestArithmeticExpressionSupport(t *testing.T) {
+	e := NewEngine()
+	rule := Rule{
+		ID:              201,
+		Name:            "redis-memory-ratio",
+		Expression:      "(used_memory / maxmemory) * 100 > 85 && (connected_clients / maxclients) > 0.8",
+		DurationSeconds: 1,
+		Enabled:         true,
+	}
+	vars := map[string]float64{
+		"used_memory":       900,
+		"maxmemory":         1000,
+		"connected_clients": 85,
+		"maxclients":        100,
+	}
+	ev, matched, err := e.Evaluate(rule, 77, vars, time.Unix(2000, 0))
+	if err != nil {
+		t.Fatalf("eval error: %v", err)
+	}
+	if !matched || ev.State != StateFiring {
+		t.Fatalf("expected firing match when times=1, got matched=%v state=%s", matched, ev.State)
+	}
+}
+
+func TestExpressionUnknownVariable(t *testing.T) {
+	e := NewEngine()
+	rule := Rule{
+		ID:              202,
+		Name:            "missing-var",
+		Expression:      "(used_memory / maxmemory) > 0.9",
+		DurationSeconds: 1,
+		Enabled:         true,
+	}
+	_, _, err := e.Evaluate(rule, 1, map[string]float64{"used_memory": 1}, time.Now())
+	if err == nil {
+		t.Fatal("expected error for unknown variable")
 	}
 }

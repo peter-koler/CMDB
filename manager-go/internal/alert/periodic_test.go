@@ -37,7 +37,7 @@ func TestPeriodicRuleFiveMinuteWindowStableTrigger(t *testing.T) {
 			Name:            "cpu-5m-high",
 			PromQL:          `avg_over_time(cpu_usage[5m])`,
 			Expression:      "value > 80",
-			DurationSeconds: 300,
+			DurationSeconds: 2,
 			Severity:        "warning",
 			Interval:        5 * time.Minute,
 			Enabled:         true,

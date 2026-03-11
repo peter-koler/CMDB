@@ -11,6 +11,7 @@ import (
 )
 
 type RuntimeTemplate struct {
+	ID       int64  `json:"id"`
 	App      string `json:"app"`
 	Name     string `json:"name"`
 	Category string `json:"category"`
@@ -26,14 +27,16 @@ type RuntimeTemplate struct {
 }
 
 type Registry struct {
-	mu        sync.RWMutex
-	templates map[string]RuntimeTemplate // app -> template
-	loadedAt  time.Time
+	mu             sync.RWMutex
+	templatesByApp map[string]RuntimeTemplate // app -> latest template
+	templatesByID  map[int64]RuntimeTemplate  // template_id -> template
+	loadedAt       time.Time
 }
 
 func NewRegistry() *Registry {
 	return &Registry{
-		templates: map[string]RuntimeTemplate{},
+		templatesByApp: map[string]RuntimeTemplate{},
+		templatesByID:  map[int64]RuntimeTemplate{},
 	}
 }
 
@@ -47,15 +50,22 @@ func (r *Registry) Get(app string) (RuntimeTemplate, bool) {
 	key := strings.TrimSpace(strings.ToLower(app))
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	tpl, ok := r.templates[key]
+	tpl, ok := r.templatesByApp[key]
+	return tpl, ok
+}
+
+func (r *Registry) GetByID(id int64) (RuntimeTemplate, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	tpl, ok := r.templatesByID[id]
 	return tpl, ok
 }
 
 func (r *Registry) List() []RuntimeTemplate {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	out := make([]RuntimeTemplate, 0, len(r.templates))
-	for _, tpl := range r.templates {
+	out := make([]RuntimeTemplate, 0, len(r.templatesByID))
+	for _, tpl := range r.templatesByID {
 		// Avoid returning the full YAML content in runtime listing.
 		tpl.Content = ""
 		out = append(out, tpl)
@@ -74,7 +84,8 @@ func (r *Registry) ReloadFromStore(st *Store) error {
 		return err
 	}
 	now := time.Now()
-	next := make(map[string]RuntimeTemplate, len(rows))
+	nextByApp := make(map[string]RuntimeTemplate, len(rows))
+	nextByID := make(map[int64]RuntimeTemplate, len(rows))
 	for _, row := range rows {
 		app := strings.TrimSpace(strings.ToLower(row.App))
 		if app == "" {
@@ -85,7 +96,8 @@ func (r *Registry) ReloadFromStore(st *Store) error {
 			warnings = append(warnings, fmt.Sprintf("content app mismatch: yaml=%s db=%s", contentApp, app))
 		}
 		sum := sha256.Sum256([]byte(row.Content))
-		next[app] = RuntimeTemplate{
+		rt := RuntimeTemplate{
+			ID:       row.ID,
 			App:      row.App,
 			Name:     row.Name,
 			Category: row.Category,
@@ -95,10 +107,15 @@ func (r *Registry) ReloadFromStore(st *Store) error {
 			Content:  row.Content,
 			Warnings: warnings,
 		}
+		nextByID[row.ID] = rt
+		if cur, exists := nextByApp[app]; !exists || rt.Version > cur.Version || (rt.Version == cur.Version && rt.ID > cur.ID) {
+			nextByApp[app] = rt
+		}
 	}
 
 	r.mu.Lock()
-	r.templates = next
+	r.templatesByApp = nextByApp
+	r.templatesByID = nextByID
 	r.loadedAt = now
 	r.mu.Unlock()
 	return nil
@@ -128,10 +145,11 @@ func sortRuntimeTemplates(items []RuntimeTemplate) {
 	// Small n, simple O(n^2) sort keeps dependencies minimal.
 	for i := 0; i < len(items); i++ {
 		for j := i + 1; j < len(items); j++ {
-			if strings.ToLower(items[j].App) < strings.ToLower(items[i].App) {
+			aj := strings.ToLower(items[j].App)
+			ai := strings.ToLower(items[i].App)
+			if aj < ai || (aj == ai && (items[j].Version > items[i].Version || (items[j].Version == items[i].Version && items[j].ID > items[i].ID))) {
 				items[i], items[j] = items[j], items[i]
 			}
 		}
 	}
 }
-

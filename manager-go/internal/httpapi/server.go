@@ -16,6 +16,7 @@ import (
 	"manager-go/internal/model"
 	"manager-go/internal/notify"
 	"manager-go/internal/store"
+	templ "manager-go/internal/template"
 )
 
 type Server struct {
@@ -147,13 +148,31 @@ func (s *Server) handleMonitors(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error())
 			return
 		}
+		candidate := model.Monitor{
+			ID:              0,
+			Name:            in.Name,
+			App:             in.App,
+			Target:          in.Target,
+			TemplateID:      in.TemplateID,
+			IntervalSeconds: normalizeInterval(in.IntervalSeconds, in.Interval),
+			Params:          in.Params,
+			Enabled:         in.Enabled,
+		}
+		if err := s.preCompileAndAudit(&candidate, "create"); err != nil {
+			writeErr(w, http.StatusUnprocessableEntity, "MONITOR_INVALID_CONFIG", err.Error())
+			return
+		}
 		m, err := s.store.Create(in)
 		if err != nil {
 			writeStoreErr(w, err)
 			return
 		}
 		if s.collectorManager != nil && m.Enabled {
-			task, _ := s.collectorManager.BuildCollectTask(&m)
+			task, _, err := s.collectorManager.BuildCollectTaskStrict(&m)
+			if err != nil {
+				writeErr(w, http.StatusUnprocessableEntity, "MONITOR_INVALID_CONFIG", err.Error())
+				return
+			}
 			if err := s.collectorManager.DispatchTaskByMonitor(m.ID, task); err != nil {
 				writeErr(w, http.StatusBadGateway, "COLLECTOR_DISPATCH_FAILED", err.Error())
 				return
@@ -212,6 +231,18 @@ func (s *Server) handleMonitorByID(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(parts) == 2 && r.Method == http.MethodPatch && (parts[1] == "enable" || parts[1] == "disable") {
 		s.handleEnableDisable(w, r, id, parts[1] == "enable")
+		return
+	}
+	if len(parts) == 2 && parts[1] == "recompile" && r.Method == http.MethodPost {
+		s.handleManualRecompile(w, id)
+		return
+	}
+	if len(parts) == 2 && parts[1] == "template-upgrade" && r.Method == http.MethodPost {
+		s.handleTemplateUpgrade(w, r, id)
+		return
+	}
+	if len(parts) == 2 && parts[1] == "compile-logs" && r.Method == http.MethodGet {
+		s.handleCompileLogs(w, r, id)
 		return
 	}
 	w.WriteHeader(http.StatusNotFound)
@@ -412,6 +443,14 @@ func (s *Server) handleCollectorByID(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
+		}
+		// 优先走 collectorManager（数据库 + gRPC 客户端连接池）
+		// collector-go 的 HTTP 心跳是注册保活信号，不应依赖旧 registry。
+		if s.collectorManager != nil {
+			if _, err := s.collectorManager.GetClient(collectorID); err == nil {
+				writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+				return
+			}
 		}
 		if s.registry == nil {
 			writeErr(w, http.StatusNotImplemented, "COLLECTOR_UNAVAILABLE", "collector registry not configured")
@@ -1095,13 +1134,37 @@ func (s *Server) handleMonitorCRUD(w http.ResponseWriter, r *http.Request, id in
 			writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error())
 			return
 		}
+		current, err := s.store.Get(id)
+		if err != nil {
+			writeStoreErr(w, err)
+			return
+		}
+		candidate := model.Monitor{
+			ID:              id,
+			Name:            in.Name,
+			App:             in.App,
+			Target:          in.Target,
+			TemplateID:      in.TemplateID,
+			IntervalSeconds: normalizeInterval(in.IntervalSeconds, in.Interval),
+			Params:          in.Params,
+			Enabled:         in.Enabled,
+			Version:         current.Version,
+		}
+		if err := s.preCompileAndAudit(&candidate, "update"); err != nil {
+			writeErr(w, http.StatusUnprocessableEntity, "MONITOR_INVALID_CONFIG", err.Error())
+			return
+		}
 		m, err := s.store.Update(id, in)
 		if err != nil {
 			writeStoreErr(w, err)
 			return
 		}
 		if s.collectorManager != nil {
-			task, _ := s.collectorManager.BuildCollectTask(&m)
+			task, _, err := s.collectorManager.BuildCollectTaskStrict(&m)
+			if err != nil {
+				writeErr(w, http.StatusUnprocessableEntity, "MONITOR_INVALID_CONFIG", err.Error())
+				return
+			}
 			if m.Enabled {
 				if err := s.collectorManager.DispatchTaskByMonitor(m.ID, task); err != nil {
 					writeErr(w, http.StatusBadGateway, "COLLECTOR_DISPATCH_FAILED", err.Error())
@@ -1146,19 +1209,35 @@ func (s *Server) handleEnableDisable(w http.ResponseWriter, r *http.Request, id 
 		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error())
 		return
 	}
+	if enabled {
+		current, err := s.store.Get(id)
+		if err != nil {
+			writeStoreErr(w, err)
+			return
+		}
+		if err := s.preCompileAndAudit(&current, "enable"); err != nil {
+			writeErr(w, http.StatusUnprocessableEntity, "MONITOR_INVALID_CONFIG", err.Error())
+			return
+		}
+	}
 	m, err := s.store.SetEnabled(id, enabled, req.Version)
 	if err != nil {
 		writeStoreErr(w, err)
 		return
 	}
 	if s.collectorManager != nil {
-		task, _ := s.collectorManager.BuildCollectTask(&m)
 		if enabled {
+			task, _, err := s.collectorManager.BuildCollectTaskStrict(&m)
+			if err != nil {
+				writeErr(w, http.StatusUnprocessableEntity, "MONITOR_INVALID_CONFIG", err.Error())
+				return
+			}
 			if err := s.collectorManager.DispatchTaskByMonitor(m.ID, task); err != nil {
 				writeErr(w, http.StatusBadGateway, "COLLECTOR_DISPATCH_FAILED", err.Error())
 				return
 			}
 		} else {
+			task, _ := s.collectorManager.BuildCollectTask(&m)
 			_ = s.collectorManager.DeleteTaskByMonitor(m.ID, task.JobId)
 		}
 	}
@@ -1176,6 +1255,138 @@ func writeStoreErr(w http.ResponseWriter, err error) {
 	default:
 		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
 	}
+}
+
+func (s *Server) handleManualRecompile(w http.ResponseWriter, id int64) {
+	if s.collectorManager == nil {
+		writeErr(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "collector manager not configured")
+		return
+	}
+	m, err := s.store.Get(id)
+	if err != nil {
+		writeStoreErr(w, err)
+		return
+	}
+	task, _, err := s.collectorManager.BuildCollectTaskStrict(&m)
+	if err != nil {
+		s.auditCompileResult(m.ID, m.App, "recompile", err)
+		writeErr(w, http.StatusUnprocessableEntity, "MONITOR_INVALID_CONFIG", err.Error())
+		return
+	}
+	s.auditCompileResult(m.ID, m.App, "recompile", nil)
+	dispatched := false
+	if m.Enabled {
+		if err := s.collectorManager.DispatchTaskByMonitor(m.ID, task); err != nil {
+			writeErr(w, http.StatusBadGateway, "COLLECTOR_DISPATCH_FAILED", err.Error())
+			return
+		}
+		dispatched = true
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"monitor_id":    m.ID,
+		"compiled":      true,
+		"dispatched":    dispatched,
+		"metrics_tasks": len(task.GetTasks()),
+		"timestamp":     time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func (s *Server) handleTemplateUpgrade(w http.ResponseWriter, r *http.Request, id int64) {
+	if s.collectorManager == nil {
+		writeErr(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "collector manager not configured")
+		return
+	}
+	var req struct {
+		TemplateID int64 `json:"template_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error())
+		return
+	}
+	if req.TemplateID <= 0 {
+		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "template_id is required")
+		return
+	}
+	current, err := s.store.Get(id)
+	if err != nil {
+		writeStoreErr(w, err)
+		return
+	}
+	candidate := current
+	candidate.TemplateID = req.TemplateID
+	if err := s.preCompileAndAudit(&candidate, "upgrade_validate"); err != nil {
+		writeErr(w, http.StatusUnprocessableEntity, "MONITOR_INVALID_CONFIG", err.Error())
+		return
+	}
+	upIn := buildUpdateInputFromMonitor(current)
+	upIn.TemplateID = req.TemplateID
+	updated, err := s.store.Update(id, upIn)
+	if err != nil {
+		writeStoreErr(w, err)
+		return
+	}
+	task, _, err := s.collectorManager.BuildCollectTaskStrict(&updated)
+	if err != nil {
+		s.auditCompileResult(updated.ID, updated.App, "upgrade_apply", err)
+		writeErr(w, http.StatusUnprocessableEntity, "MONITOR_INVALID_CONFIG", err.Error())
+		return
+	}
+	s.auditCompileResult(updated.ID, updated.App, "upgrade_apply", nil)
+	dispatched := false
+	if updated.Enabled {
+		if err := s.collectorManager.DispatchTaskByMonitor(updated.ID, task); err != nil {
+			writeErr(w, http.StatusBadGateway, "COLLECTOR_DISPATCH_FAILED", err.Error())
+			return
+		}
+		dispatched = true
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"monitor_id":      updated.ID,
+		"template_id":     updated.TemplateID,
+		"compiled":        true,
+		"dispatched":      dispatched,
+		"monitor_version": updated.Version,
+		"timestamp":       time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func (s *Server) handleCompileLogs(w http.ResponseWriter, r *http.Request, id int64) {
+	limit := atoiDefault(r.URL.Query().Get("limit"), 20)
+	items, err := s.store.ListCompileLogs(id, limit)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items": items,
+		"total": len(items),
+	})
+}
+
+func (s *Server) preCompileAndAudit(monitor *model.Monitor, stage string) error {
+	if s.collectorManager == nil {
+		return nil
+	}
+	err := s.collectorManager.ValidateMonitorTemplate(monitor)
+	s.auditCompileResult(monitor.ID, monitor.App, stage, err)
+	return err
+}
+
+func (s *Server) auditCompileResult(monitorID int64, app string, stage string, err error) {
+	if s.store == nil {
+		return
+	}
+	if err == nil {
+		_ = s.store.AddCompileLog(monitorID, app, stage, "success", "", "")
+		return
+	}
+	path := ""
+	reason := err.Error()
+	if ce, ok := templ.AsCompileError(err); ok {
+		path = ce.Path
+		reason = ce.Reason
+	}
+	_ = s.store.AddCompileLog(monitorID, app, stage, "failed", path, reason)
 }
 
 func writeAlertErr(w http.ResponseWriter, err error) {
@@ -1249,6 +1460,31 @@ func pageParams(r *http.Request) (int, int) {
 		pageSize = 200
 	}
 	return page, pageSize
+}
+
+func normalizeInterval(primary int, fallback int) int {
+	if primary > 0 {
+		return primary
+	}
+	return fallback
+}
+
+func buildUpdateInputFromMonitor(m model.Monitor) model.MonitorUpdateInput {
+	return model.MonitorUpdateInput{
+		CIID:            m.CIID,
+		CIModelID:       m.CIModelID,
+		CIName:          m.CIName,
+		CICode:          m.CICode,
+		Name:            m.Name,
+		App:             m.App,
+		Target:          m.Target,
+		TemplateID:      m.TemplateID,
+		IntervalSeconds: m.IntervalSeconds,
+		Enabled:         m.Enabled,
+		Labels:          m.Labels,
+		Params:          m.Params,
+		Version:         m.Version,
+	}
 }
 
 func atoiDefault(raw string, def int) int {

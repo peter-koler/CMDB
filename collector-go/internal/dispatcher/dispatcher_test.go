@@ -22,6 +22,37 @@ func (c *testCollector) Collect(context.Context, model.MetricsTask) (map[string]
 	return map[string]string{"v": "1"}, "ok", nil
 }
 
+type redisCacheCollector struct {
+	count atomic.Int32
+}
+
+func (c *redisCacheCollector) Collect(_ context.Context, task model.MetricsTask) (map[string]string, string, error) {
+	c.count.Add(1)
+	if task.Params["section"] == "" {
+		return map[string]string{
+			"used_memory":       "100",
+			"connected_clients": "10",
+			"identity":          "127.0.0.1:6379",
+		}, "ok", nil
+	}
+	return map[string]string{
+		"identity": task.Params["host"] + ":" + task.Params["port"],
+		"section":  task.Params["section"],
+	}, "ok", nil
+}
+
+type jdbcCacheCollector struct {
+	count atomic.Int32
+}
+
+func (c *jdbcCacheCollector) Collect(_ context.Context, task model.MetricsTask) (map[string]string, string, error) {
+	c.count.Add(1)
+	return map[string]string{
+		"query": task.Params["sql"],
+		"rows":  "1",
+	}, "ok", nil
+}
+
 type testPrecompute struct{}
 
 func (testPrecompute) Enabled() bool { return true }
@@ -90,5 +121,128 @@ func TestRegisterAndRemoveJob(t *testing.T) {
 	}
 	if got.Fields["__precompute_summary__"] == "" {
 		t.Fatalf("expected precompute summary, got %+v", got.Fields)
+	}
+}
+
+func TestRedisCycleCacheReuse(t *testing.T) {
+	rc := &redisCacheCollector{}
+	protocol.Register("redis", rc)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	wheel := scheduler.NewWheel(10*time.Millisecond, 64)
+	pool := worker.New(2, 64)
+	q := queue.NewMemoryQueue(128)
+	d := New(wheel, pool, q)
+
+	pool.Start(ctx)
+	go wheel.Start(ctx)
+
+	job := model.Job{
+		ID:       2001,
+		Monitor:  3001,
+		App:      "redis",
+		Interval: 40 * time.Millisecond,
+		Tasks: []model.MetricsTask{
+			{
+				Name:     "memory",
+				Protocol: "redis",
+				Timeout:  time.Second,
+				Priority: 1,
+				Params: map[string]string{
+					"host":    "127.0.0.1",
+					"port":    "6379",
+					"section": "memory",
+				},
+				FieldSpecs: []model.FieldSpec{{Field: "used_memory"}},
+			},
+			{
+				Name:     "clients",
+				Protocol: "redis",
+				Timeout:  time.Second,
+				Priority: 2,
+				Params: map[string]string{
+					"host":    "127.0.0.1",
+					"port":    "6379",
+					"section": "clients",
+				},
+				FieldSpecs: []model.FieldSpec{{Field: "connected_clients"}},
+			},
+		},
+	}
+
+	d.RegisterJob(job)
+	time.Sleep(120 * time.Millisecond)
+	d.RemoveJob(job.ID)
+
+	// At least one cycle should execute; each cycle should fetch Redis once due to cache reuse.
+	// With ~3 cycles in 120ms this should stay <= 4 (allowing timer jitter).
+	if rc.count.Load() > 4 {
+		t.Fatalf("expected redis collect reuse, too many collects: %d", rc.count.Load())
+	}
+}
+
+func TestJDBCCycleCacheReuse(t *testing.T) {
+	jc := &jdbcCacheCollector{}
+	protocol.Register("jdbc", jc)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	wheel := scheduler.NewWheel(10*time.Millisecond, 64)
+	pool := worker.New(2, 64)
+	q := queue.NewMemoryQueue(128)
+	d := New(wheel, pool, q)
+
+	pool.Start(ctx)
+	go wheel.Start(ctx)
+
+	job := model.Job{
+		ID:       3001,
+		Monitor:  4001,
+		App:      "mysql",
+		Interval: 40 * time.Millisecond,
+		Tasks: []model.MetricsTask{
+			{
+				Name:     "cache_a",
+				Protocol: "jdbc",
+				Timeout:  time.Second,
+				Priority: 1,
+				Params: map[string]string{
+					"host":      "127.0.0.1",
+					"port":      "3306",
+					"username":  "root",
+					"password":  "pwd",
+					"database":  "mysql",
+					"queryType": "columns",
+					"sql":       "show global status like 'Qcache%';",
+				},
+			},
+			{
+				Name:     "cache_b",
+				Protocol: "jdbc",
+				Timeout:  time.Second,
+				Priority: 2,
+				Params: map[string]string{
+					"host":      "127.0.0.1",
+					"port":      "3306",
+					"username":  "root",
+					"password":  "pwd",
+					"database":  "mysql",
+					"queryType": "columns",
+					"sql":       "show global status like 'Qcache%';",
+				},
+			},
+		},
+	}
+
+	d.RegisterJob(job)
+	time.Sleep(120 * time.Millisecond)
+	d.RemoveJob(job.ID)
+
+	// Each cycle should execute the same SQL once due to jdbc cache reuse.
+	if jc.count.Load() > 4 {
+		t.Fatalf("expected jdbc collect reuse, too many collects: %d", jc.count.Load())
 	}
 }

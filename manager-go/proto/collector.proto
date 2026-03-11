@@ -44,11 +44,27 @@ message MetricsTask {
   int32 priority = 4;
   map<string, string> params = 5;
   repeated Transform transform = 6;
+  string exec_kind = 7;
+  string spec_json = 8;
+  repeated FieldSpec field_specs = 9;
+  repeated CalculateSpec calculate_specs = 10;
 }
 
 message Transform {
   string field = 1;
   string op = 2;
+}
+
+message FieldSpec {
+  string field = 1;
+  string type = 2;
+  string unit = 3;
+  bool label = 4;
+}
+
+message CalculateSpec {
+  string field = 1;
+  string expression = 2;
 }
 
 message CollectRep {
@@ -62,6 +78,7 @@ message CollectRep {
   string message = 8;
   map<string, string> fields = 9;
   int64 raw_latency_ms = 10;
+  map<string, string> debug = 11;
 }
 
 message Heartbeat {

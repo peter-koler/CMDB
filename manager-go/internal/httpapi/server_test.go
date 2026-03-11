@@ -2,9 +2,11 @@ package httpapi
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
@@ -13,6 +15,9 @@ import (
 	"manager-go/internal/collector"
 	"manager-go/internal/model"
 	"manager-go/internal/store"
+	templ "manager-go/internal/template"
+
+	_ "github.com/mattn/go-sqlite3"
 )
 
 func TestMonitorCRUDFlow(t *testing.T) {
@@ -259,6 +264,119 @@ func TestExtendedResourceAPIs(t *testing.T) {
 				t.Fatalf("%s delete failed status=%d body=%s", tc.name, rec.Code, rec.Body.String())
 			}
 		})
+	}
+}
+
+func TestTemplateUpgradeFlow(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "meta.db")
+	seedTemplateRows(t, dbPath, []templateSeed{
+		{id: 1, app: "redis", version: 1, content: `
+app: redis
+metrics:
+  - name: server
+    protocol: redis
+    fields:
+      - field: redis_version
+        type: 1
+    redis:
+      section: server
+`},
+		{id: 2, app: "redis", version: 2, content: `
+app: redis
+metrics:
+  - name: memory
+    protocol: redis
+    fields:
+      - field: used_memory
+        type: 0
+    redis:
+      section: memory
+`},
+	})
+
+	st, err := store.NewMonitorStoreWithPath(dbPath)
+	if err != nil {
+		t.Fatalf("new monitor store: %v", err)
+	}
+	created, err := st.Create(model.MonitorCreateInput{
+		Name:            "redis-demo",
+		App:             "redis",
+		Target:          "127.0.0.1:6379",
+		TemplateID:      1,
+		IntervalSeconds: 30,
+		Enabled:         false,
+	})
+	if err != nil {
+		t.Fatalf("create monitor: %v", err)
+	}
+
+	tplStore, err := templ.NewStoreWithPath(dbPath)
+	if err != nil {
+		t.Fatalf("new template store: %v", err)
+	}
+	reg := templ.NewRegistry()
+	if err := reg.ReloadFromStore(tplStore); err != nil {
+		t.Fatalf("reload template registry: %v", err)
+	}
+	mgr := collector.NewManager(st, nil, collector.WithManagerTemplateRegistry(reg))
+	srv := NewServer(st, WithCollectorManager(mgr))
+	h := srv.Handler()
+
+	resp := doJSON(t, h, http.MethodPost, "/api/v1/monitors/"+strconv.FormatInt(created.ID, 10)+"/template-upgrade", map[string]any{
+		"template_id": 2,
+	}, http.StatusOK)
+	if int64(resp["template_id"].(float64)) != 2 {
+		t.Fatalf("unexpected template_id response: %v", resp)
+	}
+
+	monitorResp := doJSON(t, h, http.MethodGet, "/api/v1/monitors/"+strconv.FormatInt(created.ID, 10), nil, http.StatusOK)
+	if int64(monitorResp["template_id"].(float64)) != 2 {
+		t.Fatalf("monitor template_id not upgraded: %v", monitorResp)
+	}
+
+	logs := doJSON(t, h, http.MethodGet, "/api/v1/monitors/"+strconv.FormatInt(created.ID, 10)+"/compile-logs", nil, http.StatusOK)
+	if int(logs["total"].(float64)) < 2 {
+		t.Fatalf("expected compile logs for upgrade validate/apply, got: %v", logs)
+	}
+}
+
+type templateSeed struct {
+	id      int64
+	app     string
+	version int64
+	content string
+}
+
+func seedTemplateRows(t *testing.T, dbPath string, rows []templateSeed) {
+	t.Helper()
+	db, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`
+CREATE TABLE IF NOT EXISTS monitor_templates (
+  id INTEGER PRIMARY KEY,
+  app TEXT NOT NULL,
+  name TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT '',
+  content TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  is_hidden INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+`); err != nil {
+		t.Fatalf("create monitor_templates: %v", err)
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	for _, row := range rows {
+		if _, err := db.Exec(`
+INSERT INTO monitor_templates (id, app, name, category, content, version, is_hidden, created_at, updated_at)
+VALUES (?, ?, ?, '', ?, ?, 0, ?, ?)
+`, row.id, row.app, row.app+"-v"+strconv.FormatInt(row.version, 10), row.content, row.version, now, now); err != nil {
+			t.Fatalf("insert monitor_template id=%d: %v", row.id, err)
+		}
 	}
 }
 

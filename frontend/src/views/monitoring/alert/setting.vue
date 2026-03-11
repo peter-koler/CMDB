@@ -42,6 +42,11 @@
           </a-dropdown>
         </a-space>
         <a-space>
+          <a-select v-model:value="ruleScope" style="width: 160px" @change="handleScopeChange">
+            <a-select-option value="global">全局规则</a-select-option>
+            <a-select-option value="bound">实例规则</a-select-option>
+            <a-select-option value="all">全部规则</a-select-option>
+          </a-select>
           <a-input-search
             v-model:value="searchKeyword"
             placeholder="搜索规则名称/表达式"
@@ -365,8 +370,10 @@
             placeholder="请选择通知规则"
             allow-clear
             style="width: 100%"
+            show-search
+            option-filter-prop="label"
           >
-            <a-select-option v-for="rule in noticeRules" :key="rule.id" :value="rule.id">
+            <a-select-option v-for="rule in noticeRules" :key="rule.id" :value="rule.id" :label="rule.name">
               <a-space>
                 <span>{{ rule.name }}</span>
                 <a-tag v-if="rule.receiver_name" size="small" color="blue">
@@ -458,6 +465,7 @@ const searchKeyword = ref('')
 const selectedRowKeys = ref<number[]>([])
 const selectedRows = ref<AlertRule[]>([])
 const noticeRules = ref<AlertNotice[]>([])
+const ruleScope = ref<'global' | 'bound' | 'all'>('global')
 
 // 分页
 const pagination = reactive({
@@ -535,20 +543,21 @@ const severityColor = (severity?: string) => {
   return map[severity || ''] || 'default'
 }
 
+const normalizeList = (payload: any) => {
+  if (Array.isArray(payload?.items)) return { items: payload.items, total: payload.total || payload.items.length }
+  if (Array.isArray(payload)) return { items: payload, total: payload.length }
+  return { items: [], total: 0 }
+}
+
 // 加载通知规则列表
 const loadNoticeRules = async () => {
   try {
     const res = await getAlertNotices({ page_size: 1000 })
-    if (res.data?.code === 200) {
-      const data = res.data.data
-      if (Array.isArray(data)) {
-        noticeRules.value = data
-      } else if (data?.items) {
-        noticeRules.value = data.items
-      }
-    }
+    const parsed = normalizeList((res as any)?.data ?? res)
+    noticeRules.value = parsed.items
   } catch (error: any) {
     console.error('加载通知规则失败:', error)
+    noticeRules.value = []
   }
 }
 
@@ -563,24 +572,26 @@ const loadData = async () => {
   try {
     const res = await getAlertRules({
       q: searchKeyword.value,
+      include_bound: ruleScope.value !== 'global',
+      scope: ruleScope.value,
       page: pagination.current,
       page_size: pagination.pageSize
     })
-    if (res.data?.code === 200) {
-      const data = res.data.data
-      if (Array.isArray(data)) {
-        rules.value = data
-        pagination.total = data.length
-      } else if (data?.items) {
-        rules.value = data.items
-        pagination.total = data.total || data.items.length
-      }
-    }
+    const parsed = normalizeList((res as any)?.data ?? res)
+    rules.value = parsed.items
+    pagination.total = parsed.total
   } catch (error: any) {
     message.error(error?.response?.data?.message || '加载失败')
   } finally {
     loading.value = false
   }
+}
+
+const handleScopeChange = () => {
+  pagination.current = 1
+  selectedRowKeys.value = []
+  selectedRows.value = []
+  loadData()
 }
 
 // 表格选择变化

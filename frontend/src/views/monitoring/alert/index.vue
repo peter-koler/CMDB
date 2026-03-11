@@ -18,6 +18,13 @@
         <a-form-item label="关键字">
           <a-input v-model:value="filters.keyword" placeholder="告警名称/对象" style="width: 220px" />
         </a-form-item>
+        <a-form-item v-if="activeTab === 'rules'" label="规则范围">
+          <a-select v-model:value="ruleScope" style="width: 150px">
+            <a-select-option value="global">全局规则</a-select-option>
+            <a-select-option value="bound">实例规则</a-select-option>
+            <a-select-option value="all">全部规则</a-select-option>
+          </a-select>
+        </a-form-item>
         <a-form-item v-if="activeTab === 'history'" label="时间范围">
           <a-range-picker v-model:value="historyRange" style="width: 280px" />
         </a-form-item>
@@ -145,6 +152,7 @@ let socket: Socket | null = null
 
 const pagination = reactive({ current: 1, pageSize: 20, total: 0 })
 const filters = reactive({ level: undefined as string | undefined, keyword: '' })
+const ruleScope = ref<'global' | 'bound' | 'all'>('global')
 
 const canClaim = computed(() => userStore.hasPermission('monitoring:alert:claim') || userStore.hasPermission('monitoring:alert:center'))
 const canClose = computed(() => userStore.hasPermission('monitoring:alert:close') || userStore.hasPermission('monitoring:alert:center'))
@@ -229,7 +237,11 @@ const loadHistoryAlerts = async () => {
 }
 
 const loadRules = async () => {
-  const res = await getAlertRules({ q: filters.keyword || undefined })
+  const res = await getAlertRules({
+    q: filters.keyword || undefined,
+    include_bound: ruleScope.value !== 'global',
+    scope: ruleScope.value
+  })
   const parsed = normalizeList(res?.data)
   rules.value = parsed.items
 }
@@ -271,6 +283,7 @@ const syncTabByRoute = () => {
 const resetFilters = () => {
   filters.level = undefined
   filters.keyword = ''
+  ruleScope.value = 'global'
   historyRange.value = null
   pagination.current = 1
   loadActiveData()
@@ -404,6 +417,15 @@ watch(
   () => route.path,
   () => {
     syncTabByRoute()
+    pagination.current = 1
+    loadActiveData()
+  }
+)
+
+watch(
+  () => ruleScope.value,
+  () => {
+    if (activeTab.value !== 'rules') return
     pagination.current = 1
     loadActiveData()
   }
