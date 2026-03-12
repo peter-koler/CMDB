@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -32,9 +33,15 @@ type Server struct {
 	retryDeadLetter  func(int64) error
 	collectorManager *collector.Manager
 	vmQuery          *metrics.VMClient
+	stringLatest     func(monitorID int64, names []string) map[string]StringLatestValue
 }
 
 type Option func(*Server)
+
+type StringLatestValue struct {
+	Value     string
+	Timestamp int64
+}
 
 func WithResourceHub(hub *resourceHub) Option {
 	return func(s *Server) {
@@ -60,6 +67,12 @@ func WithCollectorManager(mgr *collector.Manager) Option {
 func WithVMQueryClient(client *metrics.VMClient) Option {
 	return func(s *Server) {
 		s.vmQuery = client
+	}
+}
+
+func WithStringLatestProvider(provider func(monitorID int64, names []string) map[string]StringLatestValue) Option {
+	return func(s *Server) {
+		s.stringLatest = provider
 	}
 }
 
@@ -112,6 +125,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/v1/collectors", s.handleCollectors)
 	s.mux.HandleFunc("/api/v1/metrics/series", s.handleMetricsSeries)
 	s.mux.HandleFunc("/api/v1/metrics/query-range", s.handleMetricsQueryRange)
+	s.mux.HandleFunc("/api/v1/metrics/latest", s.handleMetricsLatest)
+	s.mux.HandleFunc("/api/v1/metrics/export", s.handleMetricsExport)
 	s.mux.HandleFunc("/api/v1/metrics", s.handleMetricsIngest)
 	s.mux.HandleFunc("/api/v1/alerts", s.handleAlerts)
 	s.mux.HandleFunc("/api/v1/alerts/history", s.handleAlertsHistory)
@@ -243,6 +258,10 @@ func (s *Server) handleMonitorByID(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(parts) == 2 && parts[1] == "compile-logs" && r.Method == http.MethodGet {
 		s.handleCompileLogs(w, r, id)
+		return
+	}
+	if len(parts) == 2 && parts[1] == "metrics-view" {
+		s.handleMonitorMetricsView(w, r, id)
 		return
 	}
 	w.WriteHeader(http.StatusNotFound)
@@ -736,6 +755,225 @@ func (s *Server) handleMetricsQueryRange(w http.ResponseWriter, r *http.Request)
 		"to":    end.UTC().Format(time.RFC3339),
 		"step":  stepSec,
 	})
+}
+
+func (s *Server) handleMetricsLatest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if s.vmQuery == nil {
+		writeErr(w, http.StatusNotImplemented, "METRIC_QUERY_UNAVAILABLE", "vm query not configured")
+		return
+	}
+	monitorID, err := strconv.ParseInt(strings.TrimSpace(r.URL.Query().Get("monitor_id")), 10, 64)
+	if err != nil || monitorID <= 0 {
+		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "monitor_id is required")
+		return
+	}
+	start, end, err := resolveRangeWindow(r)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error())
+		return
+	}
+	stepSec := atoiDefault(r.URL.Query().Get("step"), 60)
+	if stepSec <= 0 {
+		stepSec = 60
+	}
+	staleSeconds := atoiDefault(r.URL.Query().Get("stale_seconds"), stepSec*2)
+	if staleSeconds <= 0 {
+		staleSeconds = stepSec * 2
+	}
+	names := parseCSVNames(r.URL.Query().Get("names"))
+	if name := strings.TrimSpace(r.URL.Query().Get("name")); name != "" {
+		names = append(names, name)
+	}
+	if len(names) == 0 {
+		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "name or names is required")
+		return
+	}
+
+	type latestItem struct {
+		Name      string   `json:"name"`
+		Value     *float64 `json:"value,omitempty"`
+		Text      *string  `json:"text,omitempty"`
+		Timestamp *int64   `json:"timestamp,omitempty"`
+		Stale     bool     `json:"stale"`
+	}
+
+	stringLatest := map[string]StringLatestValue{}
+	if s.stringLatest != nil {
+		stringLatest = s.stringLatest(monitorID, names)
+	}
+
+	out := make([]latestItem, 0, len(names))
+	for _, name := range names {
+		query := fmt.Sprintf(`%s{__monitor_id__="%d"}`, strings.TrimSpace(name), monitorID)
+		series, err := s.vmQuery.QueryRange(r.Context(), query, start, end, time.Duration(stepSec)*time.Second)
+		if err != nil {
+			// 字符串字段可能不是合法 PromQL metric name，若本地快照命中则降级返回字符串值。
+			if _, hasString := stringLatest[name]; !hasString {
+				writeErr(w, http.StatusBadGateway, "UPSTREAM_UNAVAILABLE", err.Error())
+				return
+			}
+			series = nil
+		}
+		var latestTs int64
+		var latestVal float64
+		var hasValue bool
+		for _, one := range series {
+			for _, point := range one.Points {
+				if !hasValue || point.Timestamp >= latestTs {
+					latestTs = point.Timestamp
+					latestVal = point.Value
+					hasValue = true
+				}
+			}
+		}
+		item := latestItem{Name: name, Stale: true}
+		if hasValue {
+			item.Value = &latestVal
+			item.Timestamp = &latestTs
+			item.Stale = end.Sub(time.UnixMilli(latestTs)) > time.Duration(staleSeconds)*time.Second
+		}
+		if latest, ok := stringLatest[name]; ok {
+			text := strings.TrimSpace(latest.Value)
+			if text != "" {
+				item.Text = &text
+			}
+			if !hasValue && latest.Timestamp > 0 {
+				ts := latest.Timestamp
+				item.Timestamp = &ts
+				item.Stale = end.Sub(time.UnixMilli(ts)) > time.Duration(staleSeconds)*time.Second
+			}
+		}
+		out = append(out, item)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items": out,
+		"total": len(out),
+		"from":  start.UTC().Format(time.RFC3339),
+		"to":    end.UTC().Format(time.RFC3339),
+		"step":  stepSec,
+	})
+}
+
+func (s *Server) handleMetricsExport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if s.vmQuery == nil {
+		writeErr(w, http.StatusNotImplemented, "METRIC_QUERY_UNAVAILABLE", "vm query not configured")
+		return
+	}
+	monitorID, err := strconv.ParseInt(strings.TrimSpace(r.URL.Query().Get("monitor_id")), 10, 64)
+	if err != nil || monitorID <= 0 {
+		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "monitor_id is required")
+		return
+	}
+	monitor, err := s.store.Get(monitorID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeErr(w, http.StatusNotFound, "MONITOR_NOT_FOUND", err.Error())
+			return
+		}
+		writeStoreErr(w, err)
+		return
+	}
+
+	start, end, err := resolveRangeWindow(r)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error())
+		return
+	}
+	stepSec := atoiDefault(r.URL.Query().Get("step"), 60)
+	if stepSec <= 0 {
+		stepSec = 60
+	}
+	names := parseCSVNames(r.URL.Query().Get("names"))
+	if name := strings.TrimSpace(r.URL.Query().Get("name")); name != "" {
+		names = append(names, name)
+	}
+	if len(names) == 0 {
+		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "name or names is required")
+		return
+	}
+
+	type metricRow struct {
+		MetricName string
+		Timestamp  int64
+		Value      float64
+	}
+	rows := make([]metricRow, 0, 256)
+	for _, name := range names {
+		query := fmt.Sprintf(`%s{__monitor_id__="%d"}`, strings.TrimSpace(name), monitorID)
+		series, err := s.vmQuery.QueryRange(r.Context(), query, start, end, time.Duration(stepSec)*time.Second)
+		if err != nil {
+			writeErr(w, http.StatusBadGateway, "UPSTREAM_UNAVAILABLE", err.Error())
+			return
+		}
+		for _, one := range series {
+			for _, point := range one.Points {
+				rows = append(rows, metricRow{
+					MetricName: name,
+					Timestamp:  point.Timestamp,
+					Value:      point.Value,
+				})
+			}
+		}
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].MetricName == rows[j].MetricName {
+			return rows[i].Timestamp < rows[j].Timestamp
+		}
+		return rows[i].MetricName < rows[j].MetricName
+	})
+
+	ts := time.Now().UTC().Format("20060102_150405")
+	base := fmt.Sprintf("monitor_%d_metrics", monitorID)
+	if len(names) == 1 {
+		base = sanitizeFilename(names[0])
+		if base == "" {
+			base = fmt.Sprintf("monitor_%d_metric", monitorID)
+		}
+	}
+	filename := fmt.Sprintf("%s_%s.csv", base, ts)
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("\uFEFF"))
+
+	writer := csv.NewWriter(w)
+	_ = writer.Write([]string{
+		"monitor_id",
+		"monitor_name",
+		"app",
+		"ci_code",
+		"target",
+		"metric_name",
+		"timestamp",
+		"time",
+		"value",
+	})
+	for _, row := range rows {
+		_ = writer.Write([]string{
+			strconv.FormatInt(monitorID, 10),
+			monitor.Name,
+			monitor.App,
+			monitor.CICode,
+			monitor.Target,
+			row.MetricName,
+			strconv.FormatInt(row.Timestamp, 10),
+			time.UnixMilli(row.Timestamp).UTC().Format(time.RFC3339),
+			strconv.FormatFloat(row.Value, 'f', -1, 64),
+		})
+	}
+	writer.Flush()
+	if err := writer.Error(); err != nil {
+		return
+	}
 }
 
 func (s *Server) handleMetricsIngest(w http.ResponseWriter, r *http.Request) {
@@ -1363,6 +1601,37 @@ func (s *Server) handleCompileLogs(w http.ResponseWriter, r *http.Request, id in
 	})
 }
 
+func (s *Server) handleMonitorMetricsView(w http.ResponseWriter, r *http.Request, id int64) {
+	switch r.Method {
+	case http.MethodGet:
+		item, err := s.store.GetMetricsViewPref(id)
+		if err != nil {
+			writeStoreErr(w, err)
+			return
+		}
+		if item.VisibleFieldsByGroup == nil {
+			item.VisibleFieldsByGroup = map[string][]string{}
+		}
+		writeJSON(w, http.StatusOK, item)
+	case http.MethodPut:
+		var req struct {
+			VisibleFieldsByGroup map[string][]string `json:"visible_fields_by_group"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error())
+			return
+		}
+		item, err := s.store.UpsertMetricsViewPref(id, req.VisibleFieldsByGroup)
+		if err != nil {
+			writeStoreErr(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, item)
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
 func (s *Server) preCompileAndAudit(monitor *model.Monitor, stage string) error {
 	if s.collectorManager == nil {
 		return nil
@@ -1512,6 +1781,26 @@ func parseCSVNames(raw string) []string {
 		}
 		seen[name] = struct{}{}
 		out = append(out, name)
+	}
+	return out
+}
+
+func sanitizeFilename(raw string) string {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return ""
+	}
+	var b strings.Builder
+	for _, ch := range value {
+		if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_' || ch == '-' {
+			b.WriteRune(ch)
+			continue
+		}
+		b.WriteByte('_')
+	}
+	out := strings.Trim(b.String(), "_")
+	if out == "" {
+		return "metric"
 	}
 	return out
 }

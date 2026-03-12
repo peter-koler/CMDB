@@ -151,6 +151,12 @@ const routes = [
             meta: { title: '监控列表', icon: 'DesktopOutlined', permission: 'monitoring:list' }
           },
           {
+            path: 'target/:id',
+            name: 'MonitoringTargetDetail',
+            component: () => import('@/views/monitoring/target/detail.vue'),
+            meta: { title: '监控任务详情', permission: 'monitoring:list', hideInMenu: true }
+          },
+          {
             path: 'target',
             redirect: '/monitoring/list'
           },

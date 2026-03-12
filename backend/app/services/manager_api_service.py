@@ -125,6 +125,84 @@ class ManagerAPIService:
             self._on_failure()
         raise last_error
 
+    def request_raw(
+        self,
+        method: str,
+        path: str,
+        payload: Optional[dict] = None,
+        params: Optional[dict] = None,
+        auth_header: Optional[str] = None,
+    ) -> tuple[int, Dict[str, str], bytes]:
+        self._before_request()
+
+        url = self._base_url() + path
+        if params:
+            q = urllib.parse.urlencode(params)
+            url = f"{url}?{q}"
+
+        timeout = float(self._cfg("GO_MANAGER_TIMEOUT_SECONDS", 3))
+        max_retries = int(self._cfg("GO_MANAGER_MAX_RETRIES", 2))
+        headers = {"Content-Type": "application/json"}
+        if auth_header:
+            headers["Authorization"] = auth_header
+
+        body = None
+        if payload is not None:
+            body = json.dumps(payload).encode("utf-8")
+
+        last_error: Optional[ManagerError] = None
+        for attempt in range(max_retries + 1):
+            req = urllib.request.Request(url=url, method=method, data=body, headers=headers)
+            try:
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    status = resp.status
+                    raw = resp.read()
+                    raw_headers = {k: v for k, v in resp.headers.items()}
+                if status >= 400:
+                    data = self._decode(raw)
+                    code = "UPSTREAM_ERROR"
+                    message = "Go Manager error"
+                    if isinstance(data, dict):
+                        err = data.get("error", {})
+                        if isinstance(err, dict):
+                            code = err.get("code", code)
+                            message = err.get("message", message)
+                    raise ManagerError(status=status, code=code, message=message)
+                self._on_success()
+                return status, raw_headers, raw
+            except ManagerError as e:
+                retriable = e.status >= 500
+                last_error = e
+                if not retriable or attempt == max_retries:
+                    break
+                time.sleep(0.05 * (attempt + 1))
+            except urllib.error.HTTPError as e:
+                raw = e.read() if e.fp else b""
+                data = self._decode(raw)
+                code = "UPSTREAM_ERROR"
+                message = "Go Manager error"
+                if isinstance(data, dict):
+                    err = data.get("error", {})
+                    if isinstance(err, dict):
+                        code = err.get("code", code)
+                        message = err.get("message", message)
+                last_error = ManagerError(status=e.code, code=code, message=message)
+                if e.code < 500 or attempt == max_retries:
+                    break
+                time.sleep(0.05 * (attempt + 1))
+            except (urllib.error.URLError, TimeoutError) as e:
+                self._on_failure()
+                last_error = ManagerError(status=503, code="UPSTREAM_UNAVAILABLE", message=str(e))
+                if attempt == max_retries:
+                    break
+                time.sleep(0.05 * (attempt + 1))
+
+        if last_error is None:
+            last_error = ManagerError(status=500, code="INTERNAL_ERROR", message="unknown manager client error")
+        if last_error.status >= 500:
+            self._on_failure()
+        raise last_error
+
     @staticmethod
     def _decode(raw: bytes) -> Any:
         if not raw:

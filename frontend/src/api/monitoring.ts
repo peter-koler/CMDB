@@ -181,6 +181,13 @@ export const getMonitoringTargets = (params?: Record<string, any>) => {
   })
 }
 
+export const getMonitoringTarget = (monitorId: number) => {
+  return request({
+    url: `/monitoring/targets/${monitorId}`,
+    method: 'GET'
+  })
+}
+
 export const createMonitoringTarget = (data: Partial<MonitoringTarget>) => {
   return request({
     url: '/monitoring/targets',
@@ -239,6 +246,14 @@ export interface MetricRangeSeries {
   points: MetricRangePoint[]
 }
 
+export interface MetricLatestItem {
+  name: string
+  value?: number
+  text?: string
+  timestamp?: number
+  stale?: boolean
+}
+
 export const getTargetMetricSeries = (monitorId: number, params?: Record<string, any>) => {
   return request({
     url: `/monitoring/targets/${monitorId}/metrics/series`,
@@ -252,6 +267,38 @@ export const queryTargetMetricRange = (monitorId: number, params?: Record<string
     url: `/monitoring/targets/${monitorId}/metrics/query-range`,
     method: 'GET',
     params
+  })
+}
+
+export const getTargetMetricLatest = (monitorId: number, params?: Record<string, any>) => {
+  return request({
+    url: `/monitoring/targets/${monitorId}/metrics/latest`,
+    method: 'GET',
+    params
+  })
+}
+
+export const exportTargetMetric = (monitorId: number, params?: Record<string, any>) => {
+  return request({
+    url: `/monitoring/targets/${monitorId}/metrics/export`,
+    method: 'GET',
+    params,
+    responseType: 'blob'
+  })
+}
+
+export const getTargetMetricsView = (monitorId: number) => {
+  return request({
+    url: `/monitoring/targets/${monitorId}/metrics-view`,
+    method: 'GET'
+  })
+}
+
+export const saveTargetMetricsView = (monitorId: number, data: { visible_fields_by_group: Record<string, string[]> }) => {
+  return request({
+    url: `/monitoring/targets/${monitorId}/metrics-view`,
+    method: 'PUT',
+    data
   })
 }
 

@@ -13,6 +13,7 @@ import (
 
 	"manager-go/internal/alert"
 	"manager-go/internal/collector"
+	"manager-go/internal/metrics"
 	"manager-go/internal/model"
 	"manager-go/internal/store"
 	templ "manager-go/internal/template"
@@ -144,6 +145,49 @@ func TestMetricsIngest(t *testing.T) {
 	}, http.StatusOK)
 	if int(resp["accepted"].(float64)) != 1 || called != 1 {
 		t.Fatalf("ingest failed resp=%v called=%d", resp, called)
+	}
+}
+
+func TestMetricsLatestIncludesStringFallback(t *testing.T) {
+	vm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"matrix","result":[]}}`))
+	}))
+	defer vm.Close()
+
+	srv := NewServer(
+		store.NewMonitorStore(),
+		WithVMQueryClient(metrics.NewVMClient(vm.URL, time.Second)),
+		WithStringLatestProvider(func(monitorID int64, names []string) map[string]StringLatestValue {
+			if monitorID != 1 || len(names) == 0 {
+				return map[string]StringLatestValue{}
+			}
+			return map[string]StringLatestValue{
+				"redis_version": {
+					Value:     "7.2.4",
+					Timestamp: 1700000000000,
+				},
+			}
+		}),
+	)
+	h := srv.Handler()
+	resp := doJSON(t, h, http.MethodGet, "/api/v1/metrics/latest?monitor_id=1&names=redis_version&from=1699999999&to=1700000001&step=60", nil, http.StatusOK)
+	items, ok := resp["items"].([]any)
+	if !ok || len(items) != 1 {
+		t.Fatalf("latest items invalid: %v", resp)
+	}
+	item, _ := items[0].(map[string]any)
+	if item["name"] != "redis_version" {
+		t.Fatalf("unexpected metric name: %v", item)
+	}
+	if item["text"] != "7.2.4" {
+		t.Fatalf("unexpected text value: %v", item)
+	}
+	if int64(item["timestamp"].(float64)) != 1700000000000 {
+		t.Fatalf("unexpected timestamp: %v", item)
+	}
+	if stale, _ := item["stale"].(bool); stale {
+		t.Fatalf("unexpected stale item: %v", item)
 	}
 }
 

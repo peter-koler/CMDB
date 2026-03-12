@@ -124,6 +124,8 @@ func main() {
 		periodicRuleDefs   []store.RuntimeAlertRule
 		realtimeReloadedAt time.Time
 		reducerRef         *alert.Reducer
+		unknownVarLogMu    sync.Mutex
+		unknownVarLogAt    = map[string]time.Time{}
 	)
 	reloadRealtimeAlertRules := func() {
 		if alertRuntimeStore == nil {
@@ -271,8 +273,37 @@ func main() {
 			if !store.RuleAppliesToTarget(def, point.MonitorID, point.App, point.Instance) {
 				continue
 			}
-			ev, matched, err := alertEngine.Evaluate(rule, point.MonitorID, vars, time.Now())
+			runtimeVars := vars
+			ev, matched, err := alertEngine.Evaluate(rule, point.MonitorID, runtimeVars, time.Now())
+			// Runtime alias补全: 兼容 server_up/app_server_up、metrics_field 与 field 名差异。
+			for retry := 0; err != nil && retry < 4; retry++ {
+				unknown := parseUnknownVariable(err)
+				if unknown == "" {
+					break
+				}
+				nextVars, changed := enrichUnknownVariable(runtimeVars, unknown)
+				if !changed {
+					break
+				}
+				runtimeVars = nextVars
+				ev, matched, err = alertEngine.Evaluate(rule, point.MonitorID, runtimeVars, time.Now())
+			}
 			if err != nil {
+				if unknown := parseUnknownVariable(err); unknown != "" {
+					logKey := fmt.Sprintf("%d:%d:%s", point.MonitorID, rule.ID, unknown)
+					shouldLog := false
+					now := time.Now()
+					unknownVarLogMu.Lock()
+					if last, ok := unknownVarLogAt[logKey]; !ok || now.Sub(last) >= time.Minute {
+						unknownVarLogAt[logKey] = now
+						shouldLog = true
+					}
+					unknownVarLogMu.Unlock()
+					if shouldLog {
+						log.Printf("alert eval skip rule=%s monitor=%d reason=unknown variable: %s", rule.Name, point.MonitorID, unknown)
+					}
+					continue
+				}
 				log.Printf("alert eval error rule=%s monitor=%d err=%v", rule.Name, point.MonitorID, err)
 				continue
 			}
@@ -299,11 +330,25 @@ func main() {
 		metricSnapshot   = map[int64]map[string]float64{}
 		metricSnapshotAt = map[int64]time.Time{}
 	)
+	type latestStringMetric struct {
+		Value     string
+		Timestamp int64
+	}
+	var (
+		stringSnapshotMu sync.RWMutex
+		stringSnapshot   = map[int64]map[string]latestStringMetric{}
+	)
 	updateMetricSnapshot := func(point model.MetricPoint) map[string]float64 {
 		base := pointVars(point)
 		// direct aliases for expression convenience, e.g. used_memory > 0
 		base[strings.TrimSpace(point.Field)] = point.Value
 		base[strings.TrimSpace(point.Metrics)] = point.Value
+		if strings.TrimSpace(point.Field) == "success" {
+			base["server_up"] = point.Value
+			if appToken := normalizeAlertToken(point.App); appToken != "" {
+				base[appToken+"_server_up"] = point.Value
+			}
+		}
 
 		now := time.Now()
 		metricSnapshotMu.Lock()
@@ -332,6 +377,82 @@ func main() {
 		return merged
 	}
 
+	updateStringSnapshot := func(rep *pb.CollectRep) {
+		if rep == nil || rep.GetMonitorId() <= 0 {
+			return
+		}
+		fields := rep.GetFields()
+		if len(fields) == 0 {
+			return
+		}
+		timestamp := rep.GetTimeUnixMs()
+		if timestamp <= 0 {
+			timestamp = time.Now().UnixMilli()
+		}
+		stringSnapshotMu.Lock()
+		cur := stringSnapshot[rep.GetMonitorId()]
+		if cur == nil {
+			cur = map[string]latestStringMetric{}
+		}
+		for rawKey, rawValue := range fields {
+			key := strings.TrimSpace(rawKey)
+			if key == "" || key == "identity" || key == "section" {
+				continue
+			}
+			cur[key] = latestStringMetric{
+				Value:     strings.TrimSpace(rawValue),
+				Timestamp: timestamp,
+			}
+		}
+		stringSnapshot[rep.GetMonitorId()] = cur
+		stringSnapshotMu.Unlock()
+	}
+
+	loadStringSnapshot := func(monitorID int64, names []string) map[string]httpapi.StringLatestValue {
+		out := make(map[string]httpapi.StringLatestValue, len(names))
+		if monitorID <= 0 || len(names) == 0 {
+			return out
+		}
+		stringSnapshotMu.RLock()
+		cur := stringSnapshot[monitorID]
+		if len(cur) == 0 {
+			stringSnapshotMu.RUnlock()
+			return out
+		}
+		for _, rawName := range names {
+			name := strings.TrimSpace(rawName)
+			if name == "" {
+				continue
+			}
+			if item, ok := cur[name]; ok {
+				out[name] = httpapi.StringLatestValue{
+					Value:     item.Value,
+					Timestamp: item.Timestamp,
+				}
+				continue
+			}
+			if strings.HasSuffix(name, "_ok") {
+				base := strings.TrimSuffix(name, "_ok")
+				item, ok := cur[base]
+				if !ok {
+					continue
+				}
+				if okValue, mapped := statusStringToFloat(item.Value); mapped {
+					text := "FAIL"
+					if okValue >= 0.5 {
+						text = "OK"
+					}
+					out[name] = httpapi.StringLatestValue{
+						Value:     text,
+						Timestamp: item.Timestamp,
+					}
+				}
+			}
+		}
+		stringSnapshotMu.RUnlock()
+		return out
+	}
+
 	ingestPoint := func(point model.MetricPoint) error {
 		if point.UnixMs <= 0 {
 			point.UnixMs = time.Now().UnixMilli()
@@ -357,6 +478,7 @@ func main() {
 
 	if collectorManager != nil {
 		collectorManager.SetReportHandler(func(collectorID string, rep *pb.CollectRep) {
+			updateStringSnapshot(rep)
 			points := collectorReportToPoints(st, collectorID, rep)
 			for _, point := range points {
 				if err := ingestPoint(point); err != nil {
@@ -387,6 +509,7 @@ func main() {
 		httpapi.WithDeadLetterStore(deadLetters, retryDeadLetter),
 		httpapi.WithCollectorManager(collectorManager),
 		httpapi.WithVMQueryClient(vmQueryClient),
+		httpapi.WithStringLatestProvider(loadStringSnapshot),
 	)
 
 	go func() {
@@ -662,8 +785,21 @@ func collectorReportToPoints(st *store.MonitorStore, collectorID string, rep *pb
 		if key == "" || key == "identity" || key == "section" {
 			continue
 		}
-		value, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
+		trimmed := strings.TrimSpace(raw)
+		value, err := strconv.ParseFloat(trimmed, 64)
 		if err != nil || math.IsNaN(value) || math.IsInf(value, 0) {
+			if okValue, mapped := statusStringToFloat(trimmed); mapped {
+				points = append(points, model.MetricPoint{
+					MonitorID: rep.GetMonitorId(),
+					App:       app,
+					Metrics:   metricGroup,
+					Field:     key + "_ok",
+					Value:     okValue,
+					UnixMs:    timestamp,
+					Instance:  instance,
+					Labels:    cloneLabels(baseLabels),
+				})
+			}
 			continue
 		}
 		points = append(points, model.MetricPoint{
@@ -710,6 +846,99 @@ func pointVars(p model.MetricPoint) map[string]float64 {
 	}
 	out[p.Metrics+"_"+p.Field] = p.Value
 	return out
+}
+
+func statusStringToFloat(raw string) (float64, bool) {
+	text := strings.ToLower(strings.TrimSpace(raw))
+	switch text {
+	case "ok", "true", "yes", "up", "online", "connected", "success", "master":
+		return 1, true
+	case "err", "error", "false", "no", "down", "offline", "disconnected", "fail", "failed":
+		return 0, true
+	default:
+		return 0, false
+	}
+}
+
+func normalizeAlertToken(raw string) string {
+	v := strings.TrimSpace(strings.ToLower(raw))
+	if v == "" {
+		return ""
+	}
+	buf := make([]byte, 0, len(v))
+	for i := 0; i < len(v); i++ {
+		ch := v[i]
+		if (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '_' {
+			buf = append(buf, ch)
+			continue
+		}
+		buf = append(buf, '_')
+	}
+	if len(buf) > 0 && buf[0] >= '0' && buf[0] <= '9' {
+		buf = append([]byte{'m', '_'}, buf...)
+	}
+	return strings.Trim(string(buf), "_")
+}
+
+func parseUnknownVariable(err error) string {
+	if err == nil {
+		return ""
+	}
+	const prefix = "unknown variable:"
+	msg := strings.TrimSpace(err.Error())
+	if !strings.HasPrefix(msg, prefix) {
+		return ""
+	}
+	return strings.TrimSpace(msg[len(prefix):])
+}
+
+func enrichUnknownVariable(vars map[string]float64, unknown string) (map[string]float64, bool) {
+	key := strings.TrimSpace(unknown)
+	if key == "" {
+		return vars, false
+	}
+	if _, ok := vars[key]; ok {
+		return vars, false
+	}
+
+	clone := func() map[string]float64 {
+		out := make(map[string]float64, len(vars)+2)
+		for k, v := range vars {
+			out[k] = v
+		}
+		return out
+	}
+
+	// app_server_up 缺失时，回退到通用 server_up。
+	if strings.HasSuffix(key, "_server_up") {
+		if v, ok := vars["server_up"]; ok {
+			out := clone()
+			out[key] = v
+			return out, true
+		}
+	}
+
+	// 尝试从 "<metric_group>_<field>" 形式反向映射到 "<field>"。
+	needle := "_" + key
+	var (
+		hitValue float64
+		hitCount int
+	)
+	for k, v := range vars {
+		if strings.HasSuffix(k, needle) {
+			hitValue = v
+			hitCount++
+			if hitCount > 1 {
+				break
+			}
+		}
+	}
+	if hitCount == 1 {
+		out := clone()
+		out[key] = hitValue
+		return out, true
+	}
+	return vars, false
 }
 
 func renderAlertContent(def store.RuntimeAlertRule, ev alert.Event, metric string, value float64) string {

@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 import json
 import re
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, make_response, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
 from sqlalchemy.exc import IntegrityError
 
@@ -437,12 +437,12 @@ def _redis_default_alert_rules() -> list[dict]:
             "name": "Redis实例不可用",
             "type": "realtime_metric",
             "metric": "redis_server_up",
-            "operator": "<",
-            "threshold": 0.5,
+            "operator": "==",
+            "threshold": 0,
             "level": "critical",
             "period": 60,
             "times": 1,
-            "expr": "redis_server_up < 0.5",
+            "expr": "redis_server_up == 0",
             "enabled": True,
             "template": "实例不可用",
         },
@@ -515,12 +515,12 @@ def _redis_default_alert_rules() -> list[dict]:
             "name": "RedisRDB失败",
             "type": "realtime_metric",
             "metric": "rdb_last_bgsave_status_ok",
-            "operator": "<",
-            "threshold": 0.5,
+            "operator": "==",
+            "threshold": 0,
             "level": "critical",
             "period": 60,
             "times": 1,
-            "expr": "rdb_last_bgsave_status_ok < 0.5",
+            "expr": "rdb_last_bgsave_status_ok == 0",
             "enabled": True,
             "template": "RDB失败",
         },
@@ -528,12 +528,12 @@ def _redis_default_alert_rules() -> list[dict]:
             "name": "RedisAOF失败",
             "type": "realtime_metric",
             "metric": "aof_last_bgrewrite_status_ok",
-            "operator": "<",
-            "threshold": 0.5,
+            "operator": "==",
+            "threshold": 0,
             "level": "critical",
             "period": 60,
             "times": 1,
-            "expr": "aof_last_bgrewrite_status_ok < 0.5",
+            "expr": "aof_last_bgrewrite_status_ok == 0",
             "enabled": True,
             "template": "AOF失败",
         },
@@ -1034,6 +1034,65 @@ def query_target_metric_range(monitor_id: int):
         "/api/v1/metrics/query-range",
         params=params,
         fallback=lambda: {"items": [], "total": 0},
+    )
+
+
+@monitoring_target_bp.route("/targets/<int:monitor_id>/metrics/latest", methods=["GET"])
+@jwt_required()
+@require_any_permission("monitoring:target:view", "monitoring:list:view")
+def get_target_metric_latest(monitor_id: int):
+    params = request.args.to_dict()
+    params["monitor_id"] = monitor_id
+    return _manager_call(
+        "GET",
+        "/api/v1/metrics/latest",
+        params=params,
+        fallback=lambda: {"items": [], "total": 0},
+    )
+
+
+@monitoring_target_bp.route("/targets/<int:monitor_id>/metrics/export", methods=["GET"])
+@jwt_required()
+@require_any_permission("monitoring:target:view", "monitoring:list:view")
+def export_target_metric_range(monitor_id: int):
+    params = request.args.to_dict()
+    params["monitor_id"] = monitor_id
+    try:
+        status, headers, raw = manager_api_service.request_raw(
+            method="GET",
+            path="/api/v1/metrics/export",
+            params=params,
+            auth_header=_auth_header(),
+        )
+        resp = make_response(raw, status)
+        resp.headers["Content-Type"] = headers.get("Content-Type", "text/csv; charset=utf-8")
+        if headers.get("Content-Disposition"):
+            resp.headers["Content-Disposition"] = headers["Content-Disposition"]
+        return resp
+    except ManagerError as e:
+        return jsonify({"code": e.status, "message": e.message, "error_code": e.code}), e.status
+
+
+@monitoring_target_bp.route("/targets/<int:monitor_id>/metrics-view", methods=["GET"])
+@jwt_required()
+@require_any_permission("monitoring:target:view", "monitoring:list:view")
+def get_target_metrics_view(monitor_id: int):
+    return _manager_call(
+        "GET",
+        f"/api/v1/monitors/{monitor_id}/metrics-view",
+        fallback=lambda: {"monitor_id": monitor_id, "visible_fields_by_group": {}},
+    )
+
+
+@monitoring_target_bp.route("/targets/<int:monitor_id>/metrics-view", methods=["PUT"])
+@jwt_required()
+@require_any_permission("monitoring:target:update", "monitoring:list:edit")
+def save_target_metrics_view(monitor_id: int):
+    payload = request.get_json() or {}
+    return _manager_call(
+        "PUT",
+        f"/api/v1/monitors/{monitor_id}/metrics-view",
+        payload=payload,
     )
 
 

@@ -168,6 +168,14 @@ func (m *Manager) RegisterWithInfo(id, addr, ip, version, mode string) error {
 				switch state {
 				case StateConnected:
 					m.collectorStore.SetOnline(collectorID)
+					// Collector 重启后本地内存任务会丢失，这里在重连成功时主动重推一次所有启用监控任务。
+					go func() {
+						if err := m.SyncAllMonitors(); err != nil {
+							log.Printf("[Manager] Failed to resync monitor tasks after collector %s connected: %v", collectorID, err)
+						} else {
+							log.Printf("[Manager] Resynced monitor tasks after collector %s connected", collectorID)
+						}
+					}()
 				case StateDisconnected, StateReconnecting:
 					m.collectorStore.SetOffline(collectorID)
 				}

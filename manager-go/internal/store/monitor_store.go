@@ -25,10 +25,11 @@ var (
 )
 
 type MonitorStore struct {
-	mu      sync.RWMutex
-	nextID  int64
-	records map[int64]model.Monitor
-	db      *sql.DB
+	mu           sync.RWMutex
+	nextID       int64
+	records      map[int64]model.Monitor
+	metricsViews map[int64]MonitorMetricsViewPref
+	db           *sql.DB
 }
 
 type MonitorCompileLog struct {
@@ -42,10 +43,17 @@ type MonitorCompileLog struct {
 	CreatedAt string `json:"created_at"`
 }
 
+type MonitorMetricsViewPref struct {
+	MonitorID            int64               `json:"monitor_id"`
+	VisibleFieldsByGroup map[string][]string `json:"visible_fields_by_group"`
+	UpdatedAt            string              `json:"updated_at,omitempty"`
+}
+
 func NewMonitorStore() *MonitorStore {
 	return &MonitorStore{
-		nextID:  1,
-		records: map[int64]model.Monitor{},
+		nextID:       1,
+		records:      map[int64]model.Monitor{},
+		metricsViews: map[int64]MonitorMetricsViewPref{},
 	}
 }
 
@@ -63,9 +71,10 @@ func NewMonitorStoreWithPath(dbPath string) (*MonitorStore, error) {
 	db.SetConnMaxLifetime(time.Hour)
 
 	s := &MonitorStore{
-		nextID:  1,
-		records: map[int64]model.Monitor{},
-		db:      db,
+		nextID:       1,
+		records:      map[int64]model.Monitor{},
+		metricsViews: map[int64]MonitorMetricsViewPref{},
+		db:           db,
 	}
 	if err := s.initTable(); err != nil {
 		return nil, err
@@ -207,7 +216,100 @@ func (s *MonitorStore) Delete(id int64, version int64) error {
 	if err := s.persistDelete(id); err != nil {
 		return err
 	}
+	delete(s.metricsViews, id)
+	if s.db != nil {
+		_, _ = s.db.Exec(`DELETE FROM monitor_view_prefs WHERE monitor_id = ?`, id)
+	}
 	return nil
+}
+
+func (s *MonitorStore) GetMetricsViewPref(monitorID int64) (MonitorMetricsViewPref, error) {
+	s.mu.RLock()
+	_, ok := s.records[monitorID]
+	if !ok {
+		s.mu.RUnlock()
+		return MonitorMetricsViewPref{}, ErrNotFound
+	}
+	if s.db == nil {
+		item, exists := s.metricsViews[monitorID]
+		s.mu.RUnlock()
+		if !exists {
+			return MonitorMetricsViewPref{
+				MonitorID:            monitorID,
+				VisibleFieldsByGroup: map[string][]string{},
+			}, nil
+		}
+		out := item
+		out.VisibleFieldsByGroup = cloneStringSliceMap(item.VisibleFieldsByGroup)
+		return out, nil
+	}
+	s.mu.RUnlock()
+
+	row := s.db.QueryRow(`
+SELECT metrics_visible_json, updated_at
+FROM monitor_view_prefs
+WHERE monitor_id = ?
+`, monitorID)
+	var rawJSON string
+	var updatedAt string
+	switch err := row.Scan(&rawJSON, &updatedAt); {
+	case err == nil:
+		parsed := parseMetricsVisibleJSON(rawJSON)
+		return MonitorMetricsViewPref{
+			MonitorID:            monitorID,
+			VisibleFieldsByGroup: parsed,
+			UpdatedAt:            updatedAt,
+		}, nil
+	case errors.Is(err, sql.ErrNoRows):
+		return MonitorMetricsViewPref{
+			MonitorID:            monitorID,
+			VisibleFieldsByGroup: map[string][]string{},
+		}, nil
+	default:
+		return MonitorMetricsViewPref{}, err
+	}
+}
+
+func (s *MonitorStore) UpsertMetricsViewPref(monitorID int64, visibleFieldsByGroup map[string][]string) (MonitorMetricsViewPref, error) {
+	s.mu.Lock()
+	_, ok := s.records[monitorID]
+	if !ok {
+		s.mu.Unlock()
+		return MonitorMetricsViewPref{}, ErrNotFound
+	}
+	sanitized := sanitizeMetricsVisibleMap(visibleFieldsByGroup)
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if s.db == nil {
+		item := MonitorMetricsViewPref{
+			MonitorID:            monitorID,
+			VisibleFieldsByGroup: cloneStringSliceMap(sanitized),
+			UpdatedAt:            now,
+		}
+		s.metricsViews[monitorID] = item
+		s.mu.Unlock()
+		return item, nil
+	}
+	s.mu.Unlock()
+
+	raw, err := json.Marshal(sanitized)
+	if err != nil {
+		return MonitorMetricsViewPref{}, err
+	}
+	_, err = s.db.Exec(`
+INSERT INTO monitor_view_prefs (monitor_id, metrics_visible_json, updated_at)
+VALUES (?, ?, ?)
+ON CONFLICT(monitor_id) DO UPDATE SET
+	metrics_visible_json = excluded.metrics_visible_json,
+	updated_at = excluded.updated_at
+`, monitorID, string(raw), now)
+	if err != nil {
+		return MonitorMetricsViewPref{}, err
+	}
+	return MonitorMetricsViewPref{
+		MonitorID:            monitorID,
+		VisibleFieldsByGroup: sanitized,
+		UpdatedAt:            now,
+	}, nil
 }
 
 func validateCreate(in model.MonitorCreateInput) error {
@@ -249,6 +351,89 @@ func cloneStringMap(src map[string]string) map[string]string {
 		out[k] = v
 	}
 	return out
+}
+
+func cloneStringSliceMap(src map[string][]string) map[string][]string {
+	if len(src) == 0 {
+		return map[string][]string{}
+	}
+	out := make(map[string][]string, len(src))
+	for key, values := range src {
+		copied := make([]string, 0, len(values))
+		for _, value := range values {
+			trimmed := strings.TrimSpace(value)
+			if trimmed == "" {
+				continue
+			}
+			copied = append(copied, trimmed)
+		}
+		out[strings.TrimSpace(key)] = copied
+	}
+	return out
+}
+
+func sanitizeMetricsVisibleMap(src map[string][]string) map[string][]string {
+	if len(src) == 0 {
+		return map[string][]string{}
+	}
+	out := make(map[string][]string, len(src))
+	for rawGroup, rawFields := range src {
+		group := strings.TrimSpace(rawGroup)
+		if group == "" {
+			continue
+		}
+		seen := make(map[string]struct{}, len(rawFields))
+		fields := make([]string, 0, len(rawFields))
+		for _, rawField := range rawFields {
+			field := strings.TrimSpace(rawField)
+			if field == "" {
+				continue
+			}
+			if _, ok := seen[field]; ok {
+				continue
+			}
+			seen[field] = struct{}{}
+			fields = append(fields, field)
+		}
+		out[group] = fields
+	}
+	return out
+}
+
+func parseMetricsVisibleJSON(raw string) map[string][]string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return map[string][]string{}
+	}
+	var parsed map[string][]string
+	if err := json.Unmarshal([]byte(trimmed), &parsed); err == nil {
+		return sanitizeMetricsVisibleMap(parsed)
+	}
+	var generic map[string]any
+	if err := json.Unmarshal([]byte(trimmed), &generic); err != nil {
+		return map[string][]string{}
+	}
+	converted := make(map[string][]string, len(generic))
+	for rawGroup, raw := range generic {
+		group := strings.TrimSpace(rawGroup)
+		if group == "" {
+			continue
+		}
+		list, ok := raw.([]any)
+		if !ok {
+			continue
+		}
+		fields := make([]string, 0, len(list))
+		for _, one := range list {
+			field := strings.TrimSpace(fmt.Sprintf("%v", one))
+			if field == "" {
+				continue
+			}
+			fields = append(fields, field)
+		}
+		converted[group] = fields
+	}
+	return sanitizeMetricsVisibleMap(converted)
 }
 
 func buildJobID(id int64, now time.Time) string {
@@ -297,6 +482,12 @@ CREATE TABLE IF NOT EXISTS monitor_params (
 );
 CREATE INDEX IF NOT EXISTS idx_monitor_params_monitor_id ON monitor_params(monitor_id);
 CREATE INDEX IF NOT EXISTS idx_monitor_params_field ON monitor_params(field);
+
+CREATE TABLE IF NOT EXISTS monitor_view_prefs (
+  monitor_id INTEGER PRIMARY KEY,
+  metrics_visible_json TEXT NOT NULL DEFAULT '{}',
+  updated_at TEXT NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS monitor_compile_logs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -243,7 +243,7 @@
 
         <a-row :gutter="16">
           <a-col :span="12">
-            <a-form-item label="监控指标" required>
+            <a-form-item label="监控指标" required extra="支持派生变量：<app>_server_up（可用性）与 *_ok（字符串状态映射为1/0）">
               <a-select v-model:value="policyForm.metric" show-search option-filter-prop="label" placeholder="请选择模板指标">
                 <a-select-option v-for="opt in metricOptions" :key="opt.value" :value="opt.value" :label="opt.label">
                   {{ opt.label }}
@@ -254,18 +254,28 @@
           <a-col :span="6">
             <a-form-item label="操作符">
               <a-select v-model:value="policyForm.operator">
-                <a-select-option value=">">&gt;</a-select-option>
-                <a-select-option value=">=">&gt;=</a-select-option>
-                <a-select-option value="<">&lt;</a-select-option>
-                <a-select-option value="<=">&lt;=</a-select-option>
-                <a-select-option value="==">==</a-select-option>
-                <a-select-option value="!=">!=</a-select-option>
+                <template v-if="policyIsBinaryMetric">
+                  <a-select-option value="==">==（推荐）</a-select-option>
+                  <a-select-option value="!=">!=</a-select-option>
+                </template>
+                <template v-else>
+                  <a-select-option value=">">&gt;</a-select-option>
+                  <a-select-option value=">=">&gt;=</a-select-option>
+                  <a-select-option value="<">&lt;</a-select-option>
+                  <a-select-option value="<=">&lt;=</a-select-option>
+                  <a-select-option value="==">==</a-select-option>
+                  <a-select-option value="!=">!=</a-select-option>
+                </template>
               </a-select>
             </a-form-item>
           </a-col>
           <a-col :span="6">
-            <a-form-item label="阈值" required>
-              <a-input-number v-model:value="policyForm.threshold" style="width: 100%" />
+            <a-form-item :label="policyIsBinaryMetric ? '状态值' : '阈值'" required :extra="policyIsBinaryMetric ? '0=异常，1=正常' : undefined">
+              <a-select v-if="policyIsBinaryMetric" v-model:value="policyForm.threshold">
+                <a-select-option :value="0">0（异常）</a-select-option>
+                <a-select-option :value="1">1（正常）</a-select-option>
+              </a-select>
+              <a-input-number v-else v-model:value="policyForm.threshold" style="width: 100%" />
             </a-form-item>
           </a-col>
         </a-row>
@@ -431,13 +441,13 @@ interface MetricOption {
 }
 
 const REDIS_DEFAULT_POLICY: DefaultPolicyItem[] = [
-  { key: 'redis_unavailable', name: '实例不可用', type: 'realtime_metric', metric: 'redis_server_up', operator: '<', threshold: 0.5, level: 'critical', period: 60, times: 1, mode: 'core', enabled: true, expr: 'redis_server_up < 0.5' },
+  { key: 'redis_unavailable', name: '实例不可用', type: 'realtime_metric', metric: 'redis_server_up', operator: '==', threshold: 0, level: 'critical', period: 60, times: 1, mode: 'core', enabled: true, expr: 'redis_server_up == 0' },
   { key: 'redis_memory_usage_high', name: '内存使用率过高', type: 'periodic_metric', metric: 'used_memory', operator: '>', threshold: 85, level: 'warning', period: 300, times: 1, mode: 'core', enabled: true, expr: '(maxmemory > 0) && ((used_memory / maxmemory) * 100 > 85)' },
   { key: 'redis_memory_fragmentation_high', name: '内存碎片严重', type: 'periodic_metric', metric: 'mem_fragmentation_ratio', operator: '>', threshold: 2.0, level: 'warning', period: 600, times: 1, mode: 'core', enabled: true, expr: 'mem_fragmentation_ratio > 2.0' },
   { key: 'redis_connections_saturated', name: '连接数饱和', type: 'realtime_metric', metric: 'connected_clients', operator: '>', threshold: 90, level: 'critical', period: 300, times: 1, mode: 'core', enabled: true, expr: '(maxclients > 0) && ((connected_clients / maxclients) * 100 > 90)' },
   { key: 'redis_rejected_connections', name: '拒绝连接', type: 'realtime_metric', metric: 'rejected_connections', operator: '>', threshold: 0, level: 'critical', period: 300, times: 1, mode: 'core', enabled: true, expr: 'rejected_connections > 0' },
-  { key: 'redis_rdb_failed', name: 'RDB 失败', type: 'realtime_metric', metric: 'rdb_last_bgsave_status_ok', operator: '<', threshold: 0.5, level: 'critical', period: 60, times: 1, mode: 'core', enabled: true, expr: 'rdb_last_bgsave_status_ok < 0.5' },
-  { key: 'redis_aof_failed', name: 'AOF 失败', type: 'realtime_metric', metric: 'aof_last_bgrewrite_status_ok', operator: '<', threshold: 0.5, level: 'critical', period: 60, times: 1, mode: 'core', enabled: true, expr: 'aof_last_bgrewrite_status_ok < 0.5' },
+  { key: 'redis_rdb_failed', name: 'RDB 失败', type: 'realtime_metric', metric: 'rdb_last_bgsave_status_ok', operator: '==', threshold: 0, level: 'critical', period: 60, times: 1, mode: 'core', enabled: true, expr: 'rdb_last_bgsave_status_ok == 0' },
+  { key: 'redis_aof_failed', name: 'AOF 失败', type: 'realtime_metric', metric: 'aof_last_bgrewrite_status_ok', operator: '==', threshold: 0, level: 'critical', period: 60, times: 1, mode: 'core', enabled: true, expr: 'aof_last_bgrewrite_status_ok == 0' },
   { key: 'redis_master_slave_lag_high', name: '主从延迟过高', type: 'periodic_metric', metric: 'master_last_io_seconds_ago', operator: '>', threshold: 5, level: 'warning', period: 300, times: 1, mode: 'core', enabled: true, expr: 'master_last_io_seconds_ago > 5' },
   { key: 'redis_memory_usage_warn', name: '内存使用率预警', type: 'periodic_metric', metric: 'used_memory', operator: '>', threshold: 75, level: 'warning', period: 300, times: 1, mode: 'extended', enabled: false },
   { key: 'redis_memory_fragmentation_warn', name: '内存碎片预警', type: 'periodic_metric', metric: 'mem_fragmentation_ratio', operator: '>', threshold: 1.5, level: 'warning', period: 600, times: 1, mode: 'extended', enabled: false },
@@ -516,6 +526,30 @@ const selectedCategoryForActions = computed(() => {
   return findCategoryByKey(key, categories.value)
 })
 
+const isBinaryMetric = (metric: string) => {
+  const key = String(metric || '').trim().toLowerCase()
+  return key.endsWith('_ok') || key.endsWith('_up')
+}
+
+const normalizeBinaryRule = (metric: string, operator: string, threshold: number) => {
+  if (!isBinaryMetric(metric)) {
+    return { operator: String(operator || '>').trim() || '>', threshold: Number(threshold ?? 0) || 0 }
+  }
+  const op = String(operator || '==').trim() || '=='
+  if (op === '<' || op === '<=') {
+    return { operator: '==', threshold: 0 }
+  }
+  if (op === '>' || op === '>=') {
+    return { operator: '==', threshold: 1 }
+  }
+  if (op === '!=') {
+    return { operator: '!=', threshold: Number(threshold) >= 0.5 ? 1 : 0 }
+  }
+  return { operator: '==', threshold: Number(threshold) >= 0.5 ? 1 : 0 }
+}
+
+const policyIsBinaryMetric = computed(() => isBinaryMetric(policyForm.value.metric))
+
 const toBool = (value: any, defaultValue = false) => {
   if (value === undefined || value === null) return defaultValue
   if (typeof value === 'boolean') return value
@@ -533,13 +567,15 @@ const normalizePolicyItem = (item: any, index: number): DefaultPolicyItem | null
   const type = typeRaw.includes('periodic') ? 'periodic_metric' : 'realtime_metric'
   const mode = String(item.mode || '').trim().toLowerCase() === 'core' ? 'core' : 'extended'
   const labelsObj = item.labels && typeof item.labels === 'object' ? item.labels : {}
+  const metric = String(item.metric || 'value').trim() || 'value'
+  const binary = normalizeBinaryRule(metric, String(item.operator || '>').trim() || '>', Number(item.threshold ?? 0) || 0)
   return {
     key: String(item.key || item.id || `alert_${index + 1}`),
     name,
     type,
-    metric: String(item.metric || 'value').trim() || 'value',
-    operator: String(item.operator || '>').trim() || '>',
-    threshold: Number(item.threshold ?? 0) || 0,
+    metric,
+    operator: binary.operator,
+    threshold: binary.threshold,
     level: (String(item.level || item.severity || 'warning').trim().toLowerCase() as any) || 'warning',
     period: Math.max(Number(item.period ?? (type === 'periodic_metric' ? 300 : 60)) || 0, 0),
     times: Math.max(Number(item.times ?? 1) || 1, 1),
@@ -572,6 +608,7 @@ const parseTemplateMetricOptions = (content: string): MetricOption[] => {
     const doc = yaml.load(content || '') as any
     if (!doc || typeof doc !== 'object') return []
     const options = new Map<string, MetricOption>()
+    const appName = String((doc as any).app || '').trim()
     const metricsList = Array.isArray((doc as any).metrics) ? (doc as any).metrics : []
     const localeKey = String(locale.value || 'zh-CN')
     const pickI18nText = (node: any, fallback = '') => {
@@ -597,7 +634,19 @@ const parseTemplateMetricOptions = (content: string): MetricOption[] => {
         const groupTitle = metricTitle || metricName
         const label = groupTitle ? `${groupTitle} / ${fieldTitle} (${field})` : `${fieldTitle} (${field})`
         options.set(field, { value: field, label })
+        const fieldType = Number(f?.type)
+        if (fieldType === 1) {
+          const okField = `${field}_ok`
+          const okLabel = groupTitle
+            ? `${groupTitle} / ${fieldTitle} 状态OK (${okField})`
+            : `${fieldTitle} 状态OK (${okField})`
+          options.set(okField, { value: okField, label: okLabel })
+        }
       }
+    }
+    if (appName) {
+      const appUp = `${appName}_server_up`
+      options.set(appUp, { value: appUp, label: `实例可用性 (${appUp})` })
     }
     if (!options.size) {
       options.set('value', { value: 'value', label: 'value' })
@@ -683,19 +732,23 @@ const syncPolicyDraftToYaml = () => {
 
 const buildPolicyExpr = (item: Pick<DefaultPolicyItem, 'metric' | 'operator' | 'threshold'>) => {
   const metric = String(item.metric || 'value').trim() || 'value'
-  const op = String(item.operator || '>').trim() || '>'
-  const threshold = Number(item.threshold ?? 0)
+  const binary = normalizeBinaryRule(metric, String(item.operator || '>').trim() || '>', Number(item.threshold ?? 0))
+  const op = binary.operator
+  const threshold = binary.threshold
   return `${metric} ${op} ${Number.isFinite(threshold) ? threshold : 0}`
 }
 
 const resetPolicyForm = () => {
+  const defaultMetric = metricOptions.value[0]?.value || 'value'
+  const defaultOperator = isBinaryMetric(defaultMetric) ? '==' : '>'
+  const binary = normalizeBinaryRule(defaultMetric, defaultOperator, 0)
   policyForm.value = {
     key: `alert_${Date.now()}`,
     name: '',
     type: 'realtime_metric',
-    metric: metricOptions.value[0]?.value || 'value',
-    operator: '>',
-    threshold: 0,
+    metric: defaultMetric,
+    operator: binary.operator,
+    threshold: binary.threshold,
     level: 'warning',
     period: 60,
     times: 1,
@@ -720,8 +773,11 @@ const addPolicyRule = async () => {
 const openPolicyRuleEditor = async (record: DefaultPolicyItem, index: number) => {
   await loadNoticeRuleOptions()
   policyEditIndex.value = index
+  const binary = normalizeBinaryRule(record.metric, record.operator, record.threshold)
   policyForm.value = {
     ...record,
+    operator: binary.operator,
+    threshold: binary.threshold,
     labels: { ...(record.labels || {}) }
   }
   policyFormLabelList.value = Object.entries(record.labels || {}).map(([key, value]) => ({ key, value }))
@@ -775,6 +831,9 @@ const savePolicyRuleEditor = () => {
         : undefined,
       labels
     }
+    const normalized = normalizeBinaryRule(row.metric, row.operator, row.threshold)
+    row.operator = normalized.operator
+    row.threshold = normalized.threshold
     if (policyFormUseCustomExpr.value) {
       row.expr = String(policyForm.value.expr || '').trim() || buildPolicyExpr(row)
     } else {
@@ -1340,6 +1399,20 @@ watch(
   (value) => {
     if (!selectedTemplate.value) return
     metricOptions.value = parseTemplateMetricOptions(value || selectedTemplate.value.content || '')
+  }
+)
+
+watch(
+  () => policyForm.value.metric,
+  (metric, prevMetric) => {
+    if (isBinaryMetric(metric) && !isBinaryMetric(String(prevMetric || ''))) {
+      policyForm.value.operator = '=='
+      policyForm.value.threshold = 0
+      return
+    }
+    const normalized = normalizeBinaryRule(policyForm.value.metric, policyForm.value.operator, policyForm.value.threshold)
+    policyForm.value.operator = normalized.operator
+    policyForm.value.threshold = normalized.threshold
   }
 )
 

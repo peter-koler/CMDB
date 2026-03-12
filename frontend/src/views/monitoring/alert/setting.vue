@@ -253,7 +253,9 @@
           <a-alert type="info" show-icon style="margin-bottom: 16px">
             <template #message>表达式说明</template>
             <template #description>
-              使用 JEXL 表达式语法，支持内置变量：__app__, __metrics__, __instance__, usage, value 等
+              使用 JEXL 表达式语法，支持内置变量：__app__, __metrics__, __instance__, usage, value 等。
+              可用性变量：<code>&lt;app&gt;_server_up</code>（如 <code>redis_server_up</code>）；
+              字符串状态变量：<code>&lt;field&gt;_ok</code>（ok/up/online/success 映射为1，err/down/offline/fail 映射为0）。
             </template>
           </a-alert>
           <a-form-item label="告警表达式" name="expr" extra="示例: equals(__app__, 'Linux') && usage > 80">
