@@ -1,5 +1,6 @@
 import os
 from datetime import timedelta
+import redis
 
 
 class Config:
@@ -17,8 +18,18 @@ class Config:
     CORS_HEADERS = "Content-Type"
     CORS_ORIGINS = ["http://localhost:3000", "http://localhost:5173"]
     
-    # Session configuration for cross-origin requests
-    SESSION_TYPE = "filesystem"
+    # Session configuration - Redis
+    SESSION_TYPE = "redis"
+    SESSION_REDIS = redis.from_url(
+        os.environ.get("REDIS_URL") or "redis://localhost:6379/0"
+    )
+    SESSION_KEY_PREFIX = "itops:session:"
+    SESSION_USE_SIGNER = False  # Werkzeug 3.0 兼容性
+    SESSION_PERMANENT = True
+    PERMANENT_SESSION_LIFETIME = timedelta(hours=8)
+    
+    # Cookie security
+    SESSION_COOKIE_NAME = "session_id"
     SESSION_COOKIE_SAMESITE = "Lax"
     SESSION_COOKIE_SECURE = False  # Set to True in production with HTTPS
     SESSION_COOKIE_HTTPONLY = True
@@ -41,6 +52,7 @@ class Config:
     GO_MANAGER_MAX_RETRIES = int(os.environ.get("GO_MANAGER_MAX_RETRIES", "2"))
     GO_MANAGER_CB_FAILURE_THRESHOLD = int(os.environ.get("GO_MANAGER_CB_FAILURE_THRESHOLD", "3"))
     GO_MANAGER_CB_RECOVERY_SECONDS = int(os.environ.get("GO_MANAGER_CB_RECOVERY_SECONDS", "30"))
+    GO_MANAGER_USE_SYSTEM_PROXY = os.environ.get("GO_MANAGER_USE_SYSTEM_PROXY", "false")
 
 
 class DevelopmentConfig(Config):

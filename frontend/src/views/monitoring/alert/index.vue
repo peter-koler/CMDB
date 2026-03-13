@@ -4,50 +4,79 @@
       <a-tabs v-model:activeKey="activeTab" @change="handleTabChange">
         <a-tab-pane key="current" tab="当前告警" />
         <a-tab-pane key="history" tab="告警历史" />
-        <a-tab-pane key="rules" tab="告警配置" />
       </a-tabs>
 
       <a-form layout="inline" :model="filters">
         <a-form-item label="级别">
-          <a-select v-model:value="filters.level" allow-clear style="width: 140px" placeholder="全部级别">
+          <a-select v-model:value="filters.level" allow-clear style="width: 130px" placeholder="全部级别">
             <a-select-option value="critical">critical</a-select-option>
             <a-select-option value="warning">warning</a-select-option>
             <a-select-option value="info">info</a-select-option>
           </a-select>
         </a-form-item>
-        <a-form-item label="关键字">
-          <a-input v-model:value="filters.keyword" placeholder="告警名称/对象" style="width: 220px" />
+        <a-form-item label="告警名称">
+          <a-input v-model:value="filters.name" placeholder="按告警名称筛选" style="width: 200px" allow-clear />
         </a-form-item>
-        <a-form-item v-if="activeTab === 'rules'" label="规则范围">
-          <a-select v-model:value="ruleScope" style="width: 150px">
-            <a-select-option value="global">全局规则</a-select-option>
-            <a-select-option value="bound">实例规则</a-select-option>
-            <a-select-option value="all">全部规则</a-select-option>
+        <a-form-item label="告警对象">
+          <a-input v-model:value="filters.monitor_name" placeholder="按监控对象筛选" style="width: 200px" allow-clear />
+        </a-form-item>
+        <a-form-item label="告警状态">
+          <a-select v-model:value="filters.status" allow-clear style="width: 130px" placeholder="全部状态">
+            <a-select-option value="open">open</a-select-option>
+            <a-select-option value="closed">closed</a-select-option>
           </a-select>
         </a-form-item>
-        <a-form-item v-if="activeTab === 'history'" label="时间范围">
-          <a-range-picker v-model:value="historyRange" style="width: 280px" />
+        <a-form-item label="时间范围">
+          <a-range-picker
+            v-model:value="timeRange"
+            style="width: 280px"
+            show-time
+            format="YYYY-MM-DD HH:mm:ss"
+          />
         </a-form-item>
         <a-form-item>
           <a-space>
             <a-button type="primary" @click="loadActiveData" :loading="loading">查询</a-button>
             <a-button @click="resetFilters">重置</a-button>
             <a-button v-if="activeTab === 'history'" @click="exportHistory">导出CSV</a-button>
-            <a-button v-if="activeTab === 'rules' && canEditRule" type="primary" @click="openRuleModal()">新增配置</a-button>
           </a-space>
         </a-form-item>
       </a-form>
 
+      <a-space>
+        <a-button
+          v-if="activeTab === 'current'"
+          type="primary"
+          :disabled="!canClose || !selectedRowKeys.length"
+          @click="batchClose"
+        >批量关闭</a-button>
+        <a-button
+          danger
+          :disabled="!canDelete || !selectedRowKeys.length"
+          @click="batchDelete"
+        >批量删除</a-button>
+      </a-space>
+
       <a-table
-        v-if="activeTab !== 'rules'"
         :loading="loading"
         :columns="alertColumns"
         :data-source="alerts"
         :pagination="pagination"
+        :row-selection="rowSelection"
         row-key="id"
         @change="handleTableChange"
       >
         <template #bodyCell="{ column, record }">
+          <template v-if="column.key === 'name'">
+            <a-button type="link" size="small" @click="openAlertDetail(record)">
+              {{ record.name || '-' }}
+            </a-button>
+          </template>
+          <template v-if="column.key === 'monitor_name'">
+            <a-button type="link" size="small" @click="openMonitorDetail(record)">
+              {{ record.monitor_name || '-' }}
+            </a-button>
+          </template>
           <template v-if="column.key === 'level'">
             <a-tag :color="levelColor(record.level)">{{ record.level || '-' }}</a-tag>
           </template>
@@ -56,6 +85,12 @@
           </template>
           <template v-if="column.key === 'duration'">
             {{ formatDuration(record.duration_seconds) }}
+          </template>
+          <template v-if="column.key === 'triggered_at'">
+            {{ formatTime(record.triggered_at) }}
+          </template>
+          <template v-if="column.key === 'recovered_at'">
+            {{ formatTime(record.recovered_at) }}
           </template>
           <template v-if="column.key === 'actions'">
             <a-space>
@@ -72,49 +107,18 @@
                 danger
                 @click="handleClose(record)"
               >关闭</a-button>
-            </a-space>
-          </template>
-        </template>
-      </a-table>
-
-      <a-table
-        v-else
-        :loading="loading"
-        :columns="ruleColumns"
-        :data-source="rules"
-        :pagination="false"
-        row-key="id"
-      >
-        <template #bodyCell="{ column, record }">
-          <template v-if="column.key === 'enabled'">
-            <a-switch :checked="!!record.enabled" :disabled="!canEditRule" @change="(checked: boolean) => toggleRule(record, checked)" />
-          </template>
-          <template v-if="column.key === 'actions'">
-            <a-space>
-              <a-button type="link" size="small" :disabled="!canEditRule" @click="openRuleModal(record)">编辑</a-button>
-              <a-popconfirm title="确认删除该规则？" @confirm="handleDeleteRule(record)">
-                <a-button type="link" size="small" danger :disabled="!canEditRule">删除</a-button>
-              </a-popconfirm>
+              <a-button
+                v-if="canDelete"
+                type="link"
+                size="small"
+                danger
+                @click="handleDelete(record)"
+              >删除</a-button>
             </a-space>
           </template>
         </template>
       </a-table>
     </a-space>
-
-    <a-modal v-model:open="ruleModalOpen" :title="editingRule?.id ? '编辑规则' : '新增规则'" @ok="saveRule" :confirm-loading="ruleSaving">
-      <a-form layout="vertical" :model="ruleForm">
-        <a-form-item label="规则名称" required><a-input v-model:value="ruleForm.name" /></a-form-item>
-        <a-form-item label="指标" required><a-input v-model:value="ruleForm.metric" /></a-form-item>
-        <a-form-item label="阈值" required><a-input-number v-model:value="ruleForm.threshold" style="width: 100%" /></a-form-item>
-        <a-form-item label="级别" required>
-          <a-select v-model:value="ruleForm.level">
-            <a-select-option value="critical">critical</a-select-option>
-            <a-select-option value="warning">warning</a-select-option>
-            <a-select-option value="info">info</a-select-option>
-          </a-select>
-        </a-form-item>
-      </a-form>
-    </a-modal>
   </a-card>
 </template>
 
@@ -128,77 +132,66 @@ import { useUserStore } from '@/stores/user'
 import {
   claimAlert,
   closeAlert,
-  createAlertRule,
-  deleteAlertRule,
-  disableAlertRule,
-  enableAlertRule,
+  deleteAlert,
   getAlertHistory,
-  getAlertRules,
   getCurrentAlerts,
-  updateAlertRule,
-  type AlertItem,
-  type AlertRule
+  type AlertItem
 } from '@/api/monitoring'
 
 const userStore = useUserStore()
 const route = useRoute()
 const router = useRouter()
-const activeTab = ref<'current' | 'history' | 'rules'>('current')
+const activeTab = ref<'current' | 'history'>('current')
 const loading = ref(false)
 const alerts = ref<AlertItem[]>([])
-const rules = ref<AlertRule[]>([])
-const historyRange = ref<[Dayjs, Dayjs] | null>(null)
+const timeRange = ref<[Dayjs, Dayjs] | null>(null)
+const selectedRowKeys = ref<number[]>([])
 let socket: Socket | null = null
 
 const pagination = reactive({ current: 1, pageSize: 20, total: 0 })
-const filters = reactive({ level: undefined as string | undefined, keyword: '' })
-const ruleScope = ref<'global' | 'bound' | 'all'>('global')
+const filters = reactive({
+  level: undefined as string | undefined,
+  name: '',
+  monitor_name: '',
+  status: undefined as string | undefined
+})
 
 const canClaim = computed(() => userStore.hasPermission('monitoring:alert:claim') || userStore.hasPermission('monitoring:alert:center'))
 const canClose = computed(() => userStore.hasPermission('monitoring:alert:close') || userStore.hasPermission('monitoring:alert:center'))
-const canEditRule = computed(() => userStore.hasPermission('monitoring:alert:rule') || userStore.hasPermission('monitoring:alert:setting'))
+const canDelete = computed(() =>
+  userStore.hasPermission('monitoring:alert:center') ||
+  userStore.hasPermission('monitoring:alert:close') ||
+  userStore.hasPermission('monitoring:alert:history')
+)
+
+const rowSelection = computed(() => ({
+  selectedRowKeys: selectedRowKeys.value,
+  onChange: (keys: (number | string)[]) => {
+    selectedRowKeys.value = keys.map((k) => Number(k)).filter((k) => Number.isFinite(k) && k > 0)
+  }
+}))
+
+const formatTime = (timeStr?: string) => {
+  if (!timeStr) return '-'
+  return dayjs(timeStr).format('YYYY-MM-DD HH:mm:ss')
+}
 
 const alertColumns = computed(() => {
-  const base = [
+  const base: any[] = [
     { title: '级别', dataIndex: 'level', key: 'level', width: 90 },
-    { title: '告警名称', dataIndex: 'name', key: 'name' },
-    { title: '监控对象', dataIndex: 'monitor_name', key: 'monitor_name' },
-    { title: '指标值', dataIndex: 'metric_value', key: 'metric_value', width: 110 },
+    { title: '告警名称', dataIndex: 'name', key: 'name', width: 240 },
+    { title: '告警对象', dataIndex: 'monitor_name', key: 'monitor_name', width: 220 },
+    { title: '告警状态', dataIndex: 'status', key: 'status', width: 110 },
+    { title: '指标值', dataIndex: 'metric_value', key: 'metric_value', width: 120 },
     { title: '触发时间', dataIndex: 'triggered_at', key: 'triggered_at', width: 180 },
-    { title: '持续时间', dataIndex: 'duration_seconds', key: 'duration', width: 120 },
-    { title: '状态', dataIndex: 'status', key: 'status', width: 90 }
+    { title: '持续时间', dataIndex: 'duration_seconds', key: 'duration', width: 120 }
   ]
   if (activeTab.value === 'history') {
     base.push({ title: '恢复时间', dataIndex: 'recovered_at', key: 'recovered_at', width: 180 })
     base.push({ title: '处理人', dataIndex: 'assignee', key: 'assignee', width: 120 })
   }
-  if (activeTab.value === 'current') {
-    base.push({ title: '操作', key: 'actions', fixed: 'right', width: 140 })
-  }
+  base.push({ title: '操作', key: 'actions', fixed: 'right', width: activeTab.value === 'current' ? 180 : 100 })
   return base
-})
-
-const ruleColumns = [
-  { title: '规则名称', dataIndex: 'name', key: 'name' },
-  { title: '指标', dataIndex: 'metric', key: 'metric' },
-  { title: '阈值', dataIndex: 'threshold', key: 'threshold', width: 120 },
-  { title: '级别', dataIndex: 'level', key: 'level', width: 100 },
-  { title: '启用', dataIndex: 'enabled', key: 'enabled', width: 100 },
-  { title: '操作', key: 'actions', width: 120 }
-]
-
-const ruleModalOpen = ref(false)
-const ruleSaving = ref(false)
-const editingRule = ref<AlertRule | null>(null)
-const ruleForm = reactive({ name: '', metric: '', threshold: 0, level: 'warning' })
-
-const listPayload = () => ({
-  page: pagination.current,
-  page_size: pagination.pageSize,
-  level: filters.level,
-  q: filters.keyword || undefined,
-  start_at: historyRange.value?.[0]?.toISOString(),
-  end_at: historyRange.value?.[1]?.toISOString()
 })
 
 const levelColor = (level: string) => {
@@ -222,6 +215,18 @@ const normalizeList = (payload: any): { items: any[]; total: number } => {
   return { items: [], total: 0 }
 }
 
+const listPayload = () => ({
+  page: pagination.current,
+  page_size: pagination.pageSize,
+  level: filters.level,
+  status: filters.status,
+  name: filters.name || undefined,
+  monitor_name: filters.monitor_name || undefined,
+  q: [filters.name, filters.monitor_name].filter(Boolean).join(' ') || undefined,
+  start_at: timeRange.value?.[0]?.toISOString(),
+  end_at: timeRange.value?.[1]?.toISOString()
+})
+
 const loadCurrentAlerts = async () => {
   const res = await getCurrentAlerts(listPayload())
   const parsed = normalizeList(res?.data)
@@ -236,22 +241,12 @@ const loadHistoryAlerts = async () => {
   pagination.total = parsed.total
 }
 
-const loadRules = async () => {
-  const res = await getAlertRules({
-    q: filters.keyword || undefined,
-    include_bound: ruleScope.value !== 'global',
-    scope: ruleScope.value
-  })
-  const parsed = normalizeList(res?.data)
-  rules.value = parsed.items
-}
-
 const loadActiveData = async () => {
   loading.value = true
   try {
     if (activeTab.value === 'current') await loadCurrentAlerts()
     if (activeTab.value === 'history') await loadHistoryAlerts()
-    if (activeTab.value === 'rules') await loadRules()
+    selectedRowKeys.value = []
   } catch (error: any) {
     message.error(error?.response?.data?.message || '加载失败')
   } finally {
@@ -268,24 +263,25 @@ const handleTableChange = (pager: any) => {
 const handleTabChange = () => {
   if (activeTab.value === 'current') router.replace('/monitoring/alert/current')
   if (activeTab.value === 'history') router.replace('/monitoring/alert/history')
-  if (activeTab.value === 'rules') router.replace('/monitoring/alert/rule')
   pagination.current = 1
+  selectedRowKeys.value = []
   loadActiveData()
 }
 
 const syncTabByRoute = () => {
   const path = route.path
   if (path.endsWith('/history')) activeTab.value = 'history'
-  else if (path.endsWith('/rule')) activeTab.value = 'rules'
   else activeTab.value = 'current'
 }
 
 const resetFilters = () => {
   filters.level = undefined
-  filters.keyword = ''
-  ruleScope.value = 'global'
-  historyRange.value = null
+  filters.name = ''
+  filters.monitor_name = ''
+  filters.status = undefined
+  timeRange.value = null
   pagination.current = 1
+  selectedRowKeys.value = []
   loadActiveData()
 }
 
@@ -297,7 +293,8 @@ const handleClaim = async (record: AlertItem) => {
 
 const handleClose = async (record: AlertItem) => {
   Modal.confirm({
-    title: '确认关闭告警？',
+    title: '确认关闭',
+    content: `确定要关闭告警 "${record.name}" 吗？`,
     onOk: async () => {
       await closeAlert(record.id)
       message.success('关闭成功')
@@ -306,135 +303,85 @@ const handleClose = async (record: AlertItem) => {
   })
 }
 
-const openRuleModal = (record?: AlertRule) => {
-  editingRule.value = record || null
-  ruleForm.name = record?.name || ''
-  ruleForm.metric = record?.metric || ''
-  ruleForm.threshold = Number(record?.threshold || 0)
-  ruleForm.level = record?.level || 'warning'
-  ruleModalOpen.value = true
+const handleDelete = async (record: AlertItem) => {
+  Modal.confirm({
+    title: '确认删除',
+    content: `确定要删除告警 "${record.name}" 吗？`,
+    onOk: async () => {
+      await deleteAlert(record.id, { scope: activeTab.value })
+      message.success('删除成功')
+      loadActiveData()
+    }
+  })
 }
 
-const saveRule = async () => {
-  if (!ruleForm.name || !ruleForm.metric) {
-    message.warning('请填写完整规则信息')
+const openMonitorDetail = (record: AlertItem) => {
+  const monitorId = Number(record.monitor_id)
+  if (!Number.isFinite(monitorId) || monitorId <= 0) {
+    message.warning('未找到监控任务ID，无法跳转')
     return
   }
-  ruleSaving.value = true
-  try {
-    const payload = {
-      name: ruleForm.name,
-      metric: ruleForm.metric,
-      threshold: ruleForm.threshold,
-      level: ruleForm.level,
-      enabled: true
-    }
-    if (editingRule.value?.id) {
-      await updateAlertRule(editingRule.value.id, payload)
-    } else {
-      await createAlertRule(payload)
-    }
-    message.success('保存成功')
-    ruleModalOpen.value = false
-    loadRules()
-  } catch (error: any) {
-    message.error(error?.response?.data?.message || '保存失败')
-  } finally {
-    ruleSaving.value = false
-  }
+  router.push(`/monitoring/target/${monitorId}`)
 }
 
-const toggleRule = async (record: AlertRule, checked: boolean) => {
-  try {
-    if (checked) {
-      await enableAlertRule(record.id)
-    } else {
-      await disableAlertRule(record.id)
-    }
-    message.success('状态更新成功')
-    loadRules()
-  } catch (error: any) {
-    message.error(error?.response?.data?.message || '状态更新失败')
+const openAlertDetail = (record: AlertItem) => {
+  if (!record?.id) {
+    message.warning('告警ID缺失，无法查看明细')
+    return
   }
+  router.push(`/monitoring/alert/detail/${record.id}`)
 }
 
-const handleDeleteRule = async (record: AlertRule) => {
-  try {
-    await deleteAlertRule(record.id)
-    message.success('删除成功')
-    loadRules()
-  } catch (error: any) {
-    message.error(error?.response?.data?.message || '删除失败')
-  }
+const batchClose = async () => {
+  if (!selectedRowKeys.value.length) return
+  Modal.confirm({
+    title: '批量关闭确认',
+    content: `确定批量关闭 ${selectedRowKeys.value.length} 条告警吗？`,
+    onOk: async () => {
+      const tasks = selectedRowKeys.value.map((id) => closeAlert(id))
+      const results = await Promise.allSettled(tasks)
+      const okCount = results.filter((r) => r.status === 'fulfilled').length
+      const failCount = results.length - okCount
+      if (okCount > 0) message.success(`批量关闭完成，成功 ${okCount} 条${failCount ? `，失败 ${failCount} 条` : ''}`)
+      if (failCount > 0 && okCount === 0) message.error('批量关闭失败')
+      loadActiveData()
+    }
+  })
+}
+
+const batchDelete = async () => {
+  if (!selectedRowKeys.value.length) return
+  Modal.confirm({
+    title: '批量删除确认',
+    content: `确定批量删除 ${selectedRowKeys.value.length} 条告警吗？删除后不可恢复。`,
+    onOk: async () => {
+      const tasks = selectedRowKeys.value.map((id) => deleteAlert(id, { scope: activeTab.value }))
+      const results = await Promise.allSettled(tasks)
+      const okCount = results.filter((r) => r.status === 'fulfilled').length
+      const failCount = results.length - okCount
+      if (okCount > 0) message.success(`批量删除完成，成功 ${okCount} 条${failCount ? `，失败 ${failCount} 条` : ''}`)
+      if (failCount > 0 && okCount === 0) message.error('批量删除失败')
+      loadActiveData()
+    }
+  })
 }
 
 const exportHistory = () => {
-  const rows = alerts.value.map((item) => [
-    item.level || '',
-    item.name || '',
-    item.monitor_name || '',
-    item.metric_value ?? '',
-    item.triggered_at || '',
-    item.recovered_at || '',
-    item.assignee || '',
-    item.note || ''
-  ])
-  const header = ['级别', '告警名称', '监控对象', '指标值', '触发时间', '恢复时间', '处理人', '备注']
-  const csv = [header, ...rows].map((line) => line.map((v) => `"${String(v).split('"').join('""')}"`).join(',')).join('\n')
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = `alerts-history-${dayjs().format('YYYYMMDDHHmmss')}.csv`
-  link.click()
-  URL.revokeObjectURL(url)
-}
-
-const connectAlertSocket = () => {
-  const token = localStorage.getItem('token')
-  if (!token) return
-  const wsUrl = (import.meta as any).env?.VITE_WS_URL || window.location.origin
-  socket = io(`${wsUrl}/notifications`, {
-    path: '/socket.io',
-    transports: ['websocket', 'polling'],
-    query: { token }
-  })
-  socket.on('monitoring:alert:new', () => {
-    if (activeTab.value !== 'rules') loadActiveData()
-  })
-  socket.on('monitoring:alert:update', () => {
-    if (activeTab.value !== 'rules') loadActiveData()
-  })
+  message.info('导出功能开发中')
 }
 
 onMounted(() => {
   syncTabByRoute()
   loadActiveData()
-  connectAlertSocket()
+  socket = io('/alert', { transports: ['websocket'] })
+  socket.on('alert', () => {
+    loadActiveData()
+  })
 })
-
-watch(
-  () => route.path,
-  () => {
-    syncTabByRoute()
-    pagination.current = 1
-    loadActiveData()
-  }
-)
-
-watch(
-  () => ruleScope.value,
-  () => {
-    if (activeTab.value !== 'rules') return
-    pagination.current = 1
-    loadActiveData()
-  }
-)
 
 onUnmounted(() => {
-  if (socket) {
-    socket.disconnect()
-    socket = null
-  }
+  socket?.disconnect()
 })
+
+watch(() => route.path, syncTabByRoute)
 </script>

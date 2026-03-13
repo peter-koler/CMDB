@@ -121,6 +121,8 @@ func (q *Queues) notifyWorker(ctx context.Context, sender Sender) {
 			return
 		case task := <-q.notifyQueue:
 			if err := sender.Send(ctx, task); err != nil {
+				log.Printf("[ERROR] notify send failed task=%d rule=%s monitor=%d notice_rule_id=%d attempt=%d err=%v",
+					task.ID, task.Event.RuleName, task.Event.MonitorID, task.Event.NoticeRuleID, task.Attempt+1, err)
 				task.Attempt++
 				if task.Attempt >= q.maxRetry {
 					log.Printf("notify max retry reached task=%d rule=%s monitor=%d -> manual handling",

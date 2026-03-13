@@ -14,16 +14,23 @@
             <a-button type="primary" @click="openAddModal">添加</a-button>
             <a-button danger :disabled="!currentSelectedRowKeys.length" @click="removeSelectedMetrics">删除</a-button>
             <a-button :loading="refreshing" @click="refreshCurrentGroup">刷新</a-button>
+            <a-input-search
+              v-model:value="currentSearchKeyword"
+              allow-clear
+              placeholder="按中文名/指标名搜索"
+              style="width: 260px"
+            />
             <span class="sub-text">最后刷新：{{ lastRefreshByGroup[group.key] || '-' }}</span>
           </a-space>
 
           <a-table
             size="small"
-            :pagination="false"
+            :pagination="currentPaginationConfig"
             :loading="refreshing"
-            :data-source="currentRows"
+            :data-source="pagedRows"
             row-key="field"
             :row-selection="currentRowSelection"
+            @change="handleTableChange"
           >
             <a-table-column title="名称" key="title" width="260">
               <template #default="{ record }">
@@ -82,6 +89,7 @@
       :interval-seconds="intervalSeconds"
       :metric-name="trendMetricName"
       :metric-title="trendMetricTitle"
+      :metric-type="trendMetricType"
       :monitor-name="monitorName"
       :target="target"
       :app="app"
@@ -144,9 +152,14 @@ const refreshing = ref(false)
 const rowsByGroup = ref<Record<string, MetricTableRow[]>>({})
 const visibleFieldKeysByGroup = ref<Record<string, string[]>>({})
 const selectedRowKeysByGroup = ref<Record<string, string[]>>({})
+const searchKeywordByGroup = ref<Record<string, string>>({})
 const lastRefreshByGroup = ref<Record<string, string>>({})
+const paginationByGroup = ref<Record<string, { current: number; pageSize: number }>>({})
 const activeAlertMetricSet = ref<Set<string>>(new Set())
 let persistTimer: ReturnType<typeof setTimeout> | null = null
+
+const DEFAULT_PAGE_SIZE = 10
+const PAGE_SIZE_OPTIONS = ['10', '20', '50', '100']
 
 const addModalOpen = ref(false)
 const addSelectedFields = ref<string[]>([])
@@ -154,10 +167,50 @@ const addSelectedFields = ref<string[]>([])
 const trendOpen = ref(false)
 const trendMetricName = ref('')
 const trendMetricTitle = ref('')
+const trendMetricType = ref<MetricFieldType>('number')
 
 const currentGroup = computed(() => groups.value.find((group) => group.key === activeGroupKey.value) || null)
 const currentRows = computed(() => rowsByGroup.value[activeGroupKey.value] || [])
+const currentSearchKeyword = computed({
+  get: () => searchKeywordByGroup.value[activeGroupKey.value] || '',
+  set: (value: string) => {
+    const key = activeGroupKey.value
+    if (!key) return
+    searchKeywordByGroup.value = {
+      ...searchKeywordByGroup.value,
+      [key]: String(value || '')
+    }
+    const pag = paginationByGroup.value[key] || { current: 1, pageSize: DEFAULT_PAGE_SIZE }
+    paginationByGroup.value = {
+      ...paginationByGroup.value,
+      [key]: { ...pag, current: 1 }
+    }
+  }
+})
+const filteredRows = computed(() => {
+  const keyword = String(currentSearchKeyword.value || '').trim().toLowerCase()
+  if (!keyword) return currentRows.value
+  return currentRows.value.filter((row) => {
+    const title = String(row.title || '').toLowerCase()
+    const field = String(row.field || '').toLowerCase()
+    return title.includes(keyword) || field.includes(keyword)
+  })
+})
 const currentSelectedRowKeys = computed(() => selectedRowKeysByGroup.value[activeGroupKey.value] || [])
+const currentPagination = computed(() => paginationByGroup.value[activeGroupKey.value] || { current: 1, pageSize: DEFAULT_PAGE_SIZE })
+const pagedRows = computed(() => {
+  const { current, pageSize } = currentPagination.value
+  const start = (current - 1) * pageSize
+  return filteredRows.value.slice(start, start + pageSize)
+})
+const currentPaginationConfig = computed(() => ({
+  current: currentPagination.value.current,
+  pageSize: currentPagination.value.pageSize,
+  total: filteredRows.value.length,
+  showSizeChanger: true,
+  pageSizeOptions: PAGE_SIZE_OPTIONS,
+  showTotal: (total: number) => `共 ${total} 条`
+}))
 
 const currentRowSelection = computed(() => ({
   selectedRowKeys: currentSelectedRowKeys.value,
@@ -218,12 +271,21 @@ function ensureActiveGroup() {
 function initVisibleFields() {
   const nextVisible: Record<string, string[]> = {}
   const nextSelected: Record<string, string[]> = {}
+  const nextSearchKeyword: Record<string, string> = {}
+  const nextPagination: Record<string, { current: number; pageSize: number }> = {}
   for (const group of groups.value) {
     nextVisible[group.key] = group.fields.map((field) => field.field)
     nextSelected[group.key] = []
+    nextSearchKeyword[group.key] = searchKeywordByGroup.value[group.key] || ''
+    nextPagination[group.key] = {
+      current: 1,
+      pageSize: paginationByGroup.value[group.key]?.pageSize || DEFAULT_PAGE_SIZE
+    }
   }
   visibleFieldKeysByGroup.value = nextVisible
   selectedRowKeysByGroup.value = nextSelected
+  searchKeywordByGroup.value = nextSearchKeyword
+  paginationByGroup.value = nextPagination
   rowsByGroup.value = {}
   lastRefreshByGroup.value = {}
 }
@@ -410,6 +472,16 @@ function handleGroupChange(key: string) {
   }
 }
 
+function handleTableChange(pagination: { current?: number; pageSize?: number }) {
+  if (!activeGroupKey.value) return
+  const current = pagination.current ?? 1
+  const pageSize = pagination.pageSize ?? DEFAULT_PAGE_SIZE
+  paginationByGroup.value = {
+    ...paginationByGroup.value,
+    [activeGroupKey.value]: { current, pageSize }
+  }
+}
+
 function openAddModal() {
   addSelectedFields.value = []
   addModalOpen.value = true
@@ -460,6 +532,7 @@ function openTrend(row: MetricTableRow) {
   }
   trendMetricName.value = row.metricName
   trendMetricTitle.value = row.title
+  trendMetricType.value = row.type
   trendOpen.value = true
 }
 
@@ -479,6 +552,23 @@ watch(
     initialize()
   },
   { immediate: true }
+)
+
+watch(
+  () => [activeGroupKey.value, filteredRows.value.length],
+  () => {
+    const key = activeGroupKey.value
+    if (!key) return
+    const pag = paginationByGroup.value[key]
+    if (!pag) return
+    const maxPage = Math.max(1, Math.ceil(filteredRows.value.length / pag.pageSize))
+    if (pag.current > maxPage) {
+      paginationByGroup.value = {
+        ...paginationByGroup.value,
+        [key]: { ...pag, current: maxPage }
+      }
+    }
+  }
 )
 
 onUnmounted(() => {

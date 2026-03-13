@@ -8,7 +8,7 @@
             <ReloadOutlined />
             刷新
           </a-button>
-          <a-button type="primary" @click="openTypeSelector">
+          <a-button type="primary" @click="openCreateRule">
             <PlusOutlined />
             新增配置
           </a-button>
@@ -72,29 +72,39 @@
           <template v-if="column.key === 'name'">
             <a-space direction="vertical" size="small">
               <span style="font-weight: 500">{{ record.name }}</span>
-              <a-tag v-if="record.labels?.severity" :color="severityColor(record.labels.severity)">
-                {{ record.labels.severity }}
+              <a-tag v-if="record.level" :color="severityColor(record.level)">
+                {{ record.level }}
               </a-tag>
             </a-space>
           </template>
 
           <!-- 规则类型 -->
           <template v-if="column.key === 'type'">
-            <a-tag :color="typeColor(record.type)">
-              {{ typeText(record.type) }}
+            <a-tag :color="typeColor(record.type || record.monitor_type)">
+              {{ typeText(record.type || record.monitor_type) }}
             </a-tag>
           </template>
 
           <!-- 表达式 -->
           <template v-if="column.key === 'expr'">
-            <a-typography-text ellipsis style="max-width: 200px" :title="record.expr">
-              {{ record.expr || '-' }}
+            <a-typography-text ellipsis style="max-width: 200px" :title="record.expr || `${record.metric || 'value'} ${record.operator || '>'} ${record.threshold ?? 0}`">
+              {{ record.expr || `${record.metric || 'value'} ${record.operator || '>'} ${record.threshold ?? 0}` }}
             </a-typography-text>
           </template>
 
           <!-- 通知规则 -->
           <template v-if="column.key === 'notice_rule'">
-            <a-space v-if="record.notice_rule" direction="vertical" size="small">
+            <a-space v-if="(record.notice_rule_ids || []).length" wrap>
+              <a-tag
+                v-for="ruleId in record.notice_rule_ids"
+                :key="ruleId"
+                size="small"
+                color="blue"
+              >
+                {{ getNoticeRuleName(ruleId) }}
+              </a-tag>
+            </a-space>
+            <a-space v-else-if="record.notice_rule" direction="vertical" size="small">
               <span style="font-weight: 500">{{ record.notice_rule.name }}</span>
               <a-tag v-if="record.notice_rule.receiver_name" size="small" color="blue">
                 {{ record.notice_rule.receiver_name }}
@@ -152,69 +162,6 @@
       </a-table>
     </a-space>
 
-    <!-- 类型选择弹窗 -->
-    <a-modal
-      v-model:open="typeSelectorVisible"
-      title="选择告警规则类型"
-      :footer="null"
-      width="600px"
-    >
-      <a-row :gutter="[16, 16]">
-        <a-col :span="12">
-          <a-card
-            hoverable
-            :class="['type-card', { active: selectedType === 'realtime_metric' }]"
-            @click="selectType('realtime_metric')"
-          >
-            <a-space direction="vertical" align="center" style="width: 100%">
-              <DashboardOutlined style="font-size: 32px; color: #1890ff" />
-              <span style="font-weight: 500">实时指标告警</span>
-              <span style="font-size: 12px; color: #999">基于实时采集数据触发</span>
-            </a-space>
-          </a-card>
-        </a-col>
-        <a-col :span="12">
-          <a-card
-            hoverable
-            :class="['type-card', { active: selectedType === 'periodic_metric' }]"
-            @click="selectType('periodic_metric')"
-          >
-            <a-space direction="vertical" align="center" style="width: 100%">
-              <HistoryOutlined style="font-size: 32px; color: #52c41a" />
-              <span style="font-weight: 500">周期指标告警</span>
-              <span style="font-size: 12px; color: #999">基于时序数据库查询</span>
-            </a-space>
-          </a-card>
-        </a-col>
-        <a-col :span="12">
-          <a-card
-            hoverable
-            :class="['type-card', { active: selectedType === 'realtime_log' }]"
-            @click="selectType('realtime_log')"
-          >
-            <a-space direction="vertical" align="center" style="width: 100%">
-              <FileTextOutlined style="font-size: 32px; color: #fa8c16" />
-              <span style="font-weight: 500">实时日志告警</span>
-              <span style="font-size: 12px; color: #999">基于实时日志匹配</span>
-            </a-space>
-          </a-card>
-        </a-col>
-        <a-col :span="12">
-          <a-card
-            hoverable
-            :class="['type-card', { active: selectedType === 'periodic_log' }]"
-            @click="selectType('periodic_log')"
-          >
-            <a-space direction="vertical" align="center" style="width: 100%">
-              <SearchOutlined style="font-size: 32px; color: #722ed1" />
-              <span style="font-weight: 500">周期日志告警</span>
-              <span style="font-size: 12px; color: #999">基于日志数据库查询</span>
-            </a-space>
-          </a-card>
-        </a-col>
-      </a-row>
-    </a-modal>
-
     <!-- 规则编辑弹窗 -->
     <a-modal
       v-model:open="modalVisible"
@@ -240,78 +187,53 @@
           </a-col>
           <a-col :span="12">
             <a-form-item label="规则类型">
-              <a-tag :color="typeColor(formState.type)">{{ typeText(formState.type) }}</a-tag>
+              <a-select v-model:value="formState.type">
+                <a-select-option value="realtime_metric">实时指标</a-select-option>
+                <a-select-option value="periodic_metric">周期指标</a-select-option>
+              </a-select>
             </a-form-item>
           </a-col>
         </a-row>
 
-        <!-- 告警表达式 -->
-        <a-divider orientation="left">告警表达式</a-divider>
-        
-        <!-- 实时指标告警表达式构建器 -->
-        <template v-if="formState.type === 'realtime_metric'">
-          <a-alert type="info" show-icon style="margin-bottom: 16px">
-            <template #message>表达式说明</template>
-            <template #description>
-              使用 JEXL 表达式语法，支持内置变量：__app__, __metrics__, __instance__, usage, value 等。
-              可用性变量：<code>&lt;app&gt;_server_up</code>（如 <code>redis_server_up</code>）；
-              字符串状态变量：<code>&lt;field&gt;_ok</code>（ok/up/online/success 映射为1，err/down/offline/fail 映射为0）。
-            </template>
-          </a-alert>
-          <a-form-item label="告警表达式" name="expr" extra="示例: equals(__app__, 'Linux') && usage > 80">
-            <a-textarea
-              v-model:value="formState.expr"
-              :rows="3"
-              placeholder="请输入告警表达式"
-            />
-          </a-form-item>
-        </template>
-
-        <!-- 周期指标告警 -->
-        <template v-if="formState.type === 'periodic_metric'">
-          <a-row :gutter="16">
-            <a-col :span="12">
-              <a-form-item label="数据源" name="datasource_type">
-                <a-select v-model:value="formState.datasource_type">
-                  <a-select-option value="promql">Prometheus (PromQL)</a-select-option>
-                  <a-select-option value="sql">SQL (VictoriaMetrics)</a-select-option>
-                </a-select>
-              </a-form-item>
-            </a-col>
-            <a-col :span="12">
-              <a-form-item label="执行周期(秒)" name="period">
-                <a-input-number v-model:value="formState.period" :min="60" style="width: 100%" />
-              </a-form-item>
-            </a-col>
-          </a-row>
-          <a-form-item label="查询表达式" name="expr">
-            <a-textarea
-              v-model:value="formState.expr"
-              :rows="4"
-              :placeholder="formState.datasource_type === 'promql' ? '请输入 PromQL 查询' : '请输入 SQL 查询'"
-            />
-          </a-form-item>
-        </template>
-
-        <!-- 日志告警 -->
-        <template v-if="formState.type === 'realtime_log' || formState.type === 'periodic_log'">
-          <a-alert type="info" show-icon style="margin-bottom: 16px">
-            <template #message>日志告警</template>
-            <template #description>
-              支持日志字段匹配：log.severityText, log.body, log.attributes 等
-            </template>
-          </a-alert>
-          <a-form-item label="匹配表达式" name="expr">
-            <a-textarea
-              v-model:value="formState.expr"
-              :rows="3"
-              placeholder="示例: log.severityText == 'ERROR' && contains(log.body, 'Exception')"
-            />
-          </a-form-item>
-          <a-form-item v-if="formState.type === 'periodic_log'" label="执行周期(秒)" name="period">
-            <a-input-number v-model:value="formState.period" :min="60" style="width: 100%" />
-          </a-form-item>
-        </template>
+        <a-divider orientation="left">规则条件</a-divider>
+        <a-row :gutter="12">
+          <a-col :span="10">
+            <a-form-item label="监控指标" extra="支持派生变量：<app>_server_up（可用性）与 *_ok（字符串状态映射为1/0）">
+              <a-select v-model:value="formState.metric" show-search option-filter-prop="label" placeholder="请选择模板指标">
+                <a-select-option v-for="opt in metricOptions" :key="opt.value" :value="opt.value" :label="opt.label">
+                  {{ opt.label }}
+                </a-select-option>
+              </a-select>
+            </a-form-item>
+          </a-col>
+          <a-col :span="6">
+            <a-form-item label="操作符">
+              <a-select v-model:value="formState.operator">
+                <template v-if="isBinaryMetricSelected">
+                  <a-select-option value="==">==（推荐）</a-select-option>
+                  <a-select-option value="!=">!=</a-select-option>
+                </template>
+                <template v-else>
+                  <a-select-option value=">">&gt;</a-select-option>
+                  <a-select-option value=">=">&gt;=</a-select-option>
+                  <a-select-option value="<">&lt;</a-select-option>
+                  <a-select-option value="<=">&lt;=</a-select-option>
+                  <a-select-option value="==">==</a-select-option>
+                  <a-select-option value="!=">!=</a-select-option>
+                </template>
+              </a-select>
+            </a-form-item>
+          </a-col>
+          <a-col :span="8">
+            <a-form-item :label="isBinaryMetricSelected ? '状态值' : '阈值'" :extra="isBinaryMetricSelected ? '0=异常，1=正常' : undefined">
+              <a-select v-if="isBinaryMetricSelected" v-model:value="formState.threshold">
+                <a-select-option :value="0">0（异常）</a-select-option>
+                <a-select-option :value="1">1（正常）</a-select-option>
+              </a-select>
+              <a-input-number v-else v-model:value="formState.threshold" style="width: 100%" />
+            </a-form-item>
+          </a-col>
+        </a-row>
 
         <!-- 触发配置 -->
         <a-divider orientation="left">触发配置</a-divider>
@@ -323,7 +245,7 @@
           </a-col>
           <a-col :span="12">
             <a-form-item label="告警级别" name="severity">
-              <a-select v-model:value="(formState.labels || {}).severity">
+              <a-select v-model:value="formState.level">
                 <a-select-option value="critical">紧急 (Critical)</a-select-option>
                 <a-select-option value="warning">警告 (Warning)</a-select-option>
                 <a-select-option value="info">信息 (Info)</a-select-option>
@@ -332,9 +254,19 @@
           </a-col>
         </a-row>
 
-        <!-- 标签和注释 -->
-        <a-divider orientation="left">标签和注释</a-divider>
-        <a-form-item label="告警标签" extra="用于告警分组和路由">
+        <a-divider orientation="left">高级表达式</a-divider>
+        <a-form-item>
+          <a-space>
+            <a-switch v-model:checked="formUseCustomExpr" />
+            <span>高级模式：自定义表达式</span>
+          </a-space>
+        </a-form-item>
+        <a-form-item v-if="formUseCustomExpr" label="表达式" name="expr">
+          <a-textarea v-model:value="formState.expr" :rows="3" placeholder="例如：(used_memory / maxmemory) * 100 > 85" />
+        </a-form-item>
+
+        <a-divider orientation="left">监控标签</a-divider>
+        <a-form-item label="标签" extra="用于告警分组和路由">
           <a-space direction="vertical" style="width: 100%">
             <a-row v-for="(tag, index) in tagList" :key="index" :gutter="8">
               <a-col :span="10">
@@ -356,19 +288,12 @@
           </a-space>
         </a-form-item>
 
-        <a-form-item label="告警注释" extra="告警的详细说明">
-          <a-textarea
-            v-model:value="(formState.annotations || {}).summary"
-            :rows="2"
-            placeholder="请输入告警摘要"
-          />
-        </a-form-item>
-
         <!-- 通知配置 -->
         <a-divider orientation="left">通知配置</a-divider>
-        <a-form-item label="通知规则" extra="选择告警触发时使用的通知规则">
+        <a-form-item label="通知规则" extra="选择告警触发时使用的通知规则（可多选）">
           <a-select
-            v-model:value="formState.notice_rule_id"
+            v-model:value="formState.notice_rule_ids"
+            mode="multiple"
             placeholder="请选择通知规则"
             allow-clear
             style="width: 100%"
@@ -388,9 +313,32 @@
             没有合适的规则？<a @click="goToNoticeConfig">去配置通知规则</a>
           </div>
         </a-form-item>
+        <a-row :gutter="16">
+          <a-col :span="8">
+            <a-form-item label="自动恢复关闭">
+              <a-switch v-model:checked="formState.auto_recover" />
+            </a-form-item>
+          </a-col>
+          <a-col :span="8">
+            <a-form-item label="恢复次数(N)">
+              <a-input-number v-model:value="formState.recover_times" :min="1" style="width: 100%" />
+            </a-form-item>
+          </a-col>
+          <a-col :span="8">
+            <a-form-item label="发送恢复通知">
+              <a-switch v-model:checked="formState.notify_on_recovered" />
+            </a-form-item>
+          </a-col>
+        </a-row>
 
         <!-- 消息模板 -->
         <a-divider orientation="left">消息模板</a-divider>
+        <a-form-item label="告警标题模板" name="title_template" extra="支持变量: {{$severity}}, {{$rule_name}}, {{$labels.app}}, {{$labels.instance}}">
+          <a-input
+            v-model:value="formState.title_template"
+            placeholder="示例: [{{$severity}}] {{$rule_name}} - {{$labels.app}}/{{$labels.instance}}"
+          />
+        </a-form-item>
         <a-form-item label="告警内容模板" name="template" extra="支持变量: {{$labels.instance}}, {{$value}} 等">
           <a-textarea
             v-model:value="formState.template"
@@ -419,9 +367,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { message, Modal } from 'ant-design-vue'
 import type { FormInstance } from 'ant-design-vue'
+import * as yaml from 'js-yaml'
 import {
   ReloadOutlined,
   PlusOutlined,
@@ -429,11 +378,7 @@ import {
   DeleteOutlined,
   EditOutlined,
   ExportOutlined,
-  ImportOutlined,
-  DashboardOutlined,
-  HistoryOutlined,
-  FileTextOutlined,
-  SearchOutlined
+  ImportOutlined
 } from '@ant-design/icons-vue'
 import {
   getAlertRules,
@@ -443,9 +388,19 @@ import {
   enableAlertRule,
   disableAlertRule,
   getAlertNotices,
+  getTemplates,
   type AlertRule,
-  type AlertNotice
+  type AlertNotice,
+  type MonitorTemplate
 } from '@/api/monitoring'
+
+const DEFAULT_ALERT_CONTENT_TEMPLATE = `[{{$severity}}] {{$rule_name}}
+应用: {{$labels.app}}
+实例: {{$labels.instance}}
+指标: {{$labels.metric}}
+当前值: {{$value}}
+触发条件: {{$expression}}`
+const DEFAULT_ALERT_TITLE_TEMPLATE = `[{{$severity}}] {{$rule_name}} - {{$labels.app}}/{{$labels.instance}}`
 
 // 表格列定义
 const columns = [
@@ -468,6 +423,13 @@ const selectedRowKeys = ref<number[]>([])
 const selectedRows = ref<AlertRule[]>([])
 const noticeRules = ref<AlertNotice[]>([])
 const ruleScope = ref<'global' | 'bound' | 'all'>('global')
+const noticeRuleMap = computed(() => {
+  const map = new Map<number, AlertNotice>()
+  noticeRules.value.forEach(rule => {
+    map.set(rule.id, rule)
+  })
+  return map
+})
 
 // 分页
 const pagination = reactive({
@@ -479,25 +441,35 @@ const pagination = reactive({
 })
 
 // 弹窗状态
-const typeSelectorVisible = ref(false)
 const modalVisible = ref(false)
-const selectedType = ref('')
 const editingRule = ref<AlertRule | null>(null)
 const formRef = ref<FormInstance>()
+const formUseCustomExpr = ref(false)
+const templates = ref<MonitorTemplate[]>([])
+const metricOptions = ref<{ value: string; label: string }[]>([{ value: 'value', label: 'value' }])
 
 // 表单状态
 const formState = reactive<Partial<AlertRule>>({
   name: '',
   type: 'realtime_metric',
   expr: '',
-  period: 300,
+  period: 60,
   times: 1,
-  labels: { severity: 'warning' },
-  annotations: { summary: '' },
+  metric: 'value',
+  operator: '>',
+  threshold: 0,
+  level: 'warning',
+  labels: {},
+  annotations: {},
+  title_template: '',
   template: '',
   datasource_type: 'promql',
   enabled: true,
-  notice_rule_id: undefined
+  auto_recover: true,
+  recover_times: 2,
+  notify_on_recovered: true,
+  notice_rule_id: undefined,
+  notice_rule_ids: []
 })
 
 // 标签列表
@@ -506,7 +478,6 @@ const tagList = ref<{ key: string; value: string }[]>([])
 // 表单校验规则
 const formRules = {
   name: [{ required: true, message: '请输入规则名称', trigger: 'blur' }],
-  expr: [{ required: true, message: '请输入告警表达式', trigger: 'blur' }],
   period: [{ required: true, message: '请输入执行周期', trigger: 'blur' }]
 }
 
@@ -517,9 +488,7 @@ const uploadAction = `${(import.meta as any).env?.VITE_API_BASE_URL || ''}/monit
 const typeText = (type?: string) => {
   const map: Record<string, string> = {
     realtime_metric: '实时指标',
-    periodic_metric: '周期指标',
-    realtime_log: '实时日志',
-    periodic_log: '周期日志'
+    periodic_metric: '周期指标'
   }
   return map[type || ''] || type
 }
@@ -528,9 +497,7 @@ const typeText = (type?: string) => {
 const typeColor = (type?: string) => {
   const map: Record<string, string> = {
     realtime_metric: 'blue',
-    periodic_metric: 'green',
-    realtime_log: 'orange',
-    periodic_log: 'purple'
+    periodic_metric: 'green'
   }
   return map[type || ''] || 'default'
 }
@@ -545,10 +512,91 @@ const severityColor = (severity?: string) => {
   return map[severity || ''] || 'default'
 }
 
+const getNoticeRuleName = (id: number) => {
+  const item = noticeRuleMap.value.get(id)
+  return item?.name || `#${id}`
+}
+
 const normalizeList = (payload: any) => {
   if (Array.isArray(payload?.items)) return { items: payload.items, total: payload.total || payload.items.length }
   if (Array.isArray(payload)) return { items: payload, total: payload.length }
   return { items: [], total: 0 }
+}
+
+const isBinaryMetric = (metric?: string) => {
+  const key = String(metric || '').trim().toLowerCase()
+  return key.endsWith('_ok') || key.endsWith('_up')
+}
+
+const isBinaryMetricSelected = computed(() => isBinaryMetric(String(formState.metric || '')))
+
+const normalizeBinaryRule = (metric: string, operator: string, threshold: number) => {
+  if (!isBinaryMetric(metric)) return { operator: String(operator || '>').trim() || '>', threshold: Number(threshold ?? 0) || 0 }
+  const op = String(operator || '==').trim() || '=='
+  if (op === '<' || op === '<=') return { operator: '==', threshold: 0 }
+  if (op === '>' || op === '>=') return { operator: '==', threshold: 1 }
+  if (op === '!=') return { operator: '!=', threshold: Number(threshold) >= 0.5 ? 1 : 0 }
+  return { operator: '==', threshold: Number(threshold) >= 0.5 ? 1 : 0 }
+}
+
+const buildExpr = () => {
+  const metric = String(formState.metric || 'value').trim() || 'value'
+  const normalized = normalizeBinaryRule(metric, String(formState.operator || '>'), Number(formState.threshold || 0))
+  return `${metric} ${normalized.operator} ${normalized.threshold}`
+}
+
+const parseTemplateMetricOptions = (content: string): { value: string; label: string }[] => {
+  try {
+    const doc = (yaml.load(content || '') || {}) as any
+    if (!doc || typeof doc !== 'object') return [{ value: 'value', label: 'value' }]
+    const options = new Map<string, { value: string; label: string }>()
+    const appName = String(doc.app || '').trim()
+    const groups = Array.isArray(doc.metrics) ? doc.metrics : []
+    const pickI18nText = (value: any) => {
+      if (typeof value === 'string') return value.trim()
+      if (!value || typeof value !== 'object') return ''
+      return String(value['zh-CN'] || value['en-US'] || value['zh'] || value['en'] || '').trim()
+    }
+    for (const group of groups) {
+      const groupName = String(group?.name || '').trim()
+      const groupTitle = pickI18nText(group?.i18n || group?.name) || groupName
+      const fields = Array.isArray(group?.fields) ? group.fields : []
+      for (const field of fields) {
+        const fieldName = String(field?.field || field?.metric || '').trim()
+        if (!fieldName) continue
+        const fieldTitle = pickI18nText(field?.i18n || field?.name) || fieldName
+        const label = groupTitle ? `${groupTitle} / ${fieldTitle} (${fieldName})` : `${fieldTitle} (${fieldName})`
+        options.set(fieldName, { value: fieldName, label })
+        if (Number(field?.type) === 1) {
+          const okField = `${fieldName}_ok`
+          options.set(okField, { value: okField, label: `${groupTitle || fieldTitle} / ${fieldTitle} 状态OK (${okField})` })
+        }
+      }
+    }
+    if (appName) options.set(`${appName}_server_up`, { value: `${appName}_server_up`, label: `实例可用性 (${appName}_server_up)` })
+    if (!options.size) options.set('value', { value: 'value', label: 'value' })
+    return Array.from(options.values())
+  } catch {
+    return [{ value: 'value', label: 'value' }]
+  }
+}
+
+const loadTemplates = async () => {
+  try {
+    const res = await getTemplates()
+    templates.value = Array.isArray((res as any)?.data) ? (res as any).data : []
+    const options = new Map<string, { value: string; label: string }>()
+    options.set('value', { value: 'value', label: 'value' })
+    for (const tpl of templates.value) {
+      for (const opt of parseTemplateMetricOptions(String(tpl.content || ''))) {
+        options.set(opt.value, opt)
+      }
+    }
+    metricOptions.value = Array.from(options.values())
+  } catch {
+    templates.value = []
+    metricOptions.value = [{ value: 'value', label: 'value' }]
+  }
 }
 
 // 加载通知规则列表
@@ -609,19 +657,16 @@ const handleTableChange = (pager: any) => {
   loadData()
 }
 
-// 打开类型选择器
-const openTypeSelector = () => {
-  selectedType.value = ''
-  typeSelectorVisible.value = true
-}
-
-// 选择类型
-const selectType = (type: string) => {
-  selectedType.value = type
-  typeSelectorVisible.value = false
+const openCreateRule = async () => {
   editingRule.value = null
   resetForm()
-  formState.type = type
+  await Promise.all([loadNoticeRules(), loadTemplates()])
+  if (metricOptions.value.length) {
+    formState.metric = metricOptions.value[0].value
+    const normalized = normalizeBinaryRule(String(formState.metric || 'value'), String(formState.operator || '>'), Number(formState.threshold || 0))
+    formState.operator = normalized.operator
+    formState.threshold = normalized.threshold
+  }
   modalVisible.value = true
 }
 
@@ -630,37 +675,66 @@ const resetForm = () => {
   formState.name = ''
   formState.type = 'realtime_metric'
   formState.expr = ''
-  formState.period = 300
+  formState.metric = 'value'
+  formState.operator = '>'
+  formState.threshold = 0
+  formState.level = 'warning'
+  formState.period = 60
   formState.times = 1
-  formState.labels = { severity: 'warning' }
-  formState.annotations = { summary: '' }
-  formState.template = ''
+  formState.labels = {}
+  formState.annotations = {}
+  formState.title_template = DEFAULT_ALERT_TITLE_TEMPLATE
+  formState.template = DEFAULT_ALERT_CONTENT_TEMPLATE
   formState.datasource_type = 'promql'
   formState.enabled = true
+  formState.auto_recover = true
+  formState.recover_times = 2
+  formState.notify_on_recovered = true
   formState.notice_rule_id = undefined
+  formState.notice_rule_ids = []
   tagList.value = []
+  formUseCustomExpr.value = false
 }
 
 // 编辑规则
 const handleEdit = (record: AlertRule) => {
   editingRule.value = record
+  const metric = String((record as any).metric || 'value')
+  const normalized = normalizeBinaryRule(metric, String((record as any).operator || '>'), Number((record as any).threshold || 0))
   Object.assign(formState, {
     name: record.name,
-    type: record.type,
-    expr: record.expr,
-    period: record.period,
-    times: record.times,
-    labels: { ...record.labels },
-    annotations: { ...record.annotations },
+    type: ((record as any).type || (record as any).monitor_type || 'realtime_metric'),
+    expr: (record as any).expr || '',
+    metric,
+    operator: normalized.operator,
+    threshold: normalized.threshold,
+    level: String((record as any).level || 'warning'),
+    period: Number((record as any).period || 60),
+    times: Number((record as any).times || 1),
+    labels: { ...((record as any).labels || {}) },
+    annotations: { ...((record as any).annotations || {}) },
+    title_template: String((record as any).title_template || ((record as any).annotations || {}).title_template || ''),
     template: record.template,
-    datasource_type: record.datasource_type,
+    datasource_type: (record as any).datasource_type || 'promql',
     enabled: record.enabled,
-    notice_rule_id: record.notice_rule_id
+    auto_recover: (record as any).auto_recover !== false,
+    recover_times: Math.max(Number((record as any).recover_times || 2), 1),
+    notify_on_recovered: (record as any).notify_on_recovered !== false,
+    notice_rule_id: (record as any).notice_rule_id,
+    notice_rule_ids: (record as any).notice_rule_ids && (record as any).notice_rule_ids.length
+        ? [...(record as any).notice_rule_ids]
+        : (record as any).notice_rule_id
+          ? [(record as any).notice_rule_id]
+          : []
   })
   // 转换标签列表
-  tagList.value = Object.entries(record.labels || {})
-    .filter(([key]) => key !== 'severity')
+  tagList.value = Object.entries(((record as any).labels || {}) as Record<string, string>)
+    .filter(([key]) => !['severity', 'auto_recover', 'recover_times', 'notify_on_recovered'].includes(String(key)))
     .map(([key, value]) => ({ key, value }))
+  formUseCustomExpr.value = Boolean(String((record as any).expr || '').trim())
+  if (!metricOptions.value.some((item) => item.value === metric)) {
+    metricOptions.value = [...metricOptions.value, { value: metric, label: metric }]
+  }
   modalVisible.value = true
 }
 
@@ -671,17 +745,43 @@ const handleSave = async () => {
     saving.value = true
 
     // 构建标签
-    const labels: Record<string, string> = { ...formState.labels }
+    const labels: Record<string, any> = { ...(formState.labels || {}) }
+    labels.metric = String(formState.metric || 'value').trim() || 'value'
+    labels.operator = String(formState.operator || '>').trim() || '>'
+    labels.threshold = Number(formState.threshold || 0)
+    labels.severity = String(formState.level || 'warning')
+    labels.auto_recover = formState.auto_recover !== false
+    labels.recover_times = Math.max(Number(formState.recover_times || 2), 1)
+    labels.notify_on_recovered = formState.notify_on_recovered !== false
     tagList.value.forEach(tag => {
       if (tag.key && tag.value) {
         labels[tag.key] = tag.value
       }
     })
 
+    const normalized = normalizeBinaryRule(String(formState.metric || 'value'), String(formState.operator || '>'), Number(formState.threshold || 0))
+    const expr = formUseCustomExpr.value
+      ? (String(formState.expr || '').trim() || buildExpr())
+      : `${String(formState.metric || 'value').trim() || 'value'} ${normalized.operator} ${normalized.threshold}`
+
     const data = {
       ...formState,
+      type: formState.type,
+      monitor_type: formState.type,
+      metric: String(formState.metric || 'value').trim() || 'value',
+      operator: normalized.operator,
+      threshold: normalized.threshold,
+      level: String(formState.level || 'warning'),
+      expr,
       labels,
-      annotations: formState.annotations
+      annotations: {
+        ...(formState.annotations || {}),
+        ...(String(formState.title_template || '').trim() ? { title_template: String(formState.title_template || '').trim() } : {})
+      },
+      title_template: String(formState.title_template || '').trim(),
+      auto_recover: formState.auto_recover !== false,
+      recover_times: Math.max(Number(formState.recover_times || 2), 1),
+      notify_on_recovered: formState.notify_on_recovered !== false
     }
 
     if (editingRule.value?.id) {
@@ -798,21 +898,22 @@ const removeTag = (index: number) => {
 }
 
 onMounted(() => {
+  loadTemplates()
   loadData()
   loadNoticeRules()
 })
-</script>
 
-<style scoped>
-.type-card {
-  cursor: pointer;
-  transition: all 0.3s;
-}
-.type-card:hover {
-  border-color: #1890ff;
-}
-.type-card.active {
-  border-color: #1890ff;
-  background-color: #e6f7ff;
-}
-</style>
+watch(
+  () => formState.metric,
+  (metric, prevMetric) => {
+    if (isBinaryMetric(String(metric || '')) && !isBinaryMetric(String(prevMetric || ''))) {
+      formState.operator = '=='
+      formState.threshold = 0
+      return
+    }
+    const normalized = normalizeBinaryRule(String(formState.metric || 'value'), String(formState.operator || '>'), Number(formState.threshold || 0))
+    formState.operator = normalized.operator
+    formState.threshold = normalized.threshold
+  }
+)
+</script>

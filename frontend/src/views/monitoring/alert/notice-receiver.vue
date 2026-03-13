@@ -16,6 +16,7 @@
       <a-space>
         <a-input v-model:value="keyword" placeholder="渠道名称" style="width: 220px" />
         <a-select v-model:value="typeFilter" allow-clear placeholder="全部类型" style="width: 180px">
+          <a-select-option :value="15">系统通知</a-select-option>
           <a-select-option :value="1">邮件</a-select-option>
           <a-select-option :value="2">Webhook</a-select-option>
           <a-select-option :value="4">企业微信机器人</a-select-option>
@@ -87,6 +88,7 @@
           <a-col :span="12">
             <a-form-item label="渠道类型" required>
               <a-select v-model:value="formState.type" :disabled="!!editing?.id" @change="onTypeChange">
+                <a-select-option :value="15">系统通知</a-select-option>
                 <a-select-option :value="1">邮件</a-select-option>
                 <a-select-option :value="2">Webhook</a-select-option>
                 <a-select-option :value="4">企业微信机器人</a-select-option>
@@ -403,7 +405,8 @@ import {
   SlackOutlined,
   MobileOutlined,
   CloudOutlined,
-  NotificationOutlined
+  NotificationOutlined,
+  BellOutlined
 } from '@ant-design/icons-vue'
 import { useUserStore } from '@/stores/user'
 import {
@@ -448,6 +451,7 @@ const columns = [
 ]
 
 const typeIcons: Record<number, any> = {
+  15: BellOutlined,
   0: MobileOutlined,
   1: MailOutlined,
   2: GlobalOutlined,
@@ -470,6 +474,8 @@ const getConfigPreview = (record: NoticeReceiver): string => {
   if (!record.config) return '-'
   const config = record.config
   switch (record.type) {
+    case 15:
+      return '系统通知'
     case 1:
       return config.smtp_host || '-'
     case 2:

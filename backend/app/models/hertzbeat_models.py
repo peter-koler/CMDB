@@ -207,6 +207,7 @@ class AlertDefine(db.Model):
     # 关联通知规则
     notice_rule_id = db.Column(db.Integer, db.ForeignKey("notice_rules.id"), nullable=True)
     notice_rule = db.relationship("NoticeRule", backref="alert_defines", lazy="joined")
+    notice_rule_ids_json = db.Column(db.Text, nullable=False, default="[]")
     
     creator = db.Column(db.String(100), nullable=True)
     modifier = db.Column(db.String(100), nullable=True)
@@ -226,6 +227,25 @@ class AlertDefine(db.Model):
             return json.loads(self.annotations_json or "{}")
         except json.JSONDecodeError:
             return {}
+
+    @property
+    def notice_rule_ids(self) -> list[int]:
+        try:
+            raw = json.loads(self.notice_rule_ids_json or "[]")
+        except json.JSONDecodeError:
+            raw = []
+        ids: list[int] = []
+        if isinstance(raw, list):
+            for item in raw:
+                try:
+                    val = int(item)
+                except (TypeError, ValueError):
+                    continue
+                if val > 0:
+                    ids.append(val)
+        if not ids and self.notice_rule_id:
+            ids = [int(self.notice_rule_id)]
+        return ids
 
 
 class AlertSilence(db.Model):
@@ -359,6 +379,9 @@ class NoticeRule(db.Model):
     days_json = db.Column(db.Text, nullable=False, default="[1,2,3,4,5,6,7]")  # 生效星期几 [1,2,3,4,5,6,7]
     period_start = db.Column(db.String(8), nullable=True)  # 生效时间开始，格式 HH:MM:SS
     period_end = db.Column(db.String(8), nullable=True)  # 生效时间结束，格式 HH:MM:SS
+    recipient_type = db.Column(db.String(20), nullable=False, default="user")  # user/department
+    recipient_ids_json = db.Column(db.Text, nullable=False, default="[]")  # 用户/部门ID列表
+    include_sub_departments = db.Column(db.Boolean, nullable=False, default=True)
     enable = db.Column(db.Boolean, nullable=False, default=True)
     creator = db.Column(db.String(100), nullable=True)
     modifier = db.Column(db.String(100), nullable=True)
@@ -381,6 +404,13 @@ class NoticeRule(db.Model):
             return json.loads(self.days_json or "[1,2,3,4,5,6,7]")
         except json.JSONDecodeError:
             return [1, 2, 3, 4, 5, 6, 7]
+
+    @property
+    def recipient_ids(self) -> list:
+        try:
+            return json.loads(self.recipient_ids_json or "[]")
+        except json.JSONDecodeError:
+            return []
     
     def to_dict(self) -> dict:
         """转换为字典，包含关联的渠道信息"""
@@ -400,6 +430,9 @@ class NoticeRule(db.Model):
             "days": self.days,
             "period_start": self.period_start,
             "period_end": self.period_end,
+            "recipient_type": self.recipient_type,
+            "recipient_ids": self.recipient_ids,
+            "include_sub_departments": bool(self.include_sub_departments),
             "enable": self.enable,
             "creator": self.creator,
             "modifier": self.modifier,
@@ -436,6 +469,7 @@ class NoticeReceiver(db.Model):
     TYPE_SERVERCHAN = 12   # Server酱
     TYPE_GOTIFY = 13       # Gotify
     TYPE_FEISHU_APP = 14   # 飞书应用
+    TYPE_SYSTEM = 15       # 系统通知
     
     TYPE_CHOICES = {
         TYPE_SMS: "短信",
@@ -452,6 +486,7 @@ class NoticeReceiver(db.Model):
         TYPE_SERVERCHAN: "Server酱",
         TYPE_GOTIFY: "Gotify",
         TYPE_FEISHU_APP: "飞书应用",
+        TYPE_SYSTEM: "系统通知",
     }
 
     id = db.Column(db.Integer, primary_key=True)
@@ -564,6 +599,7 @@ class NoticeReceiver(db.Model):
             self.TYPE_SERVERCHAN: "notification",
             self.TYPE_GOTIFY: "mobile",
             self.TYPE_FEISHU_APP: "feishu",
+            self.TYPE_SYSTEM: "notification",
         }
         return icons.get(self.type, "notification")
     

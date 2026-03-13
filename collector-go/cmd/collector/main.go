@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"log"
+	"net"
 	"os/signal"
 	"syscall"
 
@@ -30,15 +31,6 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// 向 Manager 注册
-	if cfg.Manager.Addr != "" {
-		regClient := registration.NewClient(cfg, cfg.Server.Addr)
-		if err := regClient.Start(ctx); err != nil {
-			log.Printf("[Main] Failed to register to manager: %v", err)
-			// 注册失败不退出，继续启动服务
-		}
-	}
-
 	resultQueue, err := queue.NewFromConfig(cfg)
 	if err != nil {
 		log.Fatalf("create queue failed: %v", err)
@@ -63,8 +55,32 @@ func main() {
 	pool.Start(ctx)
 	go wheel.Start(ctx)
 
+	// 先绑定监听端口，再向 manager 注册，避免 manager 立即回连时出现 connection refused。
+	ln, err := net.Listen("tcp", cfg.Server.Addr)
+	if err != nil {
+		log.Fatalf("collector listen failed: %v", err)
+	}
+	serveErrCh := make(chan error, 1)
+	go func() {
+		serveErrCh <- server.ServeWithListener(ctx, ln)
+	}()
+
+	// 向 Manager 注册
+	if cfg.Manager.Addr != "" {
+		regClient := registration.NewClient(cfg, cfg.Server.Addr)
+		if err := regClient.Start(ctx); err != nil {
+			log.Printf("[Main] Failed to register to manager: %v", err)
+			// 注册失败不退出，继续启动服务
+		}
+	}
+
 	log.Printf("collector start on %s, queue=%s, manager=%s", cfg.Server.Addr, cfg.Queue.Backend, cfg.Manager.Addr)
-	if err := server.Serve(ctx); err != nil {
-		log.Fatalf("collector stopped with error: %v", err)
+	select {
+	case err := <-serveErrCh:
+		if err != nil {
+			log.Fatalf("collector stopped with error: %v", err)
+		}
+	case <-ctx.Done():
+		// graceful shutdown
 	}
 }

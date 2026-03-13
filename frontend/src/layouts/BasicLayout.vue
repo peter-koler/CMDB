@@ -415,9 +415,12 @@ watch(() => route.path, () => {
 
 const updateSelectedKeys = () => {
   const path = route.path
-  if (path.includes('/dashboard')) {
+  if (path === '/dashboard') {
     selectedKeys.value = ['dashboard']
     openKeys.value = []
+  } else if (path.includes('/monitoring/dashboard')) {
+    selectedKeys.value = ['monitoring-dashboard']
+    openKeys.value = ['monitoring']
   } else if (path.includes('/cmdb/instance')) {
     selectedKeys.value = ['instance']
     openKeys.value = ['cmdb']
@@ -454,9 +457,6 @@ const updateSelectedKeys = () => {
   } else if (path.includes('/config/dictionary')) {
     selectedKeys.value = ['dictionary']
     openKeys.value = ['config']
-  } else if (path.includes('/monitoring/dashboard')) {
-    selectedKeys.value = ['monitoring-dashboard']
-    openKeys.value = ['monitoring']
   } else if (path.includes('/monitoring/template')) {
     selectedKeys.value = ['monitoring-template']
     openKeys.value = ['monitoring']

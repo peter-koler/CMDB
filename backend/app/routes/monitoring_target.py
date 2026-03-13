@@ -4,14 +4,17 @@ from datetime import datetime, timedelta, timezone
 import json
 import re
 
-from flask import Blueprint, jsonify, make_response, request
+from flask import Blueprint, current_app, jsonify, make_response, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
 from sqlalchemy.exc import IntegrityError
 
 from app import db
 from app.models import (
     User,
+    Monitor,
+    MonitorParam,
     MonitorTemplate,
+    CiInstance,
     SingleAlert,
     AlertHistory,
     AlertDefine,
@@ -19,9 +22,11 @@ from app.models import (
     AlertInhibit,
     AlertSilence,
     AlertIntegration,
+    AlertNotification,
     NoticeReceiver,
     NoticeRule,
 )
+from app.notifications.models import Notification, NotificationRecipient
 from app.notifications.websocket import socketio
 from app.services.manager_api_service import ManagerError, manager_api_service
 
@@ -86,8 +91,22 @@ def _manager_call(method: str, path: str, payload=None, params=None, fallback=No
         )
         return jsonify({"code": 200, "data": data})
     except ManagerError as e:
+        current_app.logger.warning(
+            "[MonitoringProxy] manager call failed method=%s path=%s status=%s code=%s message=%s",
+            method,
+            path,
+            e.status,
+            e.code,
+            e.message,
+        )
         # 监控扩展模块在 Manager 未实现(404)或暂时不可用(5xx)时返回空列表，避免前端页面硬失败。
         if fallback is not None and e.status in {404, 502, 503, 504}:
+            current_app.logger.info(
+                "[MonitoringProxy] fallback activated method=%s path=%s status=%s",
+                method,
+                path,
+                e.status,
+            )
             return jsonify({"code": 200, "data": fallback()})
         return jsonify({"code": e.status, "message": e.message, "error_code": e.code}), e.status
 
@@ -218,6 +237,99 @@ def _list_response(items: list[dict], total: int, page: int, page_size: int):
     )
 
 
+def _monitor_item_from_row(row: Monitor, params_by_monitor: dict[int, dict[str, str]] | None = None) -> dict:
+    annotations = _json_load(row.annotations_json, {})
+    if not isinstance(annotations, dict):
+        annotations = {}
+    labels = _json_load(row.labels_json, {})
+    if not isinstance(labels, dict):
+        labels = {}
+    if params_by_monitor is not None:
+        params = params_by_monitor.get(row.id, {})
+    else:
+        params_rows = MonitorParam.query.filter_by(monitor_id=row.id).all()
+        params = {str(p.field): str(p.param_value or "") for p in params_rows}
+    enabled = int(row.status or 0) != 0
+    return {
+        "id": row.id,
+        "job_id": str(row.job_id) if row.job_id is not None else None,
+        "name": row.name,
+        "app": row.app,
+        "target": row.instance,
+        "endpoint": row.instance,
+        "interval_seconds": int(row.intervals or 0),
+        "interval": int(row.intervals or 0),
+        "enabled": enabled,
+        "status": "enabled" if enabled else "disabled",
+        "template_id": annotations.get("template_id"),
+        "version": annotations.get("manager_version") or 1,
+        "ci_id": annotations.get("ci_id"),
+        "ci_model_id": annotations.get("ci_model_id"),
+        "ci_name": annotations.get("ci_name"),
+        "ci_code": annotations.get("ci_code"),
+        "labels": labels,
+        "params": params,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
+
+
+def _load_monitors_from_db_fallback() -> dict:
+    page, page_size = _page_args()
+    q = (request.args.get("q") or "").strip().lower()
+    status = (request.args.get("status") or "").strip().lower()
+    rows = Monitor.query.order_by(Monitor.updated_at.desc(), Monitor.id.desc()).all()
+    monitor_ids = [row.id for row in rows]
+    params_by_monitor: dict[int, dict[str, str]] = {}
+    if monitor_ids:
+        params_rows = MonitorParam.query.filter(MonitorParam.monitor_id.in_(monitor_ids)).all()
+        for item in params_rows:
+            bucket = params_by_monitor.setdefault(int(item.monitor_id), {})
+            bucket[str(item.field)] = str(item.param_value or "")
+    items = [_monitor_item_from_row(row, params_by_monitor=params_by_monitor) for row in rows]
+
+    if status in {"enabled", "disabled"}:
+        want_enabled = status == "enabled"
+        items = [item for item in items if bool(item.get("enabled")) == want_enabled]
+
+    if q:
+        def _match(item: dict) -> bool:
+            hay = " ".join(
+                [
+                    str(item.get("name") or ""),
+                    str(item.get("app") or ""),
+                    str(item.get("target") or ""),
+                    str(item.get("ci_code") or ""),
+                    str(item.get("ci_name") or ""),
+                    str(item.get("job_id") or ""),
+                ]
+            ).lower()
+            return q in hay
+
+        items = [item for item in items if _match(item)]
+
+    page_items, total = _paginate_items(items, page, page_size)
+    return {"items": page_items, "total": total, "page": page, "page_size": page_size}
+
+
+def _set_target_enabled_fallback(monitor_id: int, enabled: bool) -> dict:
+    row = Monitor.query.get(monitor_id)
+    if not row:
+        raise ValueError("监控任务不存在")
+    row.status = 1 if enabled else 0
+    row.modifier = "python-web"
+    row.updated_at = _now_naive_utc()
+    db.session.commit()
+    return _monitor_item_from_row(row)
+
+
+def _get_target_from_db_fallback(monitor_id: int) -> dict:
+    row = Monitor.query.get(monitor_id)
+    if not row:
+        return {"id": monitor_id, "fallback_error": "not_found"}
+    return _monitor_item_from_row(row)
+
+
 def _json_load(raw: str | None, default):
     if not raw:
         return default
@@ -229,6 +341,64 @@ def _json_load(raw: str | None, default):
 
 def _json_dump(payload) -> str:
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+
+def _coerce_label_value(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    text = str(value).strip()
+    return text
+
+
+def _merge_ci_labels(payload: dict) -> dict:
+    if not isinstance(payload, dict):
+        return payload
+    labels = payload.get("labels") if isinstance(payload.get("labels"), dict) else {}
+    merged = {str(k): _coerce_label_value(v) for k, v in labels.items() if str(k).strip()}
+
+    ci_id = payload.get("ci_id")
+    ci_code = payload.get("ci_code")
+    ci_name = payload.get("ci_name")
+    ci_row = None
+    if ci_id not in (None, ""):
+        try:
+            ci_row = CiInstance.query.get(int(ci_id))
+        except (TypeError, ValueError):
+            ci_row = None
+    if ci_row is None and ci_code not in (None, ""):
+        ci_row = CiInstance.query.filter_by(code=str(ci_code).strip()).first()
+
+    if ci_row:
+        merged["ci.id"] = str(ci_row.id)
+        merged["ci.code"] = str(ci_row.code or "")
+        merged["ci.name"] = str(ci_row.name or "")
+        attrs = ci_row.get_attribute_values()
+        if isinstance(attrs, dict):
+            for key, raw in attrs.items():
+                attr_key = str(key or "").strip()
+                if not attr_key:
+                    continue
+                value = _coerce_label_value(raw)
+                if value == "":
+                    continue
+                merged[f"ci.{attr_key}"] = value
+        payload["ci_id"] = ci_row.id
+        payload["ci_code"] = ci_row.code
+        payload["ci_name"] = ci_row.name
+    else:
+        ci_id_text = str(ci_id).strip() if ci_id not in (None, "") else ""
+        ci_code_text = str(ci_code).strip() if ci_code not in (None, "") else ""
+        ci_name_text = str(ci_name).strip() if ci_name not in (None, "") else ""
+        if ci_id_text:
+            merged["ci.id"] = ci_id_text
+        if ci_code_text:
+            merged["ci.code"] = ci_code_text
+        if ci_name_text:
+            merged["ci.name"] = ci_name_text
+    payload["labels"] = merged
+    return payload
 
 
 def _parse_rfc3339_to_ms(raw: str | None) -> int | None:
@@ -265,6 +435,7 @@ def _extract_alert_item(
 ) -> dict:
     labels = _json_load(labels_json, {})
     annotations = _json_load(annotations_json, {})
+    rule_id = _extract_rule_id(labels, annotations)
     level = str(labels.get("severity") or annotations.get("severity") or "warning")
     name = (
         labels.get("alertname")
@@ -295,6 +466,29 @@ def _extract_alert_item(
     if triggered_ms:
         tail = recovered_ms or _now_ms()
         duration_seconds = max(int((tail - triggered_ms) / 1000), 0)
+    source_keys = (
+        "source",
+        "integration",
+        "integration_source",
+        "provider",
+        "alert_source",
+        "origin",
+        "from",
+    )
+    source_value = None
+    for key in source_keys:
+        if key in labels and labels.get(key):
+            source_value = labels.get(key)
+            break
+        if key in annotations and annotations.get(key):
+            source_value = annotations.get(key)
+            break
+    source_type, source_name = _normalize_source_value(source_value)
+    if not source_type:
+        if monitor_id:
+            source_type = "local"
+        else:
+            source_type = "external"
     return {
         "id": row_id,
         "level": level,
@@ -307,33 +501,226 @@ def _extract_alert_item(
         "metric": labels.get("metric"),
         "metric_value": labels.get("value"),
         "threshold": labels.get("threshold"),
+        "rule_id": rule_id,
         "triggered_at": _ms_to_rfc3339(triggered_ms),
         "recovered_at": _ms_to_rfc3339(recovered_ms),
         "duration_seconds": duration_seconds,
         "assignee": assignee,
         "note": note,
+        "source_type": source_type,
+        "source_name": source_name,
     }
+
+
+def _extract_rule_id(labels: dict, annotations: dict) -> int | None:
+    if not isinstance(labels, dict):
+        labels = {}
+    if not isinstance(annotations, dict):
+        annotations = {}
+    for key in (
+        "rule_id",
+        "alert_rule_id",
+        "alert_rule",
+        "alert_rule_id",
+        "ruleId",
+        "alertRuleId",
+        "alert_ruleId",
+    ):
+        raw = labels.get(key) if key in labels else annotations.get(key)
+        if raw is None:
+            continue
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _normalize_source_value(value: str | None) -> tuple[str | None, str | None]:
+    if value is None:
+        return None, None
+    raw = str(value).strip()
+    if not raw:
+        return None, None
+    normalized = raw.lower()
+    if normalized in {"local", "internal", "hertzbeat", "hb", "self"}:
+        return "local", None
+    return "external", raw
+
+
+def _notification_from_model(row: AlertNotification) -> dict:
+    return {
+        "id": row.id,
+        "alert_id": row.alert_id,
+        "rule_id": row.rule_id,
+        "receiver_type": row.receiver_type,
+        "receiver_id": row.receiver_id,
+        "notify_type": row.notify_type,
+        "status": row.status,
+        "content": row.content,
+        "error_msg": row.error_msg,
+        "retry_times": row.retry_times,
+        "sent_at": _ms_to_rfc3339(row.sent_at),
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
+
+
+def _system_notify_status_code(delivery_status: str | None) -> int:
+    state = str(delivery_status or "").strip().lower()
+    # 站内消息创建成功即视为送达，notification_recipients 默认常为 pending。
+    if state in {"", "pending"}:
+        return 2
+    if state in {"delivered", "success", "sent"}:
+        return 2
+    if state in {"failed", "permanent_failure"}:
+        return 3
+    if state in {"sending", "processing"}:
+        return 1
+    return 0
+
+
+def _get_alert_context(alert_id: int) -> dict:
+    row = SingleAlert.query.get(alert_id)
+    if row:
+        labels = _json_load(row.labels_json, {})
+        return {
+            "rule_name": str(labels.get("alertname") or "").strip(),
+            "monitor_id": str(labels.get("monitor_id") or "").strip(),
+        }
+    history = AlertHistory.query.get(alert_id)
+    if history:
+        labels = _json_load(history.labels_json, {})
+        return {
+            "rule_name": str(labels.get("alertname") or "").strip(),
+            "monitor_id": str(labels.get("monitor_id") or "").strip(),
+        }
+    return {"rule_name": "", "monitor_id": ""}
+
+
+def _list_system_notifications_for_alert(alert_id: int) -> list[dict]:
+    notify_type = (request.args.get("notify_type") or "").strip().lower()
+    receiver_type = (request.args.get("receiver_type") or "").strip().lower()
+    status = request.args.get("status")
+    q = (request.args.get("q") or "").strip().lower()
+    start_ms = _parse_rfc3339_to_ms(request.args.get("start_at"))
+    end_ms = _parse_rfc3339_to_ms(request.args.get("end_at"))
+
+    if notify_type and notify_type != "system":
+        return []
+    if receiver_type and receiver_type != "user":
+        return []
+
+    ctx = _get_alert_context(alert_id)
+    monitor_id = str(ctx.get("monitor_id") or "").strip()
+    rule_name = str(ctx.get("rule_name") or "").strip()
+    if not monitor_id:
+        return []
+
+    query = (
+        db.session.query(NotificationRecipient, Notification)
+        .join(Notification, NotificationRecipient.notification_id == Notification.id)
+        .filter(Notification.content.ilike(f"%monitor={monitor_id}%"))
+        .order_by(Notification.created_at.desc(), NotificationRecipient.id.desc())
+    )
+    if rule_name:
+        query = query.filter(
+            db.or_(
+                Notification.title.ilike(f"%{rule_name}%"),
+                Notification.content.ilike(f"%{rule_name}%"),
+            )
+        )
+
+    items: list[dict] = []
+    for recipient, notice in query.all():
+        status_code = _system_notify_status_code(recipient.delivery_status)
+        if status is not None and str(status).strip() != "":
+            try:
+                status_val = int(status)
+                if status_code != status_val:
+                    continue
+            except (TypeError, ValueError):
+                pass
+        sent_at_ms = None
+        if notice.created_at:
+            sent_at_ms = int(notice.created_at.replace(tzinfo=timezone.utc).timestamp() * 1000)
+        if start_ms and (not sent_at_ms or sent_at_ms < start_ms):
+            continue
+        if end_ms and (not sent_at_ms or sent_at_ms > end_ms):
+            continue
+        if q:
+            hay = " ".join(
+                [
+                    str(notice.title or ""),
+                    str(notice.content or ""),
+                    str(recipient.user_id or ""),
+                    str(recipient.delivery_status or ""),
+                ]
+            ).lower()
+            if q not in hay:
+                continue
+        items.append(
+            {
+                "id": int(recipient.id) + 10_000_000,
+                "alert_id": alert_id,
+                "rule_id": None,
+                "receiver_type": "user",
+                "receiver_id": recipient.user_id,
+                "notify_type": "system",
+                "status": status_code,
+                "content": notice.content,
+                "error_msg": None,
+                "retry_times": recipient.delivery_attempts or 0,
+                "sent_at": _ms_to_rfc3339(sent_at_ms) if sent_at_ms else None,
+                "created_at": recipient.created_at.isoformat() if recipient.created_at else None,
+                "updated_at": notice.created_at.isoformat() if notice.created_at else None,
+            }
+        )
+    return items
 
 
 def _filter_alert_items(items: list[dict]) -> list[dict]:
     level = (request.args.get("level") or "").strip().lower()
+    status = (request.args.get("status") or "").strip().lower()
+    name = (request.args.get("name") or "").strip().lower()
+    monitor_name = (request.args.get("monitor_name") or "").strip().lower()
     q = (request.args.get("q") or "").strip().lower()
     monitor_id = (request.args.get("monitor_id") or "").strip()
     app = (request.args.get("app") or "").strip().lower()
     instance = (request.args.get("instance") or "").strip().lower()
+    metric = (request.args.get("metric") or "").strip().lower()
+    rule_id = (request.args.get("rule_id") or "").strip()
     start_ms = _parse_rfc3339_to_ms(request.args.get("start_at"))
     end_ms = _parse_rfc3339_to_ms(request.args.get("end_at"))
     out: list[dict] = []
     for item in items:
         if level and str(item.get("level", "")).lower() != level:
             continue
+        if status in {"open", "closed"} and str(item.get("status", "")).lower() != status:
+            continue
         if monitor_id and str(item.get("monitor_id") or "") != monitor_id:
             continue
         if app and str(item.get("app") or "").strip().lower() != app:
             continue
+        if name:
+            item_name = str(item.get("name") or "").strip().lower()
+            if name not in item_name:
+                continue
+        if monitor_name:
+            item_monitor_name = str(item.get("monitor_name") or "").strip().lower()
+            if monitor_name not in item_monitor_name:
+                continue
         if instance:
             item_instance = str(item.get("instance") or "").strip().lower()
             if instance not in item_instance:
+                continue
+        if metric:
+            item_metric = str(item.get("metric") or "").strip().lower()
+            if item_metric != metric:
+                continue
+        if rule_id:
+            item_rule_id = str(item.get("rule_id") or "").strip()
+            if item_rule_id != rule_id:
                 continue
         if q:
             hay = " ".join(
@@ -358,7 +745,11 @@ def _filter_alert_items(items: list[dict]) -> list[dict]:
 
 def _rule_from_model(row: AlertDefine) -> dict:
     labels = _json_load(row.labels_json, {})
+    if not isinstance(labels, dict):
+        labels = {}
     annotations = _json_load(row.annotations_json, {})
+    if not isinstance(annotations, dict):
+        annotations = {}
     threshold = labels.get("threshold")
     try:
         threshold = float(threshold) if threshold is not None else 0
@@ -375,17 +766,36 @@ def _rule_from_model(row: AlertDefine) -> dict:
             "receiver_type": row.notice_rule.receiver_type or (row.notice_rule.receiver.type if row.notice_rule.receiver else None),
         }
     
+    notice_rule_ids = row.notice_rule_ids if hasattr(row, "notice_rule_ids") else []
+    if not notice_rule_ids and row.notice_rule_id:
+        notice_rule_ids = [row.notice_rule_id]
+    auto_recover = _to_bool(labels.get("auto_recover"), True)
+    recover_times = max(_to_int(labels.get("recover_times"), 2), 1)
+    notify_on_recovered = _to_bool(labels.get("notify_on_recovered"), True)
     return {
         "id": row.id,
         "name": row.name,
+        "type": row.type,
         "monitor_type": row.type,
+        "expr": row.expr,
+        "period": row.period,
+        "times": row.times,
         "metric": labels.get("metric") or annotations.get("metric") or "value",
         "operator": labels.get("operator") or ">",
         "threshold": threshold,
         "level": labels.get("severity") or "warning",
+        "labels": labels,
+        "annotations": annotations,
+        "title_template": annotations.get("title_template"),
+        "template": row.template,
+        "datasource_type": row.datasource_type,
         "enabled": bool(row.enabled),
         "notice_rule_id": row.notice_rule_id,
+        "notice_rule_ids": notice_rule_ids,
         "notice_rule": notice_rule_info,
+        "auto_recover": auto_recover,
+        "recover_times": recover_times,
+        "notify_on_recovered": notify_on_recovered,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
     }
 
@@ -418,6 +828,43 @@ def _rule_match_monitor(row: AlertDefine, monitor: dict) -> bool:
     if want_instance and target and want_instance != target:
         return False
     return True
+
+
+def _extract_notice_rule_ids(payload: dict) -> tuple[list[int] | None, str | None]:
+    if "notice_rule_ids" in payload:
+        raw = payload.get("notice_rule_ids")
+    elif "notice_rule_id" in payload:
+        raw = payload.get("notice_rule_id")
+    else:
+        return None, None
+    if raw is None or raw == "":
+        return [], None
+    if isinstance(raw, list):
+        candidates = raw
+    else:
+        candidates = [raw]
+    ids: list[int] = []
+    for item in candidates:
+        if item is None or str(item).strip() == "":
+            continue
+        try:
+            val = int(item)
+        except (TypeError, ValueError):
+            return None, "notice_rule_ids 必须是整数数组"
+        if val <= 0:
+            continue
+        if val not in ids:
+            ids.append(val)
+    return ids, None
+
+
+def _validate_notice_rule_ids(ids: list[int]) -> str | None:
+    if not ids:
+        return None
+    existing = NoticeRule.query.filter(NoticeRule.id.in_(ids)).all()
+    if len(existing) != len(set(ids)):
+        return "指定的通知规则不存在"
+    return None
 
 
 def _rule_scope(row: AlertDefine, monitor_id: int) -> str:
@@ -649,6 +1096,33 @@ def _to_int(value, default=0) -> int:
         return int(default)
 
 
+def _apply_recovery_config_to_labels(labels: dict, payload: dict):
+    if not isinstance(labels, dict) or not isinstance(payload, dict):
+        return
+    payload_labels = payload.get("labels") if isinstance(payload.get("labels"), dict) else {}
+
+    if "auto_recover" in payload:
+        labels["auto_recover"] = _to_bool(payload.get("auto_recover"), True)
+    elif "auto_recover" in payload_labels:
+        labels["auto_recover"] = _to_bool(payload_labels.get("auto_recover"), True)
+    elif "auto_recover" not in labels:
+        labels["auto_recover"] = True
+
+    if "recover_times" in payload:
+        labels["recover_times"] = max(_to_int(payload.get("recover_times"), 2), 1)
+    elif "recover_times" in payload_labels:
+        labels["recover_times"] = max(_to_int(payload_labels.get("recover_times"), 2), 1)
+    elif "recover_times" not in labels:
+        labels["recover_times"] = 2
+
+    if "notify_on_recovered" in payload:
+        labels["notify_on_recovered"] = _to_bool(payload.get("notify_on_recovered"), True)
+    elif "notify_on_recovered" in payload_labels:
+        labels["notify_on_recovered"] = _to_bool(payload_labels.get("notify_on_recovered"), True)
+    elif "notify_on_recovered" not in labels:
+        labels["notify_on_recovered"] = True
+
+
 def _normalize_template_alert_rule(item: dict) -> dict | None:
     if not isinstance(item, dict):
         return None
@@ -683,6 +1157,14 @@ def _normalize_template_alert_rule(item: dict) -> dict | None:
     if not expr:
         expr = f"{metric} {operator} {threshold}"
     template_text = str(item.get("template") or name).strip() or name
+    notice_rule_ids = None
+    if isinstance(item, dict):
+        parsed_ids, _ = _extract_notice_rule_ids(item)
+        if parsed_ids is not None:
+            notice_rule_ids = parsed_ids
+    notice_rule_id = notice_rule_ids[0] if notice_rule_ids else None
+    recovery_labels: dict = {}
+    _apply_recovery_config_to_labels(recovery_labels, item)
     return {
         "name": name,
         "type": kind,
@@ -695,6 +1177,11 @@ def _normalize_template_alert_rule(item: dict) -> dict | None:
         "expr": expr,
         "enabled": enabled,
         "template": template_text,
+        "notice_rule_id": notice_rule_id,
+        "notice_rule_ids": notice_rule_ids or [],
+        "auto_recover": bool(recovery_labels.get("auto_recover", True)),
+        "recover_times": max(_to_int(recovery_labels.get("recover_times"), 2), 1),
+        "notify_on_recovered": bool(recovery_labels.get("notify_on_recovered", True)),
     }
 
 
@@ -755,6 +1242,20 @@ def _apply_default_rules_for_monitor(monitor_id: int, monitor: dict | None = Non
     created = 0
     updated = 0
     for item in defaults:
+        notice_rule_ids = item.get("notice_rule_ids") if isinstance(item.get("notice_rule_ids"), list) else []
+        notice_rule_ids = [int(v) for v in notice_rule_ids if isinstance(v, int) or str(v).strip().isdigit()]
+        notice_rule_ids = [v for v in notice_rule_ids if v > 0]
+        # 兼容旧字段，仅配置了 notice_rule_id 时自动补全数组
+        raw_notice_rule_id = item.get("notice_rule_id")
+        if not notice_rule_ids and raw_notice_rule_id is not None:
+            try:
+                parsed_notice_rule_id = int(raw_notice_rule_id)
+                if parsed_notice_rule_id > 0:
+                    notice_rule_ids = [parsed_notice_rule_id]
+            except (TypeError, ValueError):
+                notice_rule_ids = []
+        notice_rule_id = notice_rule_ids[0] if notice_rule_ids else None
+
         labels = {
             "monitor_id": monitor_id,
             "app": app,
@@ -765,6 +1266,7 @@ def _apply_default_rules_for_monitor(monitor_id: int, monitor: dict | None = Non
             "severity": item["level"],
             "source": "template_default",
         }
+        _apply_recovery_config_to_labels(labels, item)
         annotations = {
             "summary": item["name"],
             "template": item["template"],
@@ -782,6 +1284,8 @@ def _apply_default_rules_for_monitor(monitor_id: int, monitor: dict | None = Non
                 annotations_json=_json_dump(annotations),
                 template=item["template"],
                 enabled=bool(item["enabled"]),
+                notice_rule_id=notice_rule_id,
+                notice_rule_ids_json=_json_dump(notice_rule_ids),
                 creator="python-web",
                 modifier="python-web",
             )
@@ -796,6 +1300,8 @@ def _apply_default_rules_for_monitor(monitor_id: int, monitor: dict | None = Non
             row.annotations_json = _json_dump(annotations)
             row.template = item["template"]
             row.enabled = bool(item["enabled"])
+            row.notice_rule_id = notice_rule_id
+            row.notice_rule_ids_json = _json_dump(notice_rule_ids)
             row.modifier = "python-web"
             row.updated_at = _now_naive_utc()
             updated += 1
@@ -817,6 +1323,7 @@ _RECEIVER_TYPE_TO_CHANNEL = {
     5: "dingtalk",
     6: "feishu",
     10: "wechat",
+    15: "system",
 }
 _CHANNEL_TO_RECEIVER_TYPE = {v: k for k, v in _RECEIVER_TYPE_TO_CHANNEL.items()}
 
@@ -866,6 +1373,9 @@ def _notice_rule_from_model(row: NoticeRule) -> dict:
         "days": row.days,
         "period_start": row.period_start,
         "period_end": row.period_end,
+        "recipient_type": row.recipient_type,
+        "recipient_ids": row.recipient_ids,
+        "include_sub_departments": bool(row.include_sub_departments),
         "status": "enabled" if row.enable else "disabled",
         "enable": bool(row.enable),
     }
@@ -879,7 +1389,7 @@ def list_targets():
         "GET",
         "/api/v1/monitors",
         params=request.args.to_dict(),
-        fallback=lambda: {"items": [], "total": 0, "page": 1, "page_size": 20}
+        fallback=_load_monitors_from_db_fallback
     )
 
 
@@ -889,6 +1399,7 @@ def list_targets():
 def create_target():
     payload = request.get_json() or {}
     apply_default_alerts = bool(payload.pop("apply_default_alerts", False))
+    payload = _merge_ci_labels(payload)
 
     # 前端兼容字段：interval -> interval_seconds
     if "interval_seconds" not in payload and "interval" in payload:
@@ -957,14 +1468,26 @@ def create_target():
 @jwt_required()
 @require_any_permission("monitoring:target:view", "monitoring:list:view")
 def get_target(monitor_id: int):
-    return _manager_call("GET", f"/api/v1/monitors/{monitor_id}")
+    response = _manager_call(
+        "GET",
+        f"/api/v1/monitors/{monitor_id}",
+        fallback=lambda: _get_target_from_db_fallback(monitor_id),
+    )
+    status_code = getattr(response, "status_code", 200)
+    if status_code == 200:
+        body = response.get_json(silent=True) or {}
+        data = body.get("data") if isinstance(body, dict) else None
+        if isinstance(data, dict) and data.get("fallback_error") == "not_found":
+            return jsonify({"code": 404, "message": "监控任务不存在"}), 404
+    return response
 
 
 @monitoring_target_bp.route("/targets/<int:monitor_id>", methods=["PUT"])
 @jwt_required()
 @require_any_permission("monitoring:target:update", "monitoring:list:edit")
 def update_target(monitor_id: int):
-    return _manager_call("PUT", f"/api/v1/monitors/{monitor_id}", payload=request.get_json() or {})
+    payload = _merge_ci_labels(request.get_json() or {})
+    return _manager_call("PUT", f"/api/v1/monitors/{monitor_id}", payload=payload)
 
 
 @monitoring_target_bp.route("/targets/<int:monitor_id>", methods=["DELETE"])
@@ -978,14 +1501,50 @@ def delete_target(monitor_id: int):
 @jwt_required()
 @require_any_permission("monitoring:target:update", "monitoring:list:enable")
 def enable_target(monitor_id: int):
-    return _manager_call("PATCH", f"/api/v1/monitors/{monitor_id}/enable", payload=request.get_json() or {})
+    def _fallback():
+        try:
+            return _set_target_enabled_fallback(monitor_id, True)
+        except ValueError:
+            return {"id": monitor_id, "enabled": True, "fallback_error": "not_found"}
+
+    response = _manager_call(
+        "PATCH",
+        f"/api/v1/monitors/{monitor_id}/enable",
+        payload=request.get_json() or {},
+        fallback=_fallback,
+    )
+    status_code = getattr(response, "status_code", 200)
+    if status_code == 200:
+        body = response.get_json(silent=True) or {}
+        data = body.get("data") if isinstance(body, dict) else None
+        if isinstance(data, dict) and data.get("fallback_error") == "not_found":
+            return jsonify({"code": 404, "message": "监控任务不存在"}), 404
+    return response
 
 
 @monitoring_target_bp.route("/targets/<int:monitor_id>/disable", methods=["PATCH"])
 @jwt_required()
 @require_any_permission("monitoring:target:update", "monitoring:list:disable")
 def disable_target(monitor_id: int):
-    return _manager_call("PATCH", f"/api/v1/monitors/{monitor_id}/disable", payload=request.get_json() or {})
+    def _fallback():
+        try:
+            return _set_target_enabled_fallback(monitor_id, False)
+        except ValueError:
+            return {"id": monitor_id, "enabled": False, "fallback_error": "not_found"}
+
+    response = _manager_call(
+        "PATCH",
+        f"/api/v1/monitors/{monitor_id}/disable",
+        payload=request.get_json() or {},
+        fallback=_fallback,
+    )
+    status_code = getattr(response, "status_code", 200)
+    if status_code == 200:
+        body = response.get_json(silent=True) or {}
+        data = body.get("data") if isinstance(body, dict) else None
+        if isinstance(data, dict) and data.get("fallback_error") == "not_found":
+            return jsonify({"code": 404, "message": "监控任务不存在"}), 404
+    return response
 
 
 @monitoring_target_bp.route("/targets/<int:monitor_id>/collector", methods=["POST"])
@@ -1149,15 +1708,14 @@ def create_target_alert_rule(monitor_id: int):
     except (TypeError, ValueError):
         return jsonify({"code": 400, "message": "times 必须是整数"}), 400
 
-    notice_rule_id = payload.get("notice_rule_id")
-    if notice_rule_id is not None:
-        try:
-            notice_rule_id = int(notice_rule_id)
-            notice_rule = NoticeRule.query.get(notice_rule_id)
-            if not notice_rule:
-                return jsonify({"code": 400, "message": "指定的通知规则不存在"}), 400
-        except (TypeError, ValueError):
-            return jsonify({"code": 400, "message": "notice_rule_id 必须是整数"}), 400
+    notice_rule_ids, err = _extract_notice_rule_ids(payload)
+    if err:
+        return jsonify({"code": 400, "message": err}), 400
+    if notice_rule_ids is not None:
+        validate_msg = _validate_notice_rule_ids(notice_rule_ids)
+        if validate_msg:
+            return jsonify({"code": 400, "message": validate_msg}), 400
+    notice_rule_id = notice_rule_ids[0] if notice_rule_ids else None
 
     labels = {
         "monitor_id": monitor_id,
@@ -1168,6 +1726,7 @@ def create_target_alert_rule(monitor_id: int):
         "threshold": threshold_val,
         "severity": level,
     }
+    _apply_recovery_config_to_labels(labels, payload)
     custom_labels = payload.get("labels")
     if isinstance(custom_labels, dict):
         for key, value in custom_labels.items():
@@ -1177,7 +1736,16 @@ def create_target_alert_rule(monitor_id: int):
             if label_key in {"monitor_id", "app", "instance", "metric", "operator", "threshold", "severity"}:
                 continue
             labels[label_key] = str(value or "").strip()
+    _apply_recovery_config_to_labels(labels, payload)
     annotations = {"summary": name}
+    if isinstance(payload.get("annotations"), dict):
+        for key, value in payload.get("annotations").items():
+            ann_key = str(key or "").strip()
+            if ann_key:
+                annotations[ann_key] = value
+    title_template = str(payload.get("title_template") or "").strip()
+    if title_template:
+        annotations["title_template"] = title_template
     expr = str(payload.get("expr") or "").strip() or f"{metric} {operator} {threshold_val}"
 
     row = AlertDefine(
@@ -1192,6 +1760,7 @@ def create_target_alert_rule(monitor_id: int):
         datasource_type=payload.get("datasource_type"),
         enabled=bool(payload.get("enabled", True)),
         notice_rule_id=notice_rule_id,
+        notice_rule_ids_json=_json_dump(notice_rule_ids or []),
         creator=(payload.get("creator") or "python-web"),
         modifier=(payload.get("modifier") or "python-web"),
     )
@@ -1258,7 +1827,23 @@ def update_target_alert_rule(monitor_id: int, rule_id: int):
             if label_key in {"monitor_id", "app", "instance", "metric", "operator", "threshold", "severity"}:
                 continue
             labels[label_key] = str(value or "").strip()
+    _apply_recovery_config_to_labels(labels, payload)
     row.labels_json = _json_dump(labels)
+    annotations = _json_load(row.annotations_json, {})
+    if not isinstance(annotations, dict):
+        annotations = {}
+    if "annotations" in payload and isinstance(payload.get("annotations"), dict):
+        for key, value in payload.get("annotations").items():
+            ann_key = str(key or "").strip()
+            if ann_key:
+                annotations[ann_key] = value
+    if "title_template" in payload:
+        title_template = str(payload.get("title_template") or "").strip()
+        if title_template:
+            annotations["title_template"] = title_template
+        else:
+            annotations.pop("title_template", None)
+    row.annotations_json = _json_dump(annotations)
 
     if "expr" in payload:
         row.expr = str(payload.get("expr") or "").strip() or row.expr
@@ -1268,19 +1853,15 @@ def update_target_alert_rule(monitor_id: int, rule_id: int):
         threshold = labels.get("threshold", 0)
         row.expr = f"{metric} {operator} {threshold}"
 
-    if "notice_rule_id" in payload:
-        notice_rule_id = payload.get("notice_rule_id")
-        if notice_rule_id is not None:
-            try:
-                notice_rule_id = int(notice_rule_id)
-                notice_rule = NoticeRule.query.get(notice_rule_id)
-                if not notice_rule:
-                    return jsonify({"code": 400, "message": "指定的通知规则不存在"}), 400
-                row.notice_rule_id = notice_rule_id
-            except (TypeError, ValueError):
-                return jsonify({"code": 400, "message": "notice_rule_id 必须是整数"}), 400
-        else:
-            row.notice_rule_id = None
+    notice_rule_ids, err = _extract_notice_rule_ids(payload)
+    if err:
+        return jsonify({"code": 400, "message": err}), 400
+    if notice_rule_ids is not None:
+        validate_msg = _validate_notice_rule_ids(notice_rule_ids)
+        if validate_msg:
+            return jsonify({"code": 400, "message": validate_msg}), 400
+        row.notice_rule_id = notice_rule_ids[0] if notice_rule_ids else None
+        row.notice_rule_ids_json = _json_dump(notice_rule_ids or [])
 
     row.updated_at = _now_naive_utc()
     db.session.commit()
@@ -1473,11 +2054,13 @@ def list_alerts():
 @jwt_required()
 @require_any_permission("monitoring:alert:current", "monitoring:alert:center")
 def list_current_alerts():
-    rows = (
-        SingleAlert.query.filter_by(status="firing")
-        .order_by(SingleAlert.updated_at.desc(), SingleAlert.id.desc())
-        .all()
-    )
+    status = (request.args.get("status") or "").strip().lower()
+    query = SingleAlert.query
+    if status == "closed":
+        query = query.filter_by(status="resolved")
+    elif status in {"", "open"}:
+        query = query.filter_by(status="firing")
+    rows = query.order_by(SingleAlert.updated_at.desc(), SingleAlert.id.desc()).all()
     items = [
         _extract_alert_item(
             row_id=row.id,
@@ -1519,6 +2102,180 @@ def list_history_alerts():
     page, page_size = _page_args()
     page_items, total = _paginate_items(items, page, page_size)
     return _list_response(page_items, total, page, page_size)
+
+
+@monitoring_target_bp.route("/alerts/<int:alert_id>", methods=["GET"])
+@jwt_required()
+@require_any_permission("monitoring:alert:current", "monitoring:alert:history", "monitoring:alert:center")
+def get_alert_detail(alert_id: int):
+    row = SingleAlert.query.get(alert_id)
+    if row:
+        labels = _json_load(row.labels_json, {})
+        annotations = _json_load(row.annotations_json, {})
+        item = _extract_alert_item(
+            row_id=row.id,
+            labels_json=row.labels_json,
+            annotations_json=row.annotations_json,
+            content=row.content,
+            status=row.status,
+            start_at=row.start_at,
+            end_at=row.end_at,
+            created_at=row.created_at,
+        )
+        item["rule_id"] = _extract_rule_id(labels, annotations)
+        item["scope"] = "current"
+        return jsonify({"code": 200, "data": item})
+
+    history = AlertHistory.query.get(alert_id)
+    if history:
+        labels = _json_load(history.labels_json, {})
+        annotations = _json_load(history.annotations_json, {})
+        item = _extract_alert_item(
+            row_id=history.id,
+            labels_json=history.labels_json,
+            annotations_json=history.annotations_json,
+            content=history.content,
+            status=history.status,
+            start_at=history.start_at,
+            end_at=history.end_at,
+            created_at=history.created_at,
+        )
+        item["rule_id"] = _extract_rule_id(labels, annotations)
+        item["scope"] = "history"
+        return jsonify({"code": 200, "data": item})
+
+    return jsonify({"code": 404, "message": "告警不存在"}), 404
+
+
+@monitoring_target_bp.route("/alerts/<int:alert_id>/notifications", methods=["GET"])
+@jwt_required()
+@require_any_permission(
+    "monitoring:alert:current",
+    "monitoring:alert:history",
+    "monitoring:alert:center",
+    "monitoring:alert:notice",
+    "monitoring:alert:notice:view",
+)
+def list_alert_notifications(alert_id: int):
+    query = AlertNotification.query.filter_by(alert_id=alert_id)
+    notify_type = (request.args.get("notify_type") or "").strip().lower()
+    receiver_type = (request.args.get("receiver_type") or "").strip().lower()
+    status = request.args.get("status")
+    q = (request.args.get("q") or "").strip().lower()
+    start_ms = _parse_rfc3339_to_ms(request.args.get("start_at"))
+    end_ms = _parse_rfc3339_to_ms(request.args.get("end_at"))
+    if notify_type:
+        query = query.filter(AlertNotification.notify_type == notify_type)
+    if receiver_type:
+        query = query.filter(AlertNotification.receiver_type == receiver_type)
+    if status is not None and str(status).strip() != "":
+        try:
+            status_val = int(status)
+            query = query.filter(AlertNotification.status == status_val)
+        except (TypeError, ValueError):
+            pass
+    if start_ms or end_ms:
+        query = query.filter(AlertNotification.sent_at.isnot(None))
+        if start_ms:
+            query = query.filter(AlertNotification.sent_at >= start_ms)
+        if end_ms:
+            query = query.filter(AlertNotification.sent_at <= end_ms)
+
+    rows = query.order_by(
+        AlertNotification.sent_at.is_(None),
+        AlertNotification.sent_at.desc(),
+        AlertNotification.id.desc(),
+    ).all()
+    items = []
+    if q:
+        for row in rows:
+            hay = " ".join(
+                [
+                    str(row.notify_type or ""),
+                    str(row.receiver_type or ""),
+                    str(row.receiver_id or ""),
+                    str(row.content or ""),
+                    str(row.error_msg or ""),
+                ]
+            ).lower()
+            if q in hay:
+                items.append(_notification_from_model(row))
+    else:
+        items = [_notification_from_model(row) for row in rows]
+    page, page_size = _page_args()
+    if not items:
+        items = _list_system_notifications_for_alert(alert_id)
+    page_items, total = _paginate_items(items, page, page_size)
+    return _list_response(page_items, total, page, page_size)
+
+
+@monitoring_target_bp.route("/alerts/<int:alert_id>/rule", methods=["GET"])
+@jwt_required()
+@require_any_permission("monitoring:alert:current", "monitoring:alert:history", "monitoring:alert:center")
+def get_alert_rule(alert_id: int):
+    row = SingleAlert.query.get(alert_id)
+    scope = "current"
+    if not row:
+        row = AlertHistory.query.get(alert_id)
+        scope = "history"
+    if not row:
+        return jsonify({"code": 404, "message": "告警不存在"}), 404
+
+    labels = _json_load(row.labels_json, {})
+    annotations = _json_load(row.annotations_json, {})
+    rule_id = _extract_rule_id(labels, annotations)
+    alert_metric = str(labels.get("metric") or annotations.get("metric") or "").strip()
+    monitor_id = None
+    try:
+        monitor_id = int(labels.get("monitor_id")) if labels.get("monitor_id") is not None else None
+    except (TypeError, ValueError):
+        monitor_id = None
+
+    matched_by = None
+    rule = None
+
+    if rule_id:
+        rule = AlertDefine.query.get(rule_id)
+        matched_by = "rule_id"
+
+    if not rule:
+        notice_row = (
+            AlertNotification.query.filter(
+                AlertNotification.alert_id == alert_id,
+                AlertNotification.rule_id.isnot(None),
+            )
+            .order_by(
+                AlertNotification.sent_at.is_(None),
+                AlertNotification.sent_at.desc(),
+                AlertNotification.id.desc(),
+            )
+            .first()
+        )
+        if notice_row and notice_row.rule_id:
+            rule = AlertDefine.query.get(int(notice_row.rule_id))
+            matched_by = "notification_rule"
+
+    if not rule and monitor_id:
+        monitor = _monitor_payload(monitor_id)
+        for row_rule in AlertDefine.query.order_by(AlertDefine.updated_at.desc(), AlertDefine.id.desc()).all():
+            if not _rule_match_monitor(row_rule, monitor):
+                continue
+            rule_labels = _json_load(row_rule.labels_json, {})
+            rule_annotations = _json_load(row_rule.annotations_json, {})
+            rule_metric = str(rule_labels.get("metric") or rule_annotations.get("metric") or "").strip()
+            if alert_metric and rule_metric and alert_metric != rule_metric:
+                continue
+            rule = row_rule
+            matched_by = "heuristic"
+            break
+
+    if not rule:
+        return jsonify({"code": 404, "message": "未找到匹配的告警规则"}), 404
+
+    payload = _rule_from_model(rule)
+    payload["matched_by"] = matched_by
+    payload["alert_scope"] = scope
+    return jsonify({"code": 200, "data": payload})
 
 
 @monitoring_target_bp.route("/alerts/<int:alert_id>/acknowledge", methods=["POST"])
@@ -1651,6 +2408,54 @@ def close_alert(alert_id: int):
     return response
 
 
+@monitoring_target_bp.route("/alerts/<int:alert_id>", methods=["DELETE"])
+@jwt_required()
+@require_any_permission("monitoring:alert:center", "monitoring:alert:close", "monitoring:alert:history")
+def delete_alert(alert_id: int):
+    scope = (request.args.get("scope") or "").strip().lower()
+    deleted_current = False
+    deleted_history = False
+    cascade_history = False
+
+    if scope in {"", "all", "current"}:
+        row = SingleAlert.query.get(alert_id)
+        if row:
+            db.session.delete(row)
+            deleted_current = True
+        if scope in {"", "all"}:
+            removed = AlertHistory.query.filter_by(alert_id=alert_id).delete(synchronize_session=False)
+            cascade_history = bool(removed)
+            deleted_history = deleted_history or cascade_history
+
+    if scope in {"", "all", "history"}:
+        row = AlertHistory.query.get(alert_id)
+        if row:
+            db.session.delete(row)
+            deleted_history = True
+
+    if not deleted_current and not deleted_history:
+        db.session.rollback()
+        return jsonify({"code": 404, "message": "告警不存在"}), 404
+
+    db.session.commit()
+    _emit_alert_event(
+        "monitoring:alert:update",
+        {"id": alert_id, "action": "delete", "scope": scope or "all"},
+    )
+    return jsonify(
+        {
+            "code": 200,
+            "data": {
+                "id": alert_id,
+                "scope": scope or "all",
+                "deleted_current": deleted_current,
+                "deleted_history": deleted_history,
+                "cascade_history": cascade_history,
+            },
+        }
+    )
+
+
 @monitoring_target_bp.route("/alert-rules", methods=["GET"])
 @jwt_required()
 @require_any_permission("monitoring:alert:rule", "monitoring:alert:setting")
@@ -1717,23 +2522,31 @@ def create_alert_rule():
         "operator": operator,
         "threshold": threshold_val,
     }
+    _apply_recovery_config_to_labels(labels, payload)
     annotations = {"summary": name}
+    if isinstance(payload.get("annotations"), dict):
+        for key, value in payload.get("annotations").items():
+            ann_key = str(key or "").strip()
+            if ann_key:
+                annotations[ann_key] = value
+    title_template = str(payload.get("title_template") or "").strip()
+    if title_template:
+        annotations["title_template"] = title_template
     
     # 处理通知规则关联
-    notice_rule_id = payload.get("notice_rule_id")
-    if notice_rule_id is not None:
-        try:
-            notice_rule_id = int(notice_rule_id)
-            # 验证通知规则是否存在
-            notice_rule = NoticeRule.query.get(notice_rule_id)
-            if not notice_rule:
-                return jsonify({"code": 400, "message": "指定的通知规则不存在"}), 400
-        except (TypeError, ValueError):
-            return jsonify({"code": 400, "message": "notice_rule_id 必须是整数"}), 400
+    notice_rule_ids, err = _extract_notice_rule_ids(payload)
+    if err:
+        return jsonify({"code": 400, "message": err}), 400
+    if notice_rule_ids is not None:
+        validate_msg = _validate_notice_rule_ids(notice_rule_ids)
+        if validate_msg:
+            return jsonify({"code": 400, "message": validate_msg}), 400
+    notice_rule_id = notice_rule_ids[0] if notice_rule_ids else None
     
+    monitor_type = str(payload.get("type") or payload.get("monitor_type") or "realtime_metric").strip() or "realtime_metric"
     row = AlertDefine(
         name=name,
-        type=str(payload.get("monitor_type") or "realtime_metric"),
+        type=monitor_type,
         expr=str(payload.get("expr") or f"{metric} {operator} {threshold_val}"),
         period=max(int(payload.get("period") or 0), 0),
         times=max(int(payload.get("times") or 1), 1),
@@ -1743,6 +2556,7 @@ def create_alert_rule():
         datasource_type=payload.get("datasource_type"),
         enabled=bool(payload.get("enabled", True)),
         notice_rule_id=notice_rule_id,
+        notice_rule_ids_json=_json_dump(notice_rule_ids or []),
         creator=(payload.get("creator") or "python-web"),
         modifier=(payload.get("modifier") or "python-web"),
     )
@@ -1761,7 +2575,11 @@ def update_alert_rule(rule_id: int):
     payload = request.get_json() or {}
     if "name" in payload:
         row.name = str(payload.get("name") or "").strip() or row.name
+    if "type" in payload or "monitor_type" in payload:
+        row.type = str(payload.get("type") or payload.get("monitor_type") or row.type).strip() or row.type
     labels = _json_load(row.labels_json, {})
+    if not isinstance(labels, dict):
+        labels = {}
     if "metric" in payload:
         labels["metric"] = str(payload.get("metric") or "value").strip() or "value"
     if "level" in payload:
@@ -1773,7 +2591,37 @@ def update_alert_rule(rule_id: int):
             labels["threshold"] = float(payload.get("threshold"))
         except (TypeError, ValueError):
             return jsonify({"code": 400, "message": "threshold 必须是数字"}), 400
+    _apply_recovery_config_to_labels(labels, payload)
     row.labels_json = _json_dump(labels)
+    annotations = _json_load(row.annotations_json, {})
+    if not isinstance(annotations, dict):
+        annotations = {}
+    if "annotations" in payload and isinstance(payload.get("annotations"), dict):
+        for key, value in payload.get("annotations").items():
+            ann_key = str(key or "").strip()
+            if ann_key:
+                annotations[ann_key] = value
+    if "title_template" in payload:
+        title_template = str(payload.get("title_template") or "").strip()
+        if title_template:
+            annotations["title_template"] = title_template
+        else:
+            annotations.pop("title_template", None)
+    row.annotations_json = _json_dump(annotations)
+    if "period" in payload:
+        try:
+            row.period = max(int(payload.get("period") or 0), 0)
+        except (TypeError, ValueError):
+            return jsonify({"code": 400, "message": "period 必须是整数"}), 400
+    if "times" in payload:
+        try:
+            row.times = max(int(payload.get("times") or 1), 1)
+        except (TypeError, ValueError):
+            return jsonify({"code": 400, "message": "times 必须是整数"}), 400
+    if "template" in payload:
+        row.template = str(payload.get("template") or "").strip() or None
+    if "datasource_type" in payload:
+        row.datasource_type = str(payload.get("datasource_type") or "").strip() or None
     if "enabled" in payload:
         row.enabled = bool(payload.get("enabled"))
     if "expr" in payload:
@@ -1785,20 +2633,15 @@ def update_alert_rule(rule_id: int):
         row.expr = f"{metric} {operator} {threshold}"
     
     # 处理通知规则关联更新
-    if "notice_rule_id" in payload:
-        notice_rule_id = payload.get("notice_rule_id")
-        if notice_rule_id is not None:
-            try:
-                notice_rule_id = int(notice_rule_id)
-                # 验证通知规则是否存在
-                notice_rule = NoticeRule.query.get(notice_rule_id)
-                if not notice_rule:
-                    return jsonify({"code": 400, "message": "指定的通知规则不存在"}), 400
-                row.notice_rule_id = notice_rule_id
-            except (TypeError, ValueError):
-                return jsonify({"code": 400, "message": "notice_rule_id 必须是整数"}), 400
-        else:
-            row.notice_rule_id = None
+    notice_rule_ids, err = _extract_notice_rule_ids(payload)
+    if err:
+        return jsonify({"code": 400, "message": err}), 400
+    if notice_rule_ids is not None:
+        validate_msg = _validate_notice_rule_ids(notice_rule_ids)
+        if validate_msg:
+            return jsonify({"code": 400, "message": validate_msg}), 400
+        row.notice_rule_id = notice_rule_ids[0] if notice_rule_ids else None
+        row.notice_rule_ids_json = _json_dump(notice_rule_ids or [])
     
     row.updated_at = _now_naive_utc()
     db.session.commit()
@@ -2512,6 +3355,11 @@ def create_alert_notice():
     # 处理标签过滤
     labels = payload.get("labels") if isinstance(payload.get("labels"), dict) else {}
     days = payload.get("days") if isinstance(payload.get("days"), list) else [1, 2, 3, 4, 5, 6, 7]
+    recipient_type = str(payload.get("recipient_type") or "user").strip().lower()
+    if recipient_type not in {"user", "department"}:
+        return jsonify({"code": 400, "message": "recipient_type 只能是 user/department"}), 400
+    recipient_ids = payload.get("recipient_ids") if isinstance(payload.get("recipient_ids"), list) else []
+    include_sub_departments = bool(payload.get("include_sub_departments", True))
     
     row = NoticeRule(
         name=name,
@@ -2527,6 +3375,9 @@ def create_alert_notice():
         days_json=_json_dump(days),
         period_start=str(payload.get("period_start") or "").strip() or None,
         period_end=str(payload.get("period_end") or "").strip() or None,
+        recipient_type=recipient_type,
+        recipient_ids_json=_json_dump(recipient_ids),
+        include_sub_departments=include_sub_departments,
         enable=bool(payload.get("enable", True)),
         creator=get_jwt_identity(),
         modifier=get_jwt_identity(),
@@ -2583,6 +3434,15 @@ def update_alert_notice(notice_id: str):
         row.period_start = str(payload.get("period_start") or "").strip() or None
     if "period_end" in payload:
         row.period_end = str(payload.get("period_end") or "").strip() or None
+    if "recipient_type" in payload:
+        recipient_type = str(payload.get("recipient_type") or "user").strip().lower()
+        if recipient_type not in {"user", "department"}:
+            return jsonify({"code": 400, "message": "recipient_type 只能是 user/department"}), 400
+        row.recipient_type = recipient_type
+    if "recipient_ids" in payload and isinstance(payload.get("recipient_ids"), list):
+        row.recipient_ids_json = _json_dump(payload.get("recipient_ids"))
+    if "include_sub_departments" in payload:
+        row.include_sub_departments = bool(payload.get("include_sub_departments"))
     if "enable" in payload:
         row.enable = bool(payload.get("enable"))
     row.modifier = get_jwt_identity()

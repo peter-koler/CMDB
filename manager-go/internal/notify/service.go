@@ -17,6 +17,7 @@ const (
 	ChannelWebhook ChannelType = "webhook"
 	ChannelEmail   ChannelType = "email"
 	ChannelWeCom   ChannelType = "wecom"
+	ChannelSystem  ChannelType = "system"
 )
 
 type TestSendRequest struct {
@@ -77,6 +78,8 @@ func (s *Service) TestSend(ctx context.Context, req TestSendRequest) error {
 		return s.sendEmail(body, req.Config, req.Title)
 	case ChannelWeCom:
 		return s.sendWeCom(ctx, body, req.Config)
+	case ChannelSystem:
+		return fmt.Errorf("system channel should be handled by runtime store")
 	default:
 		return fmt.Errorf("unsupported channel: %s", req.Channel)
 	}
@@ -128,11 +131,21 @@ func (s *Service) sendEmail(body string, raw json.RawMessage, title string) erro
 	if cfg.Username != "" {
 		auth = smtp.PlainAuth("", cfg.Username, cfg.Password, cfg.Host)
 	}
+	toList := []string{}
+	for _, part := range strings.Split(cfg.To, ",") {
+		email := strings.TrimSpace(part)
+		if email != "" {
+			toList = append(toList, email)
+		}
+	}
+	if len(toList) == 0 {
+		return fmt.Errorf("email recipients empty")
+	}
 	msg := "To: " + cfg.To + "\r\n" +
 		"Subject: " + title + "\r\n" +
 		"Content-Type: text/plain; charset=UTF-8\r\n\r\n" +
 		body + "\r\n"
-	return s.smtpSend(addr, auth, cfg.From, []string{cfg.To}, []byte(msg))
+	return s.smtpSend(addr, auth, cfg.From, toList, []byte(msg))
 }
 
 func (s *Service) sendWeCom(ctx context.Context, body string, raw json.RawMessage) error {

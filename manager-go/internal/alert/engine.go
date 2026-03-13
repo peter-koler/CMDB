@@ -34,6 +34,7 @@ type Event struct {
 	Labels       map[string]string
 	State        State
 	Expression   string
+	Title        string
 	Content      string
 	ElapsedMs    int64
 	TriggeredAt  time.Time

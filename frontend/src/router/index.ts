@@ -142,7 +142,7 @@ const routes = [
             path: 'dashboard',
             name: 'MonitoringDashboard',
             component: () => import('@/views/monitoring/dashboard/index.vue'),
-            meta: { title: '监控大盘', icon: 'DashboardOutlined', permission: 'monitoring:dashboard' }
+            meta: { title: '监控展示', icon: 'DashboardOutlined', permission: 'monitoring:dashboard' }
           },
           {
             path: 'list',
@@ -183,6 +183,12 @@ const routes = [
             name: 'MonitoringAlertHistory',
             component: () => import('@/views/monitoring/alert/index.vue'),
             meta: { title: '告警历史', icon: 'HistoryOutlined', permission: 'monitoring:alert:history' }
+          },
+          {
+            path: 'alert/detail/:id',
+            name: 'MonitoringAlertDetail',
+            component: () => import('@/views/monitoring/alert/detail.vue'),
+            meta: { title: '告警明细', permission: 'monitoring:alert:detail', hideInMenu: true }
           },
           {
             path: 'alert/rule',
@@ -351,7 +357,8 @@ const router = createRouter({
 })
 
 const routePermissionAliases: Record<string, string[]> = {
-  'monitoring:list': ['monitoring:target']
+  'monitoring:list': ['monitoring:target'],
+  'monitoring:alert:detail': ['monitoring:alert:current', 'monitoring:alert:history', 'monitoring:alert:center']
 }
 
 router.beforeEach(async (to, from, next) => {

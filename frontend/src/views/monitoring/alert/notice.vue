@@ -114,6 +114,43 @@
           </a-col>
         </a-row>
 
+        <template v-if="showRecipientConfig">
+          <a-divider orientation="left">接收对象</a-divider>
+
+          <a-form-item label="接收方式">
+            <a-radio-group v-model:value="formState.recipient_type">
+              <a-radio value="user">个人</a-radio>
+              <a-radio value="department">部门</a-radio>
+            </a-radio-group>
+          </a-form-item>
+
+          <a-form-item v-if="formState.recipient_type === 'user'" label="接收人">
+            <a-select
+              v-model:value="formState.recipient_ids"
+              mode="multiple"
+              placeholder="请选择接收人"
+              style="width: 100%"
+              :options="userOptions"
+              show-search
+              option-filter-prop="label"
+            />
+          </a-form-item>
+
+          <a-form-item v-else label="接收部门">
+            <a-tree-select
+              v-model:value="formState.recipient_ids"
+              :tree-data="departmentTree"
+              tree-checkable
+              show-search
+              placeholder="请选择部门"
+              style="width: 100%"
+            />
+            <a-checkbox v-model:checked="formState.include_sub_departments" style="margin-top: 6px;">
+              包含子部门
+            </a-checkbox>
+          </a-form-item>
+        </template>
+
         <a-divider orientation="left">告警过滤</a-divider>
 
         <a-form-item label="过滤方式">
@@ -183,10 +220,12 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { message } from 'ant-design-vue'
-import { PlusOutlined, MailOutlined, MessageOutlined, DingdingOutlined, MobileOutlined, GlobalOutlined } from '@ant-design/icons-vue'
+import { PlusOutlined, MailOutlined, MessageOutlined, DingdingOutlined, MobileOutlined, GlobalOutlined, BellOutlined } from '@ant-design/icons-vue'
 import dayjs from 'dayjs'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
+import { getUsers } from '@/api/user'
+import { getDepartments } from '@/api/department'
 import {
   createAlertNotice,
   deleteAlertNotice,
@@ -227,6 +266,9 @@ const formState = reactive({
   days: [1, 2, 3, 4, 5, 6, 7] as number[],
   periodStart: null as dayjs.Dayjs | null,
   periodEnd: null as dayjs.Dayjs | null,
+  recipient_type: 'user' as 'user' | 'department',
+  recipient_ids: [] as number[],
+  include_sub_departments: true,
   enable: true
 })
 
@@ -245,6 +287,7 @@ const columns = [
 ]
 
 const receiverTypeIcons: Record<number, any> = {
+  15: BellOutlined,
   0: MobileOutlined,
   1: MailOutlined,
   2: GlobalOutlined,
@@ -262,6 +305,15 @@ const receiverTypeIcons: Record<number, any> = {
 const getReceiverIcon = (type: number) => {
   return receiverTypeIcons[type] || MessageOutlined
 }
+
+const userOptions = ref<{ label: string; value: number }[]>([])
+const departmentTree = ref<any[]>([])
+
+const selectedReceiver = computed(() => receiverList.value.find((item) => Number(item.id) === Number(formState.receiver_id)) || null)
+const showRecipientConfig = computed(() => {
+  const type = Number(selectedReceiver.value?.type)
+  return type === 1 || type === 15
+})
 
 const formatDays = (days: number[] | undefined): string => {
   if (!days || days.length === 0) return '无'
@@ -305,8 +357,44 @@ const loadReceivers = async () => {
   }
 }
 
+const loadUsers = async () => {
+  try {
+    const res = await getUsers({ page: 1, per_page: 1000, status: 'active' } as any)
+    const items = res?.data?.items || []
+    userOptions.value = items.map((u: any) => ({
+      label: `${u.username}${u.email ? ` (${u.email})` : ''}`,
+      value: Number(u.id)
+    }))
+  } catch (error) {
+    userOptions.value = []
+  }
+}
+
+const buildDepartmentTree = (nodes: any[]): any[] => {
+  return (nodes || []).map((node) => ({
+    title: node.name,
+    value: node.id,
+    key: node.id,
+    children: buildDepartmentTree(node.children || [])
+  }))
+}
+
+const loadDepartments = async () => {
+  try {
+    const res = await getDepartments()
+    const items = res?.data || []
+    departmentTree.value = buildDepartmentTree(items)
+  } catch (error) {
+    departmentTree.value = []
+  }
+}
+
 const onReceiverChange = (value: number) => {
   formState.receiver_id = value
+  if (showRecipientConfig.value) {
+    if (!userOptions.value.length) loadUsers()
+    if (!departmentTree.value.length) loadDepartments()
+  }
 }
 
 const goToReceiverConfig = () => {
@@ -358,12 +446,19 @@ const openModal = (record?: AlertNotice) => {
   const periodEnd = (record as any)?.period_end
   formState.periodStart = periodStart ? dayjs(periodStart, 'HH:mm:ss') : null
   formState.periodEnd = periodEnd ? dayjs(periodEnd, 'HH:mm:ss') : null
+  formState.recipient_type = ((record as any)?.recipient_type || 'user') as 'user' | 'department'
+  formState.recipient_ids = Array.isArray((record as any)?.recipient_ids) ? (record as any).recipient_ids.map((id: any) => Number(id)) : []
+  formState.include_sub_departments = (record as any)?.include_sub_departments !== false
   
   formState.enable = (record as any)?.enable !== false
   
   // 确保至少有一个空行
   if (formState.labelItems.length === 0) addLabel()
   
+  if (showRecipientConfig.value) {
+    if (!userOptions.value.length) loadUsers()
+    if (!departmentTree.value.length) loadDepartments()
+  }
   modalOpen.value = true
 }
 
@@ -371,6 +466,11 @@ const validateForm = () => {
   if (!formState.name.trim()) throw new Error('请输入规则名称')
   if (!formState.receiver_id) throw new Error('请选择通知渠道')
   if (formState.days.length === 0) throw new Error('请至少选择一天')
+  if (showRecipientConfig.value) {
+    if (!formState.recipient_ids.length) {
+      throw new Error(formState.recipient_type === 'department' ? '请选择接收部门' : '请选择接收人')
+    }
+  }
 }
 
 const saveItem = async () => {
@@ -388,6 +488,9 @@ const saveItem = async () => {
       days: formState.days,
       period_start: formState.periodStart ? formState.periodStart.format('HH:mm:ss') : null,
       period_end: formState.periodEnd ? formState.periodEnd.format('HH:mm:ss') : null,
+      recipient_type: showRecipientConfig.value ? formState.recipient_type : 'user',
+      recipient_ids: showRecipientConfig.value ? formState.recipient_ids : [],
+      include_sub_departments: showRecipientConfig.value ? formState.include_sub_departments : true,
       enable: formState.enable
     }
     

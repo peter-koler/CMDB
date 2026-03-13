@@ -99,6 +99,7 @@ export const getTemplateHierarchy = (lang: string = 'zh-CN') => {
 
 export interface AlertItem {
   id: number
+  rule_id?: number
   name?: string
   level: 'critical' | 'warning' | 'info' | string
   status?: string
@@ -114,6 +115,25 @@ export interface AlertItem {
   duration_seconds?: number
   assignee?: string
   note?: string
+  scope?: 'current' | 'history' | string
+  source_type?: 'local' | 'external' | string
+  source_name?: string
+}
+
+export interface AlertNotificationRecord {
+  id: number
+  alert_id: number
+  rule_id?: number
+  receiver_type?: string
+  receiver_id?: number
+  notify_type?: string
+  status?: number
+  content?: string
+  error_msg?: string
+  retry_times?: number
+  sent_at?: string
+  created_at?: string
+  updated_at?: string
 }
 
 export interface AlertRule {
@@ -124,8 +144,9 @@ export interface AlertRule {
   expr: string
   period?: number
   times: number
-  labels: Record<string, string>
-  annotations: Record<string, string>
+  labels: Record<string, any>
+  annotations: Record<string, any>
+  title_template?: string
   template?: string
   datasource_type?: string
   enabled: boolean
@@ -135,18 +156,24 @@ export interface AlertRule {
   updated_at?: string
   // 关联通知规则
   notice_rule_id?: number
+  notice_rule_ids?: number[]
   notice_rule?: {
     id: number
     name: string
     receiver_name?: string
     receiver_type?: number
   }
+  matched_by?: string
+  alert_scope?: string
   // 兼容旧字段
   monitor_type?: string
   metric?: string
   operator?: string
   threshold?: number | string
   level?: 'critical' | 'warning' | 'info' | string
+  auto_recover?: boolean
+  recover_times?: number
+  notify_on_recovered?: boolean
 }
 
 export interface MonitoringTarget {
@@ -310,6 +337,28 @@ export const getCurrentAlerts = (params?: Record<string, any>) => {
   })
 }
 
+export const getAlertDetail = (alertId: number) => {
+  return request({
+    url: `/monitoring/alerts/${alertId}`,
+    method: 'GET'
+  })
+}
+
+export const getAlertRuleByAlertId = (alertId: number) => {
+  return request({
+    url: `/monitoring/alerts/${alertId}/rule`,
+    method: 'GET'
+  })
+}
+
+export const getAlertNotifications = (alertId: number, params?: Record<string, any>) => {
+  return request({
+    url: `/monitoring/alerts/${alertId}/notifications`,
+    method: 'GET',
+    params
+  })
+}
+
 export const getAlertHistory = (params?: Record<string, any>) => {
   return request({
     url: '/monitoring/alerts/history',
@@ -331,6 +380,14 @@ export const closeAlert = (alertId: number, data?: Record<string, any>) => {
     url: `/monitoring/alerts/${alertId}/close`,
     method: 'POST',
     data
+  })
+}
+
+export const deleteAlert = (alertId: number, params?: Record<string, any>) => {
+  return request({
+    url: `/monitoring/alerts/${alertId}`,
+    method: 'DELETE',
+    params
   })
 }
 
@@ -537,6 +594,9 @@ export interface AlertNotice {
   enable?: boolean
   target?: string
   status?: string
+  recipient_type?: 'user' | 'department' | string
+  recipient_ids?: number[]
+  include_sub_departments?: boolean
 }
 
 export const getAlertNotices = (params?: Record<string, any>) => request({ url: '/monitoring/alert-notices', method: 'GET', params })

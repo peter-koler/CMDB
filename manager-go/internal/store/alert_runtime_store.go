@@ -25,6 +25,7 @@ type RuntimeAlertRule struct {
 	Labels      map[string]any
 	Annotations map[string]any
 	NoticeRule  int64
+	NoticeRules []int64
 }
 
 type RuntimeAlertGroup struct {
@@ -55,18 +56,21 @@ type RuntimeAlertSilence struct {
 }
 
 type NoticeDispatch struct {
-	NoticeRuleID int64
-	RuleName     string
-	Channel      string
-	Config       json.RawMessage
-	Template     string
-	NotifyTimes  int
-	NotifyScale  string
-	FilterAll    bool
-	Labels       map[string]string
-	Days         []int
-	PeriodStart  string
-	PeriodEnd    string
+	NoticeRuleID   int64
+	RuleName       string
+	Channel        string
+	Config         json.RawMessage
+	Template       string
+	NotifyTimes    int
+	NotifyScale    string
+	FilterAll      bool
+	Labels         map[string]string
+	Days           []int
+	PeriodStart    string
+	PeriodEnd      string
+	RecipientType  string
+	RecipientIDs   []int64
+	IncludeSubDept bool
 }
 
 type RuntimeAlertEvent struct {
@@ -110,7 +114,7 @@ func (s *AlertRuntimeStore) LoadEnabledRealtimeMetricRules() ([]RuntimeAlertRule
 		return nil, nil
 	}
 	rows, err := s.db.Query(`
-SELECT id, name, type, expr, template, period, times, enabled, labels_json, annotations_json, notice_rule_id
+SELECT id, name, type, expr, template, period, times, enabled, labels_json, annotations_json, notice_rule_id, notice_rule_ids_json
 FROM alert_defines
 WHERE enabled = 1 AND type = 'realtime_metric'
 ORDER BY updated_at DESC, id DESC
@@ -131,8 +135,9 @@ ORDER BY updated_at DESC, id DESC
 			labelsJSON      string
 			annotationsJSON string
 			noticeRuleID    sql.NullInt64
+			noticeRuleIDs   sql.NullString
 		)
-		if err := rows.Scan(&r.ID, &r.Name, &r.Type, &r.Expr, &template, &period, &times, &enabled, &labelsJSON, &annotationsJSON, &noticeRuleID); err != nil {
+		if err := rows.Scan(&r.ID, &r.Name, &r.Type, &r.Expr, &template, &period, &times, &enabled, &labelsJSON, &annotationsJSON, &noticeRuleID, &noticeRuleIDs); err != nil {
 			return nil, err
 		}
 		if template.Valid {
@@ -147,6 +152,12 @@ ORDER BY updated_at DESC, id DESC
 		}
 		if noticeRuleID.Valid {
 			r.NoticeRule = noticeRuleID.Int64
+		}
+		if noticeRuleIDs.Valid {
+			r.NoticeRules = parseNoticeRuleIDs(noticeRuleIDs.String)
+		}
+		if len(r.NoticeRules) == 0 && r.NoticeRule > 0 {
+			r.NoticeRules = []int64{r.NoticeRule}
 		}
 		_ = json.Unmarshal([]byte(defaultJSON(labelsJSON)), &r.Labels)
 		_ = json.Unmarshal([]byte(defaultJSON(annotationsJSON)), &r.Annotations)
@@ -163,7 +174,7 @@ func (s *AlertRuntimeStore) LoadEnabledPeriodicMetricRules() ([]RuntimeAlertRule
 		return nil, nil
 	}
 	rows, err := s.db.Query(`
-SELECT id, name, type, expr, template, period, times, enabled, labels_json, annotations_json, notice_rule_id
+SELECT id, name, type, expr, template, period, times, enabled, labels_json, annotations_json, notice_rule_id, notice_rule_ids_json
 FROM alert_defines
 WHERE enabled = 1 AND type = 'periodic_metric'
 ORDER BY updated_at DESC, id DESC
@@ -184,8 +195,9 @@ ORDER BY updated_at DESC, id DESC
 			labelsJSON      string
 			annotationsJSON string
 			noticeRuleID    sql.NullInt64
+			noticeRuleIDs   sql.NullString
 		)
-		if err := rows.Scan(&r.ID, &r.Name, &r.Type, &r.Expr, &template, &period, &times, &enabled, &labelsJSON, &annotationsJSON, &noticeRuleID); err != nil {
+		if err := rows.Scan(&r.ID, &r.Name, &r.Type, &r.Expr, &template, &period, &times, &enabled, &labelsJSON, &annotationsJSON, &noticeRuleID, &noticeRuleIDs); err != nil {
 			return nil, err
 		}
 		if template.Valid {
@@ -200,6 +212,12 @@ ORDER BY updated_at DESC, id DESC
 		}
 		if noticeRuleID.Valid {
 			r.NoticeRule = noticeRuleID.Int64
+		}
+		if noticeRuleIDs.Valid {
+			r.NoticeRules = parseNoticeRuleIDs(noticeRuleIDs.String)
+		}
+		if len(r.NoticeRules) == 0 && r.NoticeRule > 0 {
+			r.NoticeRules = []int64{r.NoticeRule}
 		}
 		_ = json.Unmarshal([]byte(defaultJSON(labelsJSON)), &r.Labels)
 		_ = json.Unmarshal([]byte(defaultJSON(annotationsJSON)), &r.Annotations)
@@ -333,9 +351,9 @@ ORDER BY updated_at DESC, id DESC
 	return out, rows.Err()
 }
 
-func (s *AlertRuntimeStore) UpsertFiringAlert(ev RuntimeAlertEvent) error {
+func (s *AlertRuntimeStore) UpsertFiringAlert(ev RuntimeAlertEvent) (bool, error) {
 	if s == nil || s.db == nil {
-		return nil
+		return false, nil
 	}
 	if ev.TriggeredAt.IsZero() {
 		ev.TriggeredAt = time.Now()
@@ -370,17 +388,19 @@ func (s *AlertRuntimeStore) UpsertFiringAlert(ev RuntimeAlertEvent) error {
 
 	tx, err := s.db.Begin()
 	if err != nil {
-		return err
+		return false, err
 	}
 	var (
 		id           int64
+		status       string
 		triggerTimes int
 		exists       bool
 	)
-	row := tx.QueryRow(`SELECT id, trigger_times FROM single_alerts WHERE fingerprint = ?`, fingerprint)
-	if err := row.Scan(&id, &triggerTimes); err == nil {
+	row := tx.QueryRow(`SELECT id, status, trigger_times FROM single_alerts WHERE fingerprint = ?`, fingerprint)
+	if err := row.Scan(&id, &status, &triggerTimes); err == nil {
 		exists = true
 	}
+	newCycle := !exists || strings.TrimSpace(strings.ToLower(status)) != "firing"
 	if exists {
 		_, err = tx.Exec(`
 UPDATE single_alerts
@@ -398,14 +418,17 @@ VALUES
 	}
 	if err != nil {
 		_ = tx.Rollback()
-		return err
+		return false, err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return newCycle, nil
 }
 
-func (s *AlertRuntimeStore) ResolveAlert(ruleID int64, monitorID int64, resolvedAt time.Time) error {
+func (s *AlertRuntimeStore) ResolveAlert(ruleID int64, monitorID int64, resolvedAt time.Time) (bool, error) {
 	if s == nil || s.db == nil {
-		return nil
+		return false, nil
 	}
 	if resolvedAt.IsZero() {
 		resolvedAt = time.Now()
@@ -416,7 +439,7 @@ func (s *AlertRuntimeStore) ResolveAlert(ruleID int64, monitorID int64, resolved
 
 	tx, err := s.db.Begin()
 	if err != nil {
-		return err
+		return false, err
 	}
 	var (
 		id              int64
@@ -435,13 +458,13 @@ WHERE fingerprint = ?
 	if err := row.Scan(&id, &status, &triggerTimes, &startAt, &labelsJSON, &annotationsJSON, &content); err != nil {
 		_ = tx.Rollback()
 		if err == sql.ErrNoRows {
-			return nil
+			return false, nil
 		}
-		return err
+		return false, err
 	}
 	if strings.TrimSpace(strings.ToLower(status)) != "firing" {
 		_ = tx.Rollback()
-		return nil
+		return false, nil
 	}
 	if _, err := tx.Exec(`
 UPDATE single_alerts
@@ -449,7 +472,7 @@ SET status = 'resolved', end_at = ?, modifier = 'manager-go', updated_at = ?
 WHERE id = ?
 `, nowMS, now.Format(time.RFC3339Nano), id); err != nil {
 		_ = tx.Rollback()
-		return err
+		return false, err
 	}
 	startMs := nowMS
 	if startAt.Valid && startAt.Int64 > 0 {
@@ -466,9 +489,76 @@ VALUES
   (?, 'single', ?, ?, ?, 'resolved', ?, ?, ?, ?, ?)
 `, id, defaultJSON(labelsJSON), defaultJSON(annotationsJSON), content.String, triggerTimes, startMs, nowMS, duration, now.Format(time.RFC3339Nano)); err != nil {
 		_ = tx.Rollback()
-		return err
+		return false, err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (s *AlertRuntimeStore) FindCurrentAlertID(ruleID int64, monitorID int64) (int64, error) {
+	if s == nil || s.db == nil {
+		return 0, nil
+	}
+	fingerprint := alertFingerprint(ruleID, monitorID)
+	var id int64
+	row := s.db.QueryRow(`
+SELECT id
+FROM single_alerts
+WHERE fingerprint = ?
+LIMIT 1
+`, fingerprint)
+	if err := row.Scan(&id); err != nil {
+		if err == sql.ErrNoRows {
+			return 0, nil
+		}
+		return 0, err
+	}
+	return id, nil
+}
+
+func (s *AlertRuntimeStore) SaveAlertNotification(
+	alertID int64,
+	ruleID int64,
+	notifyType string,
+	status int,
+	content string,
+	errorMsg string,
+	retryTimes int,
+) error {
+	if s == nil || s.db == nil {
+		return nil
+	}
+	if alertID <= 0 {
+		return nil
+	}
+	notifyType = strings.TrimSpace(strings.ToLower(notifyType))
+	switch notifyType {
+	case "email", "sms", "webhook", "wecom", "dingtalk", "feishu":
+	default:
+		return nil
+	}
+	now := time.Now().UTC()
+	nowMS := now.UnixMilli()
+	_, err := s.db.Exec(`
+INSERT INTO alert_notifications
+  (alert_id, rule_id, receiver_type, receiver_id, notify_type, status, content, error_msg, retry_times, sent_at, created_at, updated_at)
+VALUES
+  (?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?)
+`,
+		alertID,
+		ruleID,
+		notifyType,
+		status,
+		strings.TrimSpace(content),
+		strings.TrimSpace(errorMsg),
+		retryTimes,
+		nowMS,
+		now.Format(time.RFC3339Nano),
+		now.Format(time.RFC3339Nano),
+	)
+	return err
 }
 
 func (s *AlertRuntimeStore) LoadNoticeDispatch(noticeRuleID int64) (NoticeDispatch, error) {
@@ -479,30 +569,33 @@ func (s *AlertRuntimeStore) LoadNoticeDispatch(noticeRuleID int64) (NoticeDispat
 		return NoticeDispatch{}, fmt.Errorf("invalid notice_rule_id")
 	}
 	var (
-		out             NoticeDispatch
-		receiverType    int
-		receiverEnabled bool
-		ruleEnabled     bool
-		notifyTimes     sql.NullInt64
-		notifyScale     sql.NullString
-		filterAll       bool
-		labelsJSON      sql.NullString
-		daysJSON        sql.NullString
-		periodStart     sql.NullString
-		periodEnd       sql.NullString
-		smtpHost        sql.NullString
-		smtpPort        sql.NullInt64
-		smtpUsername    sql.NullString
-		smtpPassword    sql.NullString
-		emailFrom       sql.NullString
-		emailTo         sql.NullString
-		hookURL         sql.NullString
-		hookMethod      sql.NullString
-		hookContentType sql.NullString
-		hookAuthType    sql.NullString
-		hookAuthToken   sql.NullString
-		wecomKey        sql.NullString
-		templateContent sql.NullString
+		out              NoticeDispatch
+		receiverType     int
+		receiverEnabled  bool
+		ruleEnabled      bool
+		notifyTimes      sql.NullInt64
+		notifyScale      sql.NullString
+		filterAll        bool
+		labelsJSON       sql.NullString
+		daysJSON         sql.NullString
+		periodStart      sql.NullString
+		periodEnd        sql.NullString
+		recipientType    sql.NullString
+		recipientIDsJSON sql.NullString
+		includeSubDept   sql.NullBool
+		smtpHost         sql.NullString
+		smtpPort         sql.NullInt64
+		smtpUsername     sql.NullString
+		smtpPassword     sql.NullString
+		emailFrom        sql.NullString
+		emailTo          sql.NullString
+		hookURL          sql.NullString
+		hookMethod       sql.NullString
+		hookContentType  sql.NullString
+		hookAuthType     sql.NullString
+		hookAuthToken    sql.NullString
+		wecomKey         sql.NullString
+		templateContent  sql.NullString
 	)
 	row := s.db.QueryRow(`
 SELECT
@@ -516,6 +609,9 @@ SELECT
   nr.days_json,
   nr.period_start,
   nr.period_end,
+  nr.recipient_type,
+  nr.recipient_ids_json,
+  nr.include_sub_departments,
   rc.type,
   rc.enable,
   rc.smtp_host,
@@ -548,6 +644,9 @@ LIMIT 1
 		&daysJSON,
 		&periodStart,
 		&periodEnd,
+		&recipientType,
+		&recipientIDsJSON,
+		&includeSubDept,
 		&receiverType,
 		&receiverEnabled,
 		&smtpHost,
@@ -595,8 +694,27 @@ LIMIT 1
 	if templateContent.Valid && strings.TrimSpace(templateContent.String) != "" {
 		out.Template = templateContent.String
 	}
+	out.RecipientType = strings.ToLower(strings.TrimSpace(recipientType.String))
+	if out.RecipientType == "" {
+		out.RecipientType = "user"
+	}
+	out.RecipientIDs = parseInt64Slice(recipientIDsJSON.String)
+	out.IncludeSubDept = includeSubDept.Bool
+	if recipientType.Valid && !includeSubDept.Valid {
+		out.IncludeSubDept = true
+	}
 	switch receiverType {
 	case 1: // email
+		if len(out.RecipientIDs) > 0 {
+			emails, err := s.resolveRecipientEmails(out.RecipientType, out.RecipientIDs, out.IncludeSubDept)
+			if err != nil {
+				return NoticeDispatch{}, err
+			}
+			if len(emails) == 0 {
+				return NoticeDispatch{}, fmt.Errorf("notice rule %d email recipients empty", noticeRuleID)
+			}
+			emailTo = sql.NullString{String: strings.Join(emails, ","), Valid: true}
+		}
 		cfg := map[string]any{
 			"host":     strings.TrimSpace(smtpHost.String),
 			"port":     int(smtpPort.Int64),
@@ -651,9 +769,302 @@ LIMIT 1
 		out.Channel = "wecom"
 		out.Config = raw
 		return out, nil
+	case 15: // system notification
+		out.Channel = "system"
+		if len(out.RecipientIDs) == 0 {
+			return NoticeDispatch{}, fmt.Errorf("notice rule %d system recipients empty", noticeRuleID)
+		}
+		out.Config = json.RawMessage(`{}`)
+		return out, nil
 	default:
 		return NoticeDispatch{}, fmt.Errorf("notice rule %d receiver type=%d not supported", noticeRuleID, receiverType)
 	}
+}
+
+func parseInt64Slice(raw string) []int64 {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	var items []any
+	if err := json.Unmarshal([]byte(raw), &items); err != nil {
+		return nil
+	}
+	out := make([]int64, 0, len(items))
+	for _, v := range items {
+		switch t := v.(type) {
+		case float64:
+			out = append(out, int64(t))
+		case int64:
+			out = append(out, t)
+		case string:
+			if n, err := strconv.ParseInt(strings.TrimSpace(t), 10, 64); err == nil {
+				out = append(out, n)
+			}
+		}
+	}
+	return out
+}
+
+func parseNoticeRuleIDs(raw string) []int64 {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	var out []int64
+	if err := json.Unmarshal([]byte(defaultJSON(raw)), &out); err == nil {
+		filtered := make([]int64, 0, len(out))
+		seen := map[int64]struct{}{}
+		for _, val := range out {
+			if val <= 0 {
+				continue
+			}
+			if _, ok := seen[val]; ok {
+				continue
+			}
+			seen[val] = struct{}{}
+			filtered = append(filtered, val)
+		}
+		return filtered
+	}
+	return nil
+}
+
+type recipientUser struct {
+	ID    int64
+	Email string
+	Phone string
+}
+
+func (s *AlertRuntimeStore) resolveRecipientEmails(recipientType string, recipientIDs []int64, includeSub bool) ([]string, error) {
+	users, err := s.resolveRecipientUsers(recipientType, recipientIDs, includeSub)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	out := make([]string, 0, len(users))
+	for _, u := range users {
+		email := strings.TrimSpace(u.Email)
+		if email == "" || seen[email] {
+			continue
+		}
+		seen[email] = true
+		out = append(out, email)
+	}
+	return out, nil
+}
+
+func (s *AlertRuntimeStore) resolveRecipientUsers(recipientType string, recipientIDs []int64, includeSub bool) ([]recipientUser, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("runtime store not configured")
+	}
+	if len(recipientIDs) == 0 {
+		return nil, nil
+	}
+	switch strings.ToLower(strings.TrimSpace(recipientType)) {
+	case "department":
+		deptIDs, err := s.expandDepartmentIDs(recipientIDs, includeSub)
+		if err != nil {
+			return nil, err
+		}
+		return s.queryUsersByDepartments(deptIDs)
+	default:
+		return s.queryUsersByIDs(recipientIDs)
+	}
+}
+
+func (s *AlertRuntimeStore) expandDepartmentIDs(ids []int64, includeSub bool) ([]int64, error) {
+	if !includeSub {
+		return ids, nil
+	}
+	placeholders, args := buildInClause(ids)
+	if placeholders == "" {
+		return ids, nil
+	}
+	query := fmt.Sprintf(`
+WITH RECURSIVE dept_tree(id) AS (
+  SELECT id FROM departments WHERE id IN (%s)
+  UNION ALL
+  SELECT d.id FROM departments d JOIN dept_tree dt ON d.parent_id = dt.id
+)
+SELECT id FROM dept_tree
+`, placeholders)
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, nil
+}
+
+func (s *AlertRuntimeStore) queryUsersByIDs(ids []int64) ([]recipientUser, error) {
+	placeholders, args := buildInClause(ids)
+	if placeholders == "" {
+		return nil, nil
+	}
+	query := fmt.Sprintf(`
+SELECT id, email, phone
+FROM users
+WHERE deleted_at IS NULL AND status = 'active' AND id IN (%s)
+`, placeholders)
+	return scanRecipientUsers(s.db, query, args...)
+}
+
+func (s *AlertRuntimeStore) queryUsersByDepartments(deptIDs []int64) ([]recipientUser, error) {
+	placeholders, args := buildInClause(deptIDs)
+	if placeholders == "" {
+		return nil, nil
+	}
+	users := map[int64]recipientUser{}
+
+	query := fmt.Sprintf(`
+SELECT id, email, phone
+FROM users
+WHERE deleted_at IS NULL AND status = 'active' AND department_id IN (%s)
+`, placeholders)
+	rows, err := scanRecipientUsers(s.db, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	for _, u := range rows {
+		users[u.ID] = u
+	}
+
+	query = fmt.Sprintf(`
+SELECT u.id, u.email, u.phone
+FROM users u
+JOIN department_users du ON du.user_id = u.id
+WHERE u.deleted_at IS NULL AND u.status = 'active' AND du.department_id IN (%s)
+`, placeholders)
+	rows, err = scanRecipientUsers(s.db, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	for _, u := range rows {
+		users[u.ID] = u
+	}
+
+	out := make([]recipientUser, 0, len(users))
+	for _, u := range users {
+		out = append(out, u)
+	}
+	return out, nil
+}
+
+func scanRecipientUsers(db *sql.DB, query string, args ...any) ([]recipientUser, error) {
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []recipientUser
+	for rows.Next() {
+		var (
+			u     recipientUser
+			email sql.NullString
+			phone sql.NullString
+		)
+		if err := rows.Scan(&u.ID, &email, &phone); err != nil {
+			return nil, err
+		}
+		if email.Valid {
+			u.Email = strings.TrimSpace(email.String)
+		}
+		if phone.Valid {
+			u.Phone = strings.TrimSpace(phone.String)
+		}
+		out = append(out, u)
+	}
+	return out, nil
+}
+
+func buildInClause(ids []int64) (string, []any) {
+	if len(ids) == 0 {
+		return "", nil
+	}
+	parts := make([]string, 0, len(ids))
+	args := make([]any, 0, len(ids))
+	for _, id := range ids {
+		parts = append(parts, "?")
+		args = append(args, id)
+	}
+	return strings.Join(parts, ","), args
+}
+
+func (s *AlertRuntimeStore) SendSystemNotification(title, content string, recipientType string, recipientIDs []int64, includeSub bool) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("runtime store not configured")
+	}
+	if len(recipientIDs) == 0 {
+		return fmt.Errorf("system notification recipients empty")
+	}
+	users, err := s.resolveRecipientUsers(recipientType, recipientIDs, includeSub)
+	if err != nil {
+		return err
+	}
+	if len(users) == 0 {
+		return fmt.Errorf("system notification recipients empty")
+	}
+	userIDs := make([]int64, 0, len(users))
+	for _, u := range users {
+		userIDs = append(userIDs, u.ID)
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	var typeID int64
+	if err = tx.QueryRow(`SELECT id FROM notification_types WHERE name = 'system' LIMIT 1`).Scan(&typeID); err != nil {
+		return fmt.Errorf("notification type system not found")
+	}
+	var senderID int64
+	if err = tx.QueryRow(`SELECT id FROM users WHERE deleted_at IS NULL AND status = 'active' AND role = 'admin' ORDER BY id LIMIT 1`).Scan(&senderID); err != nil {
+		if err = tx.QueryRow(`SELECT id FROM users WHERE deleted_at IS NULL AND status = 'active' ORDER BY id LIMIT 1`).Scan(&senderID); err != nil {
+			return fmt.Errorf("no active sender user found")
+		}
+	}
+
+	res, err := tx.Exec(`
+INSERT INTO notifications (title, content, content_html, type_id, sender_id, created_at, expires_at, is_archived)
+VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now', '+90 days'), 0)
+`, title, content, content, typeID, senderID)
+	if err != nil {
+		return err
+	}
+	notificationID, err := res.LastInsertId()
+	if err != nil {
+		return err
+	}
+
+	stmt, err := tx.Prepare(`
+INSERT OR IGNORE INTO notification_recipients (notification_id, user_id, is_read, delivery_status, created_at)
+VALUES (?, ?, 0, 'pending', datetime('now'))
+`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	for _, uid := range userIDs {
+		if _, err = stmt.Exec(notificationID, uid); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (d NoticeDispatch) MatchEventLabels(labels map[string]string) bool {

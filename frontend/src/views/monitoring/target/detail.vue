@@ -79,11 +79,17 @@
                   size="small"
                   :pagination="false"
                   :data-source="targetAlertSummary.recent"
-                  :row-key="(record: any) => `${record.id}-${record.status || 'unknown'}`"
+                  :row-key="(record: any) => String(record.id)"
                 >
                   <a-table-column title="级别" data-index="level" key="level" width="90" />
                   <a-table-column title="状态" data-index="status" key="status" width="90" />
-                  <a-table-column title="名称" data-index="name" key="name" />
+                  <a-table-column title="名称" data-index="name" key="name">
+                    <template #default="{ record }">
+                      <a-button type="link" size="small" @click="openAlertDetail(record)">
+                        {{ record?.name || '-' }}
+                      </a-button>
+                    </template>
+                  </a-table-column>
                   <a-table-column title="触发时间" data-index="triggered_at" key="triggered_at" width="180" />
                 </a-table>
               </a-card>
@@ -212,12 +218,36 @@
         <a-row :gutter="12">
           <a-col :span="20">
             <a-form-item label="通知规则">
-              <a-select v-model:value="targetAlertForm.notice_rule_id" allow-clear placeholder="不指定则沿用默认通知策略">
-                <a-select-option v-for="item in targetAlertNoticeOptions" :key="item.id" :value="Number(item.id)">{{ item.name }}</a-select-option>
+              <a-select
+                v-model:value="targetAlertForm.notice_rule_ids"
+                mode="multiple"
+                allow-clear
+                placeholder="不指定则沿用默认通知策略"
+              >
+                <a-select-option v-for="item in targetAlertNoticeOptions" :key="item.id" :value="Number(item.id)">
+                  {{ item.name }}
+                </a-select-option>
               </a-select>
             </a-form-item>
           </a-col>
           <a-col :span="4"><a-form-item label="启用"><a-switch v-model:checked="targetAlertForm.enabled" /></a-form-item></a-col>
+        </a-row>
+        <a-row :gutter="12">
+          <a-col :span="8">
+            <a-form-item label="自动恢复关闭">
+              <a-switch v-model:checked="targetAlertForm.auto_recover" />
+            </a-form-item>
+          </a-col>
+          <a-col :span="8">
+            <a-form-item label="恢复次数(N)">
+              <a-input-number v-model:value="targetAlertForm.recover_times" :min="1" style="width: 100%" />
+            </a-form-item>
+          </a-col>
+          <a-col :span="8">
+            <a-form-item label="发送恢复通知">
+              <a-switch v-model:checked="targetAlertForm.notify_on_recovered" />
+            </a-form-item>
+          </a-col>
         </a-row>
 
         <a-form-item>
@@ -228,6 +258,21 @@
         </a-form-item>
         <a-form-item v-if="targetAlertFormUseCustomExpr" label="表达式">
           <a-textarea v-model:value="targetAlertForm.expr" :rows="3" placeholder="例如：(used_memory / maxmemory) * 100 > 85" />
+        </a-form-item>
+
+        <a-divider orientation="left">消息模板</a-divider>
+        <a-form-item label="告警标题模板" extra="支持变量: {{$severity}}, {{$rule_name}}, {{$labels.app}}, {{$labels.instance}}">
+          <a-input
+            v-model:value="targetAlertForm.title_template"
+            placeholder="示例: [{{$severity}}] {{$rule_name}} - {{$labels.app}}/{{$labels.instance}}"
+          />
+        </a-form-item>
+        <a-form-item label="告警内容模板" extra="支持变量: {{$labels.instance}}, {{$value}} 等">
+          <a-textarea
+            v-model:value="targetAlertForm.template"
+            :rows="3"
+            placeholder="示例: 实例 {{$labels.instance}} 的 {{$labels.metric}} 当前值 {{$value}}"
+          />
         </a-form-item>
       </a-form>
     </a-modal>
@@ -260,6 +305,13 @@ import {
 } from '@/api/monitoring'
 
 interface MetricOption { value: string; label: string }
+const DEFAULT_ALERT_CONTENT_TEMPLATE = `[{{$severity}}] {{$rule_name}}
+应用: {{$labels.app}}
+实例: {{$labels.instance}}
+指标: {{$labels.metric}}
+当前值: {{$value}}
+触发条件: {{$expression}}`
+const DEFAULT_ALERT_TITLE_TEMPLATE = `[{{$severity}}] {{$rule_name}} - {{$labels.app}}/{{$labels.instance}}`
 
 const route = useRoute()
 const router = useRouter()
@@ -301,6 +353,7 @@ const targetAlertForm = reactive({
   name: '',
   type: 'realtime_metric' as 'realtime_metric' | 'periodic_metric',
   expr: '',
+  title_template: '',
   template: '',
   metric: 'value',
   operator: '>',
@@ -308,7 +361,11 @@ const targetAlertForm = reactive({
   level: 'warning',
   period: 60,
   times: 1,
+  auto_recover: true,
+  recover_times: 2,
+  notify_on_recovered: true,
   notice_rule_id: undefined as number | undefined,
+  notice_rule_ids: [] as number[],
   enabled: true
 })
 const targetAlertFormUseCustomExpr = ref(false)
@@ -482,13 +539,27 @@ async function loadTargetAlertSummary() {
     targetAlertSummary.warning_total = currentItems.filter((item) => String(item.level || '').toLowerCase() === 'warning').length
     targetAlertSummary.info_total = currentItems.filter((item) => String(item.level || '').toLowerCase() === 'info').length
     targetAlertSummary.history_24h = historyItems.length
-    targetAlertSummary.recent = [...currentItems, ...historyItems].slice(0, 8)
+    targetAlertSummary.recent = currentItems
+      .filter((item) => {
+        const status = String(item.status || '').toLowerCase()
+        return !status || status === 'open'
+      })
+      .slice(0, 8)
   } catch (error: any) {
     resetTargetAlertSummary()
     message.error(error?.response?.data?.message || '加载告警摘要失败')
   } finally {
     targetAlertSummaryLoading.value = false
   }
+}
+
+function openAlertDetail(record: AlertItem) {
+  const alertId = Number((record as any)?.id || 0)
+  if (!alertId) {
+    message.warning('告警ID无效，无法跳转详情')
+    return
+  }
+  router.push(`/monitoring/alert/detail/${alertId}`)
 }
 
 async function refreshTargetAlerts() {
@@ -577,6 +648,7 @@ async function openTargetAlertRuleEditor(record: AlertRule) {
   targetAlertForm.name = String(record.name || '')
   targetAlertForm.type = String((record as any).type || (record as any).monitor_type || '').includes('periodic') ? 'periodic_metric' : 'realtime_metric'
   targetAlertForm.expr = String((record as any).expr || '')
+  targetAlertForm.title_template = String((record as any).title_template || (record as any).annotations?.title_template || '')
   targetAlertForm.template = String((record as any).template || '')
   targetAlertForm.metric = String((record as any).metric || 'value')
   const normalized = normalizeBinaryRule(targetAlertForm.metric, String((record as any).operator || '>'), Number((record as any).threshold || 0))
@@ -585,6 +657,17 @@ async function openTargetAlertRuleEditor(record: AlertRule) {
   targetAlertForm.level = String((record as any).level || 'warning')
   targetAlertForm.period = Number((record as any).period || 60)
   targetAlertForm.times = Number((record as any).times || 1)
+  targetAlertForm.auto_recover = (record as any).auto_recover !== false
+  targetAlertForm.recover_times = Math.max(Number((record as any).recover_times || 2), 1)
+  targetAlertForm.notify_on_recovered = (record as any).notify_on_recovered !== false
+  const noticeRuleIds = Array.isArray((record as any).notice_rule_ids)
+    ? ((record as any).notice_rule_ids as number[])
+    : []
+  targetAlertForm.notice_rule_ids = noticeRuleIds.length
+    ? [...noticeRuleIds]
+    : (record as any).notice_rule_id
+      ? [Number((record as any).notice_rule_id)]
+      : []
   targetAlertForm.notice_rule_id = (record as any).notice_rule_id ? Number((record as any).notice_rule_id) : undefined
   targetAlertForm.enabled = (record as any).enabled !== false
   targetAlertFormUseCustomExpr.value = Boolean(String(targetAlertForm.expr || '').trim())
@@ -602,14 +685,19 @@ async function openCreateTargetAlertRule() {
   targetAlertForm.name = ''
   targetAlertForm.type = 'realtime_metric'
   targetAlertForm.expr = ''
-  targetAlertForm.template = ''
+  targetAlertForm.title_template = DEFAULT_ALERT_TITLE_TEMPLATE
+  targetAlertForm.template = DEFAULT_ALERT_CONTENT_TEMPLATE
   targetAlertForm.metric = 'value'
   targetAlertForm.operator = '>'
   targetAlertForm.threshold = 0
   targetAlertForm.level = 'warning'
   targetAlertForm.period = 60
   targetAlertForm.times = 1
+  targetAlertForm.auto_recover = true
+  targetAlertForm.recover_times = 2
+  targetAlertForm.notify_on_recovered = true
   targetAlertForm.notice_rule_id = undefined
+  targetAlertForm.notice_rule_ids = []
   targetAlertForm.enabled = true
   targetAlertFormUseCustomExpr.value = false
 
@@ -642,6 +730,7 @@ async function saveTargetAlertRule() {
       name: targetAlertForm.name.trim(),
       type: targetAlertForm.type,
       expr: targetAlertFormUseCustomExpr.value ? String(targetAlertForm.expr || '').trim() || buildTargetAlertExpr() : buildTargetAlertExpr(),
+      title_template: String(targetAlertForm.title_template || '').trim(),
       template: String(targetAlertForm.template || '').trim() || undefined,
       metric,
       operator: normalized.operator,
@@ -649,6 +738,10 @@ async function saveTargetAlertRule() {
       level: targetAlertForm.level,
       period: Number(targetAlertForm.period),
       times: Number(targetAlertForm.times),
+      auto_recover: Boolean(targetAlertForm.auto_recover),
+      recover_times: Math.max(Number(targetAlertForm.recover_times || 2), 1),
+      notify_on_recovered: Boolean(targetAlertForm.notify_on_recovered),
+      notice_rule_ids: targetAlertForm.notice_rule_ids,
       notice_rule_id: targetAlertForm.notice_rule_id,
       labels: {},
       enabled: targetAlertForm.enabled

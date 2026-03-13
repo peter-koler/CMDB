@@ -326,6 +326,23 @@
             </a-form-item>
           </a-col>
         </a-row>
+        <a-row :gutter="16">
+          <a-col :span="8">
+            <a-form-item label="自动恢复关闭">
+              <a-switch v-model:checked="policyForm.auto_recover" />
+            </a-form-item>
+          </a-col>
+          <a-col :span="8">
+            <a-form-item label="恢复次数(N)">
+              <a-input-number v-model:value="policyForm.recover_times" :min="1" style="width: 100%" />
+            </a-form-item>
+          </a-col>
+          <a-col :span="8">
+            <a-form-item label="发送恢复通知">
+              <a-switch v-model:checked="policyForm.notify_on_recovered" />
+            </a-form-item>
+          </a-col>
+        </a-row>
 
         <a-form-item label="监控标签">
           <a-space direction="vertical" style="width: 100%">
@@ -433,6 +450,9 @@ interface DefaultPolicyItem {
   template?: string
   notice_rule_id?: number
   labels?: Record<string, string>
+  auto_recover?: boolean
+  recover_times?: number
+  notify_on_recovered?: boolean
 }
 
 interface MetricOption {
@@ -498,6 +518,9 @@ const policyForm = ref<DefaultPolicyItem>({
   times: 1,
   mode: 'extended',
   enabled: false,
+  auto_recover: true,
+  recover_times: 2,
+  notify_on_recovered: true,
   expr: '',
   template: '',
   notice_rule_id: undefined,
@@ -581,6 +604,9 @@ const normalizePolicyItem = (item: any, index: number): DefaultPolicyItem | null
     times: Math.max(Number(item.times ?? 1) || 1, 1),
     mode,
     enabled: toBool(item.enabled ?? item.default_enabled, mode === 'core'),
+    auto_recover: toBool(item.auto_recover, true),
+    recover_times: Math.max(Number(item.recover_times ?? 2) || 2, 1),
+    notify_on_recovered: toBool(item.notify_on_recovered, true),
     expr: String(item.expr || '').trim() || undefined,
     template: String(item.template || '').trim() || undefined,
     notice_rule_id: item.notice_rule_id !== undefined && item.notice_rule_id !== null ? Number(item.notice_rule_id) : undefined,
@@ -711,7 +737,10 @@ const syncPolicyDraftToYaml = () => {
           period: Math.max(Number(item.period || 0), 0),
           times: Math.max(Number(item.times || 1), 1),
           mode: item.mode || 'extended',
-          enabled: Boolean(item.enabled)
+          enabled: Boolean(item.enabled),
+          auto_recover: item.auto_recover !== false,
+          recover_times: Math.max(Number(item.recover_times ?? 2), 1),
+          notify_on_recovered: item.notify_on_recovered !== false
         }
         if (item.notice_rule_id !== undefined && item.notice_rule_id !== null) out.notice_rule_id = Number(item.notice_rule_id)
         if (item.labels && Object.keys(item.labels).length) out.labels = item.labels
@@ -754,6 +783,9 @@ const resetPolicyForm = () => {
     times: 1,
     mode: 'extended',
     enabled: false,
+    auto_recover: true,
+    recover_times: 2,
+    notify_on_recovered: true,
     expr: '',
     template: '',
     notice_rule_id: undefined,
@@ -825,6 +857,9 @@ const savePolicyRuleEditor = () => {
       times: Math.max(Number(policyForm.value.times ?? 1), 1),
       mode: policyForm.value.mode === 'core' ? 'core' : 'extended',
       enabled: Boolean(policyForm.value.enabled),
+      auto_recover: policyForm.value.auto_recover !== false,
+      recover_times: Math.max(Number(policyForm.value.recover_times ?? 2), 1),
+      notify_on_recovered: policyForm.value.notify_on_recovered !== false,
       template: String(policyForm.value.template || '').trim() || undefined,
       notice_rule_id: policyForm.value.notice_rule_id !== undefined && policyForm.value.notice_rule_id !== null
         ? Number(policyForm.value.notice_rule_id)

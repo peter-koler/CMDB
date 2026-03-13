@@ -3,7 +3,7 @@
     "addr": ":50051"
   },
   "manager": {
-    "addr": "localhost:8080",
+    "addr": "127.0.0.1:8080",
     "collector_id": "collector-1",
     "mode": "public",
     "version": "1.0.0",

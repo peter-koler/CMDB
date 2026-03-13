@@ -62,7 +62,18 @@ class ManagerAPIService:
         timeout: float,
     ) -> tuple[int, bytes]:
         req = urllib.request.Request(url=url, method=method, data=data, headers=headers)
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        use_system_proxy = str(self._cfg("GO_MANAGER_USE_SYSTEM_PROXY", "false")).strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        if use_system_proxy:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return resp.status, resp.read()
+        # Manager 是内网服务，默认直连，避免 localhost 被系统代理劫持导致 503。
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(req, timeout=timeout) as resp:
             return resp.status, resp.read()
 
     def request(

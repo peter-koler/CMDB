@@ -75,7 +75,7 @@ export default {
     monitoringAlertInhibit: '告警抑制',
     monitoringAlertSilence: '告警静默',
     monitoringAlertNotice: '通知配置',
-    monitoringDashboard: '监控大盘',
+    monitoringDashboard: '监控展示',
     monitoringCollector: '采集器管理',
     monitoringLabels: '标签管理',
     monitoringStatus: '状态页'

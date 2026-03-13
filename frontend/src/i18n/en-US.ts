@@ -70,7 +70,7 @@ export default {
     monitoringAlertInhibit: 'Alert Inhibit',
     monitoringAlertSilence: 'Alert Silence',
     monitoringAlertNotice: 'Notification Config',
-    monitoringDashboard: 'Monitoring Dashboard',
+    monitoringDashboard: 'Monitoring Insights',
     monitoringCollector: 'Collector Management',
     monitoringLabels: 'Label Management',
     monitoringStatus: 'Status Page'

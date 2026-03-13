@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -126,6 +127,8 @@ func main() {
 		reducerRef         *alert.Reducer
 		unknownVarLogMu    sync.Mutex
 		unknownVarLogAt    = map[string]time.Time{}
+		recoveryMu         sync.Mutex
+		recoveryCounter    = map[string]int{}
 	)
 	reloadRealtimeAlertRules := func() {
 		if alertRuntimeStore == nil {
@@ -203,6 +206,90 @@ func main() {
 		}
 	}()
 
+	ciAttrDB, ciDBErr := sql.Open("sqlite3", pythonWebDB)
+	if ciDBErr != nil {
+		log.Printf("[Manager] open ci attr db failed: %v", ciDBErr)
+		ciAttrDB = nil
+	} else {
+		ciAttrDB.SetMaxOpenConns(3)
+		ciAttrDB.SetMaxIdleConns(2)
+		ciAttrDB.SetConnMaxLifetime(30 * time.Minute)
+		defer ciAttrDB.Close()
+	}
+	type ciAttrCacheEntry struct {
+		labels   map[string]string
+		expireAt time.Time
+	}
+	var (
+		ciAttrCacheMu sync.Mutex
+		ciAttrCache   = map[int64]ciAttrCacheEntry{}
+	)
+	resolveCIAttrLabels := func(m model.Monitor) map[string]string {
+		if m.CIID <= 0 {
+			return nil
+		}
+		base := map[string]string{
+			"ci.id": strconv.FormatInt(m.CIID, 10),
+		}
+		if code := strings.TrimSpace(m.CICode); code != "" {
+			base["ci.code"] = code
+		}
+		if name := strings.TrimSpace(m.CIName); name != "" {
+			base["ci.name"] = name
+		}
+		if ciAttrDB == nil {
+			return cloneLabels(base)
+		}
+		now := time.Now()
+		ciAttrCacheMu.Lock()
+		if cached, ok := ciAttrCache[m.CIID]; ok && now.Before(cached.expireAt) {
+			out := cloneLabels(cached.labels)
+			ciAttrCacheMu.Unlock()
+			return out
+		}
+		ciAttrCacheMu.Unlock()
+
+		var (
+			code    sql.NullString
+			name    sql.NullString
+			attrRaw sql.NullString
+		)
+		row := ciAttrDB.QueryRow(`SELECT code, name, attribute_values FROM ci_instances WHERE id = ? LIMIT 1`, m.CIID)
+		if err := row.Scan(&code, &name, &attrRaw); err != nil {
+			return cloneLabels(base)
+		}
+		if code.Valid && strings.TrimSpace(code.String) != "" {
+			base["ci.code"] = strings.TrimSpace(code.String)
+		}
+		if name.Valid && strings.TrimSpace(name.String) != "" {
+			base["ci.name"] = strings.TrimSpace(name.String)
+		}
+		if attrRaw.Valid && strings.TrimSpace(attrRaw.String) != "" {
+			attrs := map[string]any{}
+			if err := json.Unmarshal([]byte(attrRaw.String), &attrs); err == nil {
+				for k, raw := range attrs {
+					key := strings.TrimSpace(k)
+					if key == "" || raw == nil {
+						continue
+					}
+					val := strings.TrimSpace(fmt.Sprintf("%v", raw))
+					if val == "" {
+						continue
+					}
+					base["ci."+key] = val
+				}
+			}
+		}
+		out := cloneLabels(base)
+		ciAttrCacheMu.Lock()
+		ciAttrCache[m.CIID] = ciAttrCacheEntry{
+			labels:   cloneLabels(base),
+			expireAt: now.Add(60 * time.Second),
+		}
+		ciAttrCacheMu.Unlock()
+		return out
+	}
+
 	periodicVM := alert.NewVMClient(vmURL, 1200*time.Millisecond)
 	reducer := alert.NewReducer(
 		60*time.Second,
@@ -220,13 +307,49 @@ func main() {
 	sender := newNotifySender(alertRuntimeStore)
 	queues.Start(ctx, sender, 2, 2)
 
+	recoveryKey := func(ruleID int64, monitorID int64) string {
+		return fmt.Sprintf("%d:%d", ruleID, monitorID)
+	}
+	clearRecoveryCount := func(ruleID int64, monitorID int64) {
+		key := recoveryKey(ruleID, monitorID)
+		recoveryMu.Lock()
+		delete(recoveryCounter, key)
+		recoveryMu.Unlock()
+	}
+	incRecoveryCount := func(ruleID int64, monitorID int64) int {
+		key := recoveryKey(ruleID, monitorID)
+		recoveryMu.Lock()
+		defer recoveryMu.Unlock()
+		next := recoveryCounter[key] + 1
+		recoveryCounter[key] = next
+		return next
+	}
+	enqueueByNoticeRules := func(ev alert.Event, noticeRuleIDs []int64) {
+		if len(noticeRuleIDs) == 0 {
+			if !queues.EnqueueAlert(ev) {
+				log.Printf("alert queue full rule=%s monitor=%d", ev.RuleName, ev.MonitorID)
+			}
+			return
+		}
+		for _, noticeID := range noticeRuleIDs {
+			evCopy := ev
+			evCopy.NoticeRuleID = noticeID
+			if !queues.EnqueueAlert(evCopy) {
+				log.Printf("alert queue full rule=%s monitor=%d notice_rule_id=%d", evCopy.RuleName, evCopy.MonitorID, noticeID)
+			}
+		}
+	}
+
 	handleFiring := func(ev alert.Event, grouped int, point model.MetricPoint) {
 		alertStore.Fire(ev)
+		alertRulesMu.RLock()
+		def := alertRuleDefsByID[ev.RuleID]
+		alertRulesMu.RUnlock()
+		noticeRuleIDs := def.NoticeRules
+		if len(noticeRuleIDs) == 0 && def.NoticeRule > 0 {
+			noticeRuleIDs = []int64{def.NoticeRule}
+		}
 		if alertRuntimeStore != nil {
-			alertRulesMu.RLock()
-			def := alertRuleDefsByID[ev.RuleID]
-			alertRulesMu.RUnlock()
-			ev.NoticeRuleID = def.NoticeRule
 			ev.App = point.App
 			ev.Instance = point.Instance
 			metric := store.BuildRuleMetric(def)
@@ -235,8 +358,9 @@ func main() {
 			if v, ok := pointVarsMap[metric]; ok {
 				metricValue = v
 			}
+			ev.Title = renderAlertTitle(def, ev, metric, metricValue)
 			ev.Content = renderAlertContent(def, ev, metric, metricValue)
-			if err := alertRuntimeStore.UpsertFiringAlert(store.RuntimeAlertEvent{
+			newCycle, err := alertRuntimeStore.UpsertFiringAlert(store.RuntimeAlertEvent{
 				RuleID:      ev.RuleID,
 				RuleName:    ev.RuleName,
 				MonitorID:   ev.MonitorID,
@@ -251,15 +375,37 @@ func main() {
 				Content:     ev.Content,
 				TriggeredAt: ev.TriggeredAt,
 				ElapsedMs:   ev.ElapsedMs,
-			}); err != nil {
+			})
+			if err != nil {
 				log.Printf("alert runtime upsert failed rule=%d monitor=%d err=%v", ev.RuleID, ev.MonitorID, err)
+			} else if newCycle {
+				sender.ResetNotifyLimits(ev.RuleID, ev.MonitorID)
 			}
 		}
-		if !queues.EnqueueAlert(ev) {
-			log.Printf("alert queue full rule=%s monitor=%d", ev.RuleName, ev.MonitorID)
-		}
+		enqueueByNoticeRules(ev, noticeRuleIDs)
 		log.Printf("alert firing rule=%s monitor=%d severity=%s elapsed_ms=%d grouped=%d",
 			ev.RuleName, ev.MonitorID, ev.Severity, ev.ElapsedMs, grouped)
+	}
+	handleRecovered := func(ev alert.Event, point model.MetricPoint) {
+		ev.App = point.App
+		ev.Instance = point.Instance
+		alertRulesMu.RLock()
+		def := alertRuleDefsByID[ev.RuleID]
+		alertRulesMu.RUnlock()
+		metric := store.BuildRuleMetric(def)
+		metricValue := point.Value
+		pointVarsMap := pointVars(point)
+		if v, ok := pointVarsMap[metric]; ok {
+			metricValue = v
+		}
+		ev.Title = renderAlertTitle(def, ev, metric, metricValue)
+		ev.Content = renderAlertContent(def, ev, metric, metricValue)
+		noticeRuleIDs := def.NoticeRules
+		if len(noticeRuleIDs) == 0 && def.NoticeRule > 0 {
+			noticeRuleIDs = []int64{def.NoticeRule}
+		}
+		enqueueByNoticeRules(ev, noticeRuleIDs)
+		log.Printf("alert recovered rule=%s monitor=%d severity=%s", ev.RuleName, ev.MonitorID, ev.Severity)
 	}
 
 	runRealtimeAlerts := func(point model.MetricPoint, vars map[string]float64) {
@@ -309,6 +455,7 @@ func main() {
 			}
 			ev.Labels = buildEventLabels(def, point)
 			if matched && ev.State == alert.StateFiring {
+				clearRecoveryCount(rule.ID, point.MonitorID)
 				d := reducer.Process(ev, time.Now())
 				if d.Emit {
 					handleFiring(ev, d.GroupedCount, point)
@@ -318,10 +465,27 @@ func main() {
 				continue
 			}
 			if matched && ev.State == alert.StateNormal && alertRuntimeStore != nil {
-				if err := alertRuntimeStore.ResolveAlert(rule.ID, point.MonitorID, time.Now()); err != nil {
-					log.Printf("alert resolve failed rule=%d monitor=%d err=%v", rule.ID, point.MonitorID, err)
+				if !ruleAutoRecoverEnabled(def) {
+					clearRecoveryCount(rule.ID, point.MonitorID)
+					continue
 				}
+				currentRecovery := incRecoveryCount(rule.ID, point.MonitorID)
+				requiredRecovery := ruleRecoverTimes(def)
+				if currentRecovery < requiredRecovery {
+					continue
+				}
+				clearRecoveryCount(rule.ID, point.MonitorID)
+				changed, err := alertRuntimeStore.ResolveAlert(rule.ID, point.MonitorID, time.Now())
+				if err != nil {
+					log.Printf("alert resolve failed rule=%d monitor=%d err=%v", rule.ID, point.MonitorID, err)
+					continue
+				}
+				if changed && ruleNotifyOnRecovered(def) {
+					handleRecovered(ev, point)
+				}
+				continue
 			}
+			clearRecoveryCount(rule.ID, point.MonitorID)
 		}
 	}
 
@@ -479,7 +643,7 @@ func main() {
 	if collectorManager != nil {
 		collectorManager.SetReportHandler(func(collectorID string, rep *pb.CollectRep) {
 			updateStringSnapshot(rep)
-			points := collectorReportToPoints(st, collectorID, rep)
+			points := collectorReportToPoints(st, collectorID, rep, resolveCIAttrLabels)
 			for _, point := range points {
 				if err := ingestPoint(point); err != nil {
 					log.Printf("collector report ingest failed collector=%s monitor=%d metric=%s_%s err=%v",
@@ -616,6 +780,7 @@ func main() {
 						}
 						ev.Labels = buildEventLabels(def, point)
 						if matched && ev.State == alert.StateFiring {
+							clearRecoveryCount(def.ID, m.ID)
 							d := reducer.Process(ev, now)
 							if d.Emit {
 								handleFiring(ev, d.GroupedCount, point)
@@ -627,10 +792,27 @@ func main() {
 							continue
 						}
 						if matched && ev.State == alert.StateNormal && alertRuntimeStore != nil {
-							if err := alertRuntimeStore.ResolveAlert(def.ID, m.ID, now); err != nil {
-								log.Printf("periodic alert resolve failed rule=%d monitor=%d err=%v", def.ID, m.ID, err)
+							if !ruleAutoRecoverEnabled(def) {
+								clearRecoveryCount(def.ID, m.ID)
+								continue
 							}
+							currentRecovery := incRecoveryCount(def.ID, m.ID)
+							requiredRecovery := ruleRecoverTimes(def)
+							if currentRecovery < requiredRecovery {
+								continue
+							}
+							clearRecoveryCount(def.ID, m.ID)
+							changed, err := alertRuntimeStore.ResolveAlert(def.ID, m.ID, now)
+							if err != nil {
+								log.Printf("periodic alert resolve failed rule=%d monitor=%d err=%v", def.ID, m.ID, err)
+								continue
+							}
+							if changed && ruleNotifyOnRecovered(def) {
+								handleRecovered(ev, point)
+							}
+							continue
 						}
+						clearRecoveryCount(def.ID, m.ID)
 					}
 				}
 			}
@@ -715,7 +897,7 @@ func makePoint(m model.Monitor) model.MetricPoint {
 	}
 }
 
-func collectorReportToPoints(st *store.MonitorStore, collectorID string, rep *pb.CollectRep) []model.MetricPoint {
+func collectorReportToPoints(st *store.MonitorStore, collectorID string, rep *pb.CollectRep, resolveCIAttrLabels func(model.Monitor) map[string]string) []model.MetricPoint {
 	if rep == nil {
 		return nil
 	}
@@ -751,6 +933,35 @@ func collectorReportToPoints(st *store.MonitorStore, collectorID string, rep *pb
 		"collector_id": collectorID,
 		"protocol":     strings.TrimSpace(rep.GetProtocol()),
 		"app":          app,
+	}
+	if err == nil {
+		for key, value := range monitor.Labels {
+			k := strings.TrimSpace(key)
+			v := strings.TrimSpace(value)
+			if k == "" || v == "" {
+				continue
+			}
+			baseLabels[k] = v
+		}
+		if monitor.CIID > 0 {
+			baseLabels["ci.id"] = strconv.FormatInt(monitor.CIID, 10)
+		}
+		if ciCode := strings.TrimSpace(monitor.CICode); ciCode != "" {
+			baseLabels["ci.code"] = ciCode
+		}
+		if ciName := strings.TrimSpace(monitor.CIName); ciName != "" {
+			baseLabels["ci.name"] = ciName
+		}
+		if resolveCIAttrLabels != nil {
+			for key, value := range resolveCIAttrLabels(monitor) {
+				k := strings.TrimSpace(key)
+				v := strings.TrimSpace(value)
+				if k == "" || v == "" {
+					continue
+				}
+				baseLabels[k] = v
+			}
+		}
 	}
 	if section := strings.TrimSpace(rep.GetFields()["section"]); section != "" {
 		baseLabels["section"] = section
@@ -941,17 +1152,33 @@ func enrichUnknownVariable(vars map[string]float64, unknown string) (map[string]
 	return vars, false
 }
 
-func renderAlertContent(def store.RuntimeAlertRule, ev alert.Event, metric string, value float64) string {
-	tpl := strings.TrimSpace(def.Template)
-	if tpl == "" {
-		return ev.RuleName
+func renderAlertTemplate(tpl string, ev alert.Event, metric string, value float64) string {
+	labels := map[string]string{}
+	for k, v := range ev.Labels {
+		key := strings.TrimSpace(k)
+		val := strings.TrimSpace(v)
+		if key == "" || val == "" {
+			continue
+		}
+		labels[key] = val
 	}
-	labels := map[string]string{
-		"monitor_id": strconv.FormatInt(ev.MonitorID, 10),
-		"severity":   strings.TrimSpace(ev.Severity),
-		"app":        strings.TrimSpace(ev.App),
-		"instance":   strings.TrimSpace(ev.Instance),
-		"metric":     strings.TrimSpace(metric),
+	labels["monitor_id"] = strconv.FormatInt(ev.MonitorID, 10)
+	labels["severity"] = strings.TrimSpace(ev.Severity)
+	labels["app"] = strings.TrimSpace(ev.App)
+	labels["instance"] = strings.TrimSpace(ev.Instance)
+	labels["metric"] = strings.TrimSpace(metric)
+	labels["status"] = eventStatusText(ev)
+
+	ci := map[string]string{}
+	for key, val := range labels {
+		if !strings.HasPrefix(key, "ci.") {
+			continue
+		}
+		ciKey := strings.TrimSpace(strings.TrimPrefix(key, "ci."))
+		if ciKey == "" {
+			continue
+		}
+		ci[ciKey] = val
 	}
 	repl := map[string]string{
 		"$value":           strconv.FormatFloat(value, 'f', -1, 64),
@@ -959,6 +1186,7 @@ func renderAlertContent(def store.RuntimeAlertRule, ev alert.Event, metric strin
 		"$monitor_id":      strconv.FormatInt(ev.MonitorID, 10),
 		"$severity":        ev.Severity,
 		"$expression":      ev.Expression,
+		"$status":          labels["status"],
 		"$labels.instance": labels["instance"],
 		"$labels.app":      labels["app"],
 		"$labels.metric":   labels["metric"],
@@ -973,9 +1201,48 @@ func renderAlertContent(def store.RuntimeAlertRule, ev alert.Event, metric strin
 		content = strings.ReplaceAll(content, "{{"+token+"}}", val)
 		content = strings.ReplaceAll(content, "{{ "+token+" }}", val)
 	}
-	content = strings.TrimSpace(content)
+	for key, val := range ci {
+		token := "$ci." + key
+		content = strings.ReplaceAll(content, "{{"+token+"}}", val)
+		content = strings.ReplaceAll(content, "{{ "+token+" }}", val)
+	}
+	return strings.TrimSpace(content)
+}
+
+func annotationString(def store.RuntimeAlertRule, key string) string {
+	if def.Annotations == nil {
+		return ""
+	}
+	raw, ok := def.Annotations[key]
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprintf("%v", raw))
+}
+
+func renderAlertTitle(def store.RuntimeAlertRule, ev alert.Event, metric string, value float64) string {
+	tpl := annotationString(def, "title_template")
+	if tpl == "" {
+		tpl = annotationString(def, "title")
+	}
+	if tpl == "" {
+		tpl = "[{{$severity}}] {{$rule_name}} - {{$labels.app}}/{{$labels.instance}}"
+	}
+	title := renderAlertTemplate(tpl, ev, metric, value)
+	if title == "" {
+		return fmt.Sprintf("[%s] %s", strings.TrimSpace(ev.Severity), strings.TrimSpace(ev.RuleName))
+	}
+	return title
+}
+
+func renderAlertContent(def store.RuntimeAlertRule, ev alert.Event, metric string, value float64) string {
+	tpl := strings.TrimSpace(def.Template)
+	if tpl == "" {
+		tpl = "[{{$severity}}] {{$rule_name}}\n应用: {{$labels.app}}\n实例: {{$labels.instance}}\n指标: {{$labels.metric}}\n当前值: {{$value}}\n触发条件: {{$expression}}"
+	}
+	content := renderAlertTemplate(tpl, ev, metric, value)
 	if content == "" {
-		return ev.RuleName
+		return fmt.Sprintf("[%s] %s", strings.TrimSpace(ev.Severity), strings.TrimSpace(ev.RuleName))
 	}
 	return content
 }
@@ -987,6 +1254,14 @@ func buildEventLabels(def store.RuntimeAlertRule, point model.MetricPoint) map[s
 		"instance":   strings.TrimSpace(point.Instance),
 		"metric":     strings.TrimSpace(point.Field),
 		"metrics":    strings.TrimSpace(point.Metrics),
+	}
+	for key, val := range point.Labels {
+		k := strings.TrimSpace(key)
+		v := strings.TrimSpace(val)
+		if k == "" || v == "" {
+			continue
+		}
+		out[k] = v
 	}
 	for key, raw := range def.Labels {
 		k := strings.TrimSpace(key)
@@ -1070,6 +1345,89 @@ func convertSilenceRules(rows []store.RuntimeAlertSilence) []alert.SilenceRule {
 	return out
 }
 
+func ruleAutoRecoverEnabled(def store.RuntimeAlertRule) bool {
+	return getLabelBool(def.Labels, true, "auto_recover", "recover_auto_close")
+}
+
+func ruleRecoverTimes(def store.RuntimeAlertRule) int {
+	return maxInt(getLabelInt(def.Labels, 2, "recover_times", "auto_recover_times"), 1)
+}
+
+func ruleNotifyOnRecovered(def store.RuntimeAlertRule) bool {
+	return getLabelBool(def.Labels, true, "notify_on_recovered", "recover_notify")
+}
+
+func getLabelBool(labels map[string]any, def bool, keys ...string) bool {
+	if len(labels) == 0 {
+		return def
+	}
+	for _, key := range keys {
+		v, ok := labels[key]
+		if !ok {
+			continue
+		}
+		switch t := v.(type) {
+		case bool:
+			return t
+		case string:
+			normalized := strings.TrimSpace(strings.ToLower(t))
+			switch normalized {
+			case "1", "true", "yes", "on":
+				return true
+			case "0", "false", "no", "off":
+				return false
+			}
+		case float64:
+			return t != 0
+		case int:
+			return t != 0
+		}
+	}
+	return def
+}
+
+func getLabelInt(labels map[string]any, def int, keys ...string) int {
+	if len(labels) == 0 {
+		return def
+	}
+	for _, key := range keys {
+		v, ok := labels[key]
+		if !ok {
+			continue
+		}
+		switch t := v.(type) {
+		case float64:
+			return int(t)
+		case int:
+			return t
+		case string:
+			text := strings.TrimSpace(t)
+			if text == "" {
+				continue
+			}
+			parsed, err := strconv.Atoi(text)
+			if err == nil {
+				return parsed
+			}
+		}
+	}
+	return def
+}
+
+func eventStatusText(ev alert.Event) string {
+	if ev.State == alert.StateNormal {
+		return "recovered"
+	}
+	return "firing"
+}
+
+func formatNotifyTime(t time.Time) string {
+	if t.IsZero() {
+		t = time.Now()
+	}
+	return t.Local().Format("2006-01-02 15:04:05")
+}
+
 func maxInt(a, b int) int {
 	if a >= b {
 		return a
@@ -1151,7 +1509,7 @@ func newNotifySender(runtimeStore *store.AlertRuntimeStore) *notifySender {
 	}
 	sender := &notifySender{
 		service:       notify.NewService(),
-		template:      getenv("MANAGER_NOTIFY_TEMPLATE", "告警 {{.rule_name}} monitor={{.monitor_id}} severity={{.severity}}"),
+		template:      getenv("MANAGER_NOTIFY_TEMPLATE", "【{{.severity}}】{{.rule_name}}\n对象: {{.app}}/{{.instance}} (monitor={{.monitor_id}})\n内容: {{.content}}\n时间: {{.triggered_at}}"),
 		batchTemplate: getenv("MANAGER_NOTIFY_BATCH_TEMPLATE", "批量告警 {{.count}} 条，最近一条：{{.last_rule_name}} monitor={{.last_monitor_id}} severity={{.last_severity}}"),
 		title:         getenv("MANAGER_NOTIFY_TITLE", "Arco Monitoring Alert"),
 		channels:      channels,
@@ -1180,11 +1538,57 @@ func (s *notifySender) Send(ctx context.Context, task alert.NotifyTask) error {
 		configs      map[notify.ChannelType]json.RawMessage
 		templateText = s.template
 	)
+	titleText := strings.TrimSpace(task.Event.Title)
+	if titleText == "" {
+		titleText = s.title
+	}
+	payloadLabels := map[string]string{
+		"app":      strings.TrimSpace(task.Event.App),
+		"instance": strings.TrimSpace(task.Event.Instance),
+	}
+	for k, v := range task.Event.Labels {
+		key := strings.TrimSpace(k)
+		val := strings.TrimSpace(v)
+		if key == "" || val == "" {
+			continue
+		}
+		payloadLabels[key] = val
+	}
+	ciVars := map[string]string{}
+	for key, val := range payloadLabels {
+		if !strings.HasPrefix(key, "ci.") {
+			continue
+		}
+		ciKey := strings.TrimSpace(strings.TrimPrefix(key, "ci."))
+		if ciKey == "" {
+			continue
+		}
+		ciVars[ciKey] = val
+	}
+	payload := map[string]any{
+		"title":            titleText,
+		"rule_name":        task.Event.RuleName,
+		"notice_rule_id":   task.Event.NoticeRuleID,
+		"monitor_id":       task.Event.MonitorID,
+		"app":              task.Event.App,
+		"instance":         task.Event.Instance,
+		"severity":         task.Event.Severity,
+		"status":           eventStatusText(task.Event),
+		"content":          task.Event.Content,
+		"expression":       task.Event.Expression,
+		"elapsed_ms":       task.Event.ElapsedMs,
+		"triggered_at":     formatNotifyTime(task.Event.TriggeredAt),
+		"triggered_at_iso": task.Event.TriggeredAt.Format(time.RFC3339),
+		"labels":           payloadLabels,
+		"ci":               ciVars,
+	}
 	if task.Event.NoticeRuleID > 0 {
 		dispatch, err := s.loadNoticeDispatch(task.Event.NoticeRuleID)
 		if err != nil {
 			return fmt.Errorf("load notice dispatch failed notice_rule_id=%d: %w", task.Event.NoticeRuleID, err)
 		}
+		log.Printf("[INFO] notify dispatch resolved rule=%s monitor=%d notice_rule_id=%d channel=%s",
+			task.Event.RuleName, task.Event.MonitorID, dispatch.NoticeRuleID, dispatch.Channel)
 		eventLabels := map[string]string{
 			"severity":   strings.TrimSpace(task.Event.Severity),
 			"monitor_id": strconv.FormatInt(task.Event.MonitorID, 10),
@@ -1200,12 +1604,18 @@ func (s *notifySender) Send(ctx context.Context, task alert.NotifyTask) error {
 			eventLabels[key] = strings.TrimSpace(v)
 		}
 		if !dispatch.MatchTime(time.Now()) {
+			log.Printf("[INFO] notify skipped by time window rule=%s monitor=%d notice_rule_id=%d",
+				task.Event.RuleName, task.Event.MonitorID, dispatch.NoticeRuleID)
 			return nil
 		}
 		if !dispatch.MatchEventLabels(eventLabels) {
+			log.Printf("[INFO] notify skipped by label filter rule=%s monitor=%d notice_rule_id=%d",
+				task.Event.RuleName, task.Event.MonitorID, dispatch.NoticeRuleID)
 			return nil
 		}
 		if !s.allowNotify(task.Event, dispatch) {
+			log.Printf("[INFO] notify skipped by notify_times rule=%s monitor=%d notice_rule_id=%d",
+				task.Event.RuleName, task.Event.MonitorID, dispatch.NoticeRuleID)
 			return nil
 		}
 		ch, ok := parseNotifyChannel(dispatch.Channel)
@@ -1213,48 +1623,77 @@ func (s *notifySender) Send(ctx context.Context, task alert.NotifyTask) error {
 			return fmt.Errorf("unsupported notice dispatch channel=%s notice_rule_id=%d", dispatch.Channel, dispatch.NoticeRuleID)
 		}
 		if dispatch.NotifyScale == "batch" {
-			template := dispatch.Template
-			if strings.TrimSpace(template) == "" {
-				template = s.batchTemplate
-			}
-			s.enqueueBatch(dispatch, ch, dispatch.Config, template, task.Event)
+			s.enqueueBatch(dispatch, ch, dispatch.Config, s.batchTemplate, task.Event)
+			log.Printf("[INFO] notify enqueued batch rule=%s monitor=%d notice_rule_id=%d channel=%s",
+				task.Event.RuleName, task.Event.MonitorID, dispatch.NoticeRuleID, ch)
 			return s.flushDueBatches(ctx, false)
 		}
 		channels = []notify.ChannelType{ch}
 		configs = map[notify.ChannelType]json.RawMessage{ch: dispatch.Config}
-		if strings.TrimSpace(dispatch.Template) != "" {
-			templateText = dispatch.Template
+		if ch == notify.ChannelSystem {
+			body, err := notify.Render(templateText, payload)
+			if err != nil {
+				return err
+			}
+			if s.runtimeStore == nil {
+				return fmt.Errorf("runtime store unavailable for system notification")
+			}
+			if err := s.runtimeStore.SendSystemNotification(titleText, body, dispatch.RecipientType, dispatch.RecipientIDs, dispatch.IncludeSubDept); err != nil {
+				return err
+			}
+			log.Printf("[INFO] system notification sent rule=%s monitor=%d notice_rule_id=%d recipients=%d recipient_type=%s",
+				task.Event.RuleName, task.Event.MonitorID, dispatch.NoticeRuleID, len(dispatch.RecipientIDs), dispatch.RecipientType)
+			return nil
 		}
 	} else {
-		channels = s.channels
-		configs = s.configs
+		channels, configs = s.resolveDefaultChannels()
+		if len(channels) == 0 {
+			log.Printf("[INFO] notify skipped rule=%s monitor=%d notice_rule_id=0 reason=no valid default channel configured",
+				task.Event.RuleName, task.Event.MonitorID)
+			return nil
+		}
 	}
 	if len(channels) == 0 {
 		return fmt.Errorf("no notify channel configured")
 	}
-	payload := map[string]any{
-		"rule_name":      task.Event.RuleName,
-		"notice_rule_id": task.Event.NoticeRuleID,
-		"monitor_id":     task.Event.MonitorID,
-		"app":            task.Event.App,
-		"instance":       task.Event.Instance,
-		"severity":       task.Event.Severity,
-		"content":        task.Event.Content,
-		"expression":     task.Event.Expression,
-		"elapsed_ms":     task.Event.ElapsedMs,
-		"triggered_at":   task.Event.TriggeredAt.Format(time.RFC3339),
+	alertID := int64(0)
+	if s.runtimeStore != nil {
+		id, err := s.runtimeStore.FindCurrentAlertID(task.Event.RuleID, task.Event.MonitorID)
+		if err != nil {
+			log.Printf("[WARN] resolve current alert id failed rule=%d monitor=%d err=%v", task.Event.RuleID, task.Event.MonitorID, err)
+		} else {
+			alertID = id
+		}
 	}
 	var errs []string
 	for _, ch := range channels {
+		body, renderErr := notify.Render(templateText, payload)
+		if renderErr != nil {
+			errs = append(errs, string(ch)+": "+renderErr.Error())
+			log.Printf("[ERROR] notify content render failed rule=%s monitor=%d notice_rule_id=%d channel=%s err=%v",
+				task.Event.RuleName, task.Event.MonitorID, task.Event.NoticeRuleID, ch, renderErr)
+			continue
+		}
 		req := notify.TestSendRequest{
 			Channel:  ch,
-			Title:    s.title,
+			Title:    titleText,
 			Template: templateText,
 			Data:     payload,
 			Config:   configs[ch],
 		}
 		if err := s.service.TestSend(ctx, req); err != nil {
 			errs = append(errs, string(ch)+": "+err.Error())
+			log.Printf("[ERROR] notify channel send failed rule=%s monitor=%d notice_rule_id=%d channel=%s err=%v",
+				task.Event.RuleName, task.Event.MonitorID, task.Event.NoticeRuleID, ch, err)
+			if s.runtimeStore != nil && alertID > 0 {
+				_ = s.runtimeStore.SaveAlertNotification(alertID, task.Event.RuleID, string(ch), 3, body, err.Error(), task.Attempt+1)
+			}
+			continue
+		}
+		log.Printf("[INFO] notify channel sent rule=%s monitor=%d notice_rule_id=%d channel=%s",
+			task.Event.RuleName, task.Event.MonitorID, task.Event.NoticeRuleID, ch)
+		if s.runtimeStore != nil && alertID > 0 {
+			_ = s.runtimeStore.SaveAlertNotification(alertID, task.Event.RuleID, string(ch), 2, body, "", task.Attempt)
 		}
 	}
 	if len(errs) > 0 {
@@ -1264,6 +1703,10 @@ func (s *notifySender) Send(ctx context.Context, task alert.NotifyTask) error {
 }
 
 func (s *notifySender) allowNotify(ev alert.Event, dispatch store.NoticeDispatch) bool {
+	if ev.State == alert.StateNormal {
+		// 恢复通知由状态迁移触发，不受 firing 次数限流影响。
+		return true
+	}
 	limit := dispatch.NotifyTimes
 	if limit <= 0 {
 		limit = 1
@@ -1285,19 +1728,35 @@ func (s *notifySender) allowNotify(ev alert.Event, dispatch store.NoticeDispatch
 	return true
 }
 
+func (s *notifySender) ResetNotifyLimits(ruleID int64, monitorID int64) {
+	if ruleID <= 0 || monitorID <= 0 {
+		return
+	}
+	suffix := fmt.Sprintf(":%d:%d", ruleID, monitorID)
+	s.limitMu.Lock()
+	defer s.limitMu.Unlock()
+	for key := range s.notifyLimits {
+		if strings.HasSuffix(key, suffix) {
+			delete(s.notifyLimits, key)
+		}
+	}
+}
+
 func (s *notifySender) enqueueBatch(dispatch store.NoticeDispatch, channel notify.ChannelType, cfg json.RawMessage, template string, ev alert.Event) {
 	now := time.Now()
 	item := map[string]any{
-		"rule_name":      ev.RuleName,
-		"notice_rule_id": ev.NoticeRuleID,
-		"monitor_id":     ev.MonitorID,
-		"app":            ev.App,
-		"instance":       ev.Instance,
-		"severity":       ev.Severity,
-		"content":        ev.Content,
-		"expression":     ev.Expression,
-		"elapsed_ms":     ev.ElapsedMs,
-		"triggered_at":   ev.TriggeredAt.Format(time.RFC3339),
+		"rule_name":        ev.RuleName,
+		"notice_rule_id":   ev.NoticeRuleID,
+		"monitor_id":       ev.MonitorID,
+		"app":              ev.App,
+		"instance":         ev.Instance,
+		"severity":         ev.Severity,
+		"status":           eventStatusText(ev),
+		"content":          ev.Content,
+		"expression":       ev.Expression,
+		"elapsed_ms":       ev.ElapsedMs,
+		"triggered_at":     formatNotifyTime(ev.TriggeredAt),
+		"triggered_at_iso": ev.TriggeredAt.Format(time.RFC3339),
 	}
 	s.batchMu.Lock()
 	defer s.batchMu.Unlock()
@@ -1347,6 +1806,21 @@ func (s *notifySender) flushDueBatches(ctx context.Context, force bool) error {
 			"last_monitor_id": last["monitor_id"],
 			"last_severity":   last["severity"],
 			"last_content":    last["content"],
+		}
+		if bucket.channel == notify.ChannelSystem {
+			body, err := notify.Render(bucket.template, data)
+			if err != nil {
+				errs = append(errs, fmt.Sprintf("notice_rule_id=%d channel=%s err=%v", bucket.dispatch.NoticeRuleID, bucket.channel, err))
+				continue
+			}
+			if s.runtimeStore == nil {
+				errs = append(errs, fmt.Sprintf("notice_rule_id=%d channel=%s err=runtime store unavailable", bucket.dispatch.NoticeRuleID, bucket.channel))
+				continue
+			}
+			if err := s.runtimeStore.SendSystemNotification(s.title, body, bucket.dispatch.RecipientType, bucket.dispatch.RecipientIDs, bucket.dispatch.IncludeSubDept); err != nil {
+				errs = append(errs, fmt.Sprintf("notice_rule_id=%d channel=%s err=%v", bucket.dispatch.NoticeRuleID, bucket.channel, err))
+			}
+			continue
 		}
 		req := notify.TestSendRequest{
 			Channel:  bucket.channel,
@@ -1398,8 +1872,56 @@ func parseNotifyChannel(raw string) (notify.ChannelType, bool) {
 		return notify.ChannelEmail, true
 	case string(notify.ChannelWeCom):
 		return notify.ChannelWeCom, true
+	case string(notify.ChannelSystem):
+		return notify.ChannelSystem, true
 	default:
 		return "", false
+	}
+}
+
+func (s *notifySender) resolveDefaultChannels() ([]notify.ChannelType, map[notify.ChannelType]json.RawMessage) {
+	outChannels := make([]notify.ChannelType, 0, len(s.channels))
+	outConfigs := map[notify.ChannelType]json.RawMessage{}
+	for _, ch := range s.channels {
+		if ch == notify.ChannelSystem {
+			// 系统消息需要 notice rule 的接收人上下文，默认通道不支持。
+			continue
+		}
+		cfg, ok := s.configs[ch]
+		if !ok || !s.isDefaultChannelConfigured(ch, cfg) {
+			continue
+		}
+		outChannels = append(outChannels, ch)
+		outConfigs[ch] = cfg
+	}
+	return outChannels, outConfigs
+}
+
+func (s *notifySender) isDefaultChannelConfigured(ch notify.ChannelType, raw json.RawMessage) bool {
+	switch ch {
+	case notify.ChannelWebhook:
+		var cfg notify.WebhookConfig
+		if err := json.Unmarshal(raw, &cfg); err != nil {
+			return false
+		}
+		return strings.TrimSpace(cfg.URL) != ""
+	case notify.ChannelEmail:
+		var cfg notify.EmailConfig
+		if err := json.Unmarshal(raw, &cfg); err != nil {
+			return false
+		}
+		return strings.TrimSpace(cfg.Host) != "" &&
+			cfg.Port > 0 &&
+			strings.TrimSpace(cfg.From) != "" &&
+			strings.TrimSpace(cfg.To) != ""
+	case notify.ChannelWeCom:
+		var cfg notify.WeComConfig
+		if err := json.Unmarshal(raw, &cfg); err != nil {
+			return false
+		}
+		return strings.TrimSpace(cfg.WebhookURL) != ""
+	default:
+		return false
 	}
 }
 
@@ -1415,6 +1937,8 @@ func parseNotifyChannels(raw string) []notify.ChannelType {
 			out = append(out, notify.ChannelEmail)
 		case string(notify.ChannelWeCom):
 			out = append(out, notify.ChannelWeCom)
+		case string(notify.ChannelSystem):
+			out = append(out, notify.ChannelSystem)
 		}
 	}
 	return out
