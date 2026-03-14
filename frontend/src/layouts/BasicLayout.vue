@@ -99,7 +99,7 @@
         <!-- 监控管理菜单 -->
         <a-sub-menu
           key="monitoring"
-          v-if="hasAnyPermission(['monitoring:template', 'monitoring:list', 'monitoring:target', 'monitoring:bulletin', 'monitoring:alert:center', 'monitoring:dashboard', 'monitoring:collector', 'monitoring:labels', 'monitoring:status'])"
+          v-if="hasAnyPermission(['monitoring:template', 'monitoring:list', 'monitoring:target', 'monitoring:bulletin', 'monitoring:dashboard', 'monitoring:collector', 'monitoring:labels', 'monitoring:status'])"
         >
           <template #icon><LineChartOutlined /></template>
           <template #title>{{ t('menu.monitoring') }}</template>
@@ -119,37 +119,6 @@
             <template #icon><FileTextOutlined /></template>
             <span>{{ t('menu.monitoringTemplate') }}</span>
           </a-menu-item>
-          <a-sub-menu key="monitoring-alert-center" v-if="hasAnyPermission(['monitoring:alert:center', 'monitoring:alert:current', 'monitoring:alert:history', 'monitoring:alert:rule', 'monitoring:alert:setting', 'monitoring:alert:integration', 'monitoring:alert:external', 'monitoring:alert:group', 'monitoring:alert:inhibit', 'monitoring:alert:silence', 'monitoring:alert:notice'])">
-            <template #icon><BellOutlined /></template>
-            <template #title>{{ t('menu.monitoringAlertCenter') }}</template>
-            <a-menu-item key="monitoring-alert-current" v-if="hasAnyPermission(['monitoring:alert:current', 'monitoring:alert:center'])" @click="navigateTo('/monitoring/alert/current')">
-              <span>{{ t('menu.monitoringAlertCurrent') }}</span>
-            </a-menu-item>
-            <a-menu-item key="monitoring-alert-history" v-if="hasAnyPermission(['monitoring:alert:history', 'monitoring:alert:center'])" @click="navigateTo('/monitoring/alert/history')">
-              <span>{{ t('menu.monitoringAlertHistory') }}</span>
-            </a-menu-item>
-            <a-menu-item key="monitoring-alert-setting" v-if="hasAnyPermission(['monitoring:alert:setting', 'monitoring:alert:rule'])" @click="navigateTo('/monitoring/alert/setting')">
-              <span>告警配置</span>
-            </a-menu-item>
-            <a-menu-item key="monitoring-alert-integration" v-if="hasAnyPermission(['monitoring:alert:integration', 'monitoring:alert:external'])" @click="navigateTo('/monitoring/alert/integration')">
-              <span>外部告警接入</span>
-            </a-menu-item>
-            <a-menu-item key="monitoring-alert-group" v-if="hasPermission('monitoring:alert:group')" @click="navigateTo('/monitoring/alert/group')">
-              <span>{{ t('menu.monitoringAlertGroup') }}</span>
-            </a-menu-item>
-            <a-menu-item key="monitoring-alert-inhibit" v-if="hasPermission('monitoring:alert:inhibit')" @click="navigateTo('/monitoring/alert/inhibit')">
-              <span>{{ t('menu.monitoringAlertInhibit') }}</span>
-            </a-menu-item>
-            <a-menu-item key="monitoring-alert-silence" v-if="hasPermission('monitoring:alert:silence')" @click="navigateTo('/monitoring/alert/silence')">
-              <span>{{ t('menu.monitoringAlertSilence') }}</span>
-            </a-menu-item>
-            <a-menu-item key="monitoring-alert-notice" v-if="hasPermission('monitoring:alert:notice')" @click="navigateTo('/monitoring/alert/notice')">
-              <span>通知规则</span>
-            </a-menu-item>
-            <a-menu-item key="monitoring-alert-notice-receiver" v-if="hasPermission('monitoring:alert:notice')" @click="navigateTo('/monitoring/alert/notice-receiver')">
-              <span>通知渠道</span>
-            </a-menu-item>
-          </a-sub-menu>
           <a-menu-item key="monitoring-collector" v-if="hasPermission('monitoring:collector')" @click="navigateTo('/monitoring/collector')">
             <template #icon><ClusterOutlined /></template>
             <span>{{ t('menu.monitoringCollector') }}</span>
@@ -161,6 +130,45 @@
           <a-menu-item key="monitoring-status" v-if="hasPermission('monitoring:status')" @click="navigateTo('/monitoring/status')">
             <template #icon><MobileOutlined /></template>
             <span>{{ t('menu.monitoringStatus') }}</span>
+          </a-menu-item>
+        </a-sub-menu>
+
+        <!-- 告警中心菜单（一级菜单） -->
+        <a-sub-menu
+          key="alert-center"
+          v-if="hasAnyPermission(['monitoring:alert:center', 'monitoring:alert:current', 'monitoring:alert:my', 'monitoring:alert:history', 'monitoring:alert:rule', 'monitoring:alert:setting', 'monitoring:alert:integration', 'monitoring:alert:external', 'monitoring:alert:group', 'monitoring:alert:inhibit', 'monitoring:alert:silence', 'monitoring:alert:notice'])"
+        >
+          <template #icon><BellOutlined /></template>
+          <template #title>{{ t('menu.monitoringAlertCenter') }}</template>
+          <a-menu-item key="monitoring-alert-current" v-if="hasAnyPermission(['monitoring:alert:current', 'monitoring:alert:center'])" @click="navigateTo('/alert-center/current')">
+            <span>{{ t('menu.monitoringAlertCurrent') }}</span>
+          </a-menu-item>
+          <a-menu-item key="monitoring-alert-my" v-if="hasAnyPermission(['monitoring:alert:my', 'monitoring:alert:center'])" @click="navigateTo('/alert-center/my')">
+            <span>我的告警</span>
+          </a-menu-item>
+          <a-menu-item key="monitoring-alert-history" v-if="hasAnyPermission(['monitoring:alert:history', 'monitoring:alert:center'])" @click="navigateTo('/alert-center/history')">
+            <span>{{ t('menu.monitoringAlertHistory') }}</span>
+          </a-menu-item>
+          <a-menu-item key="monitoring-alert-setting" v-if="hasAnyPermission(['monitoring:alert:setting', 'monitoring:alert:rule'])" @click="navigateTo('/alert-center/setting')">
+            <span>告警配置</span>
+          </a-menu-item>
+          <a-menu-item key="monitoring-alert-integration" v-if="hasAnyPermission(['monitoring:alert:integration', 'monitoring:alert:external'])" @click="navigateTo('/alert-center/integration')">
+            <span>外部告警接入</span>
+          </a-menu-item>
+          <a-menu-item key="monitoring-alert-group" v-if="hasPermission('monitoring:alert:group')" @click="navigateTo('/alert-center/group')">
+            <span>{{ t('menu.monitoringAlertGroup') }}</span>
+          </a-menu-item>
+          <a-menu-item key="monitoring-alert-inhibit" v-if="hasPermission('monitoring:alert:inhibit')" @click="navigateTo('/alert-center/inhibit')">
+            <span>{{ t('menu.monitoringAlertInhibit') }}</span>
+          </a-menu-item>
+          <a-menu-item key="monitoring-alert-silence" v-if="hasPermission('monitoring:alert:silence')" @click="navigateTo('/alert-center/silence')">
+            <span>{{ t('menu.monitoringAlertSilence') }}</span>
+          </a-menu-item>
+          <a-menu-item key="monitoring-alert-notice" v-if="hasPermission('monitoring:alert:notice')" @click="navigateTo('/alert-center/notice')">
+            <span>通知规则</span>
+          </a-menu-item>
+          <a-menu-item key="monitoring-alert-notice-receiver" v-if="hasPermission('monitoring:alert:notice')" @click="navigateTo('/alert-center/notice-receiver')">
+            <span>通知渠道</span>
           </a-menu-item>
         </a-sub-menu>
         
@@ -466,9 +474,10 @@ const updateSelectedKeys = () => {
   } else if (path.includes('/monitoring/bulletin')) {
     selectedKeys.value = ['monitoring-bulletin']
     openKeys.value = ['monitoring']
-  } else if (path.includes('/monitoring/alert')) {
-    openKeys.value = ['monitoring', 'monitoring-alert-center']
+  } else if (path.includes('/alert-center')) {
+    openKeys.value = ['alert-center']
     if (path.includes('/current')) selectedKeys.value = ['monitoring-alert-current']
+    else if (path.includes('/my')) selectedKeys.value = ['monitoring-alert-my']
     else if (path.includes('/history')) selectedKeys.value = ['monitoring-alert-history']
     else if (path.includes('/rule')) selectedKeys.value = ['monitoring-alert-rule']
     else if (path.includes('/integration')) selectedKeys.value = ['monitoring-alert-integration']

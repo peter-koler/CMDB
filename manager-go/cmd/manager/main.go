@@ -97,6 +97,7 @@ func main() {
 	}
 
 	redisAddr := getenv("REDIS_ADDR", "127.0.0.1:6379")
+	escalationQueue := newRedisEscalationQueue(redisAddr, 1200*time.Millisecond)
 	vmURL := getenv("VICTORIA_METRICS_URL", "http://127.0.0.1:8428")
 	dispatcher := dispatch.NewDispatcher(
 		[]dispatch.Sink{
@@ -339,6 +340,19 @@ func main() {
 			}
 		}
 	}
+	go runEscalationWorker(
+		ctx,
+		10*time.Second,
+		escalationQueue,
+		alertRuntimeStore,
+		func(ruleID int64) (store.RuntimeAlertRule, bool) {
+			alertRulesMu.RLock()
+			defer alertRulesMu.RUnlock()
+			def, ok := alertRuleDefsByID[ruleID]
+			return def, ok
+		},
+		enqueueByNoticeRules,
+	)
 
 	handleFiring := func(ev alert.Event, grouped int, point model.MetricPoint) {
 		alertStore.Fire(ev)
@@ -380,6 +394,9 @@ func main() {
 				log.Printf("alert runtime upsert failed rule=%d monitor=%d err=%v", ev.RuleID, ev.MonitorID, err)
 			} else if newCycle {
 				sender.ResetNotifyLimits(ev.RuleID, ev.MonitorID)
+				if err := scheduleEscalationForCycle(ctx, escalationQueue, def, ev.RuleID, ev.MonitorID); err != nil {
+					log.Printf("[Escalation] schedule failed rule=%d monitor=%d err=%v", ev.RuleID, ev.MonitorID, err)
+				}
 			}
 		}
 		enqueueByNoticeRules(ev, noticeRuleIDs)
@@ -482,6 +499,9 @@ func main() {
 				}
 				if changed && ruleNotifyOnRecovered(def) {
 					handleRecovered(ev, point)
+				}
+				if changed {
+					clearEscalation(ctx, escalationQueue, rule.ID, point.MonitorID)
 				}
 				continue
 			}
@@ -809,6 +829,9 @@ func main() {
 							}
 							if changed && ruleNotifyOnRecovered(def) {
 								handleRecovered(ev, point)
+							}
+							if changed {
+								clearEscalation(ctx, escalationQueue, def.ID, m.ID)
 							}
 							continue
 						}

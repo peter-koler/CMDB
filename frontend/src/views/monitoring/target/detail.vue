@@ -250,6 +250,59 @@
           </a-col>
         </a-row>
 
+        <a-divider orientation="left">告警升级</a-divider>
+        <a-form-item label="启用告警升级" extra="告警持续未处理时，按阶梯延时升级通知">
+          <a-switch v-model:checked="targetAlertForm.escalation_enabled" />
+        </a-form-item>
+        <a-space v-if="targetAlertForm.escalation_enabled" direction="vertical" style="width: 100%" :size="8">
+          <a-card
+            v-for="(level, idx) in targetAlertEscalationLevels"
+            :key="idx"
+            size="small"
+            :title="`Level ${idx + 1}`"
+          >
+            <a-row :gutter="12">
+              <a-col :span="8">
+                <a-form-item label="等待时间(秒)">
+                  <a-input-number v-model:value="level.delay_seconds" :min="1" style="width: 100%" />
+                </a-form-item>
+              </a-col>
+              <a-col :span="16">
+                <a-form-item label="升级通知规则">
+                  <a-select
+                    v-model:value="level.notice_rule_ids"
+                    mode="multiple"
+                    allow-clear
+                    placeholder="不填则回退本规则通知配置"
+                  >
+                    <a-select-option v-for="item in targetAlertNoticeOptions" :key="item.id" :value="Number(item.id)">
+                      {{ item.name }}
+                    </a-select-option>
+                  </a-select>
+                </a-form-item>
+              </a-col>
+            </a-row>
+            <a-row :gutter="12">
+              <a-col :span="24">
+                <a-form-item label="升级标题模板">
+                  <a-input v-model:value="level.title_template" placeholder="示例: [Level {{level}}] {{rule_name}}" />
+                </a-form-item>
+              </a-col>
+            </a-row>
+            <a-row :gutter="12">
+              <a-col :span="24">
+                <a-form-item label="升级内容模板">
+                  <a-textarea v-model:value="level.content_template" :rows="2" placeholder="示例: 告警 {{rule_name}} 在 {{instance}} 持续未恢复" />
+                </a-form-item>
+              </a-col>
+            </a-row>
+            <a-button danger type="link" @click="removeTargetEscalationLevel(idx)">删除该级</a-button>
+          </a-card>
+          <a-button type="dashed" block @click="addTargetEscalationLevel">
+            新增升级级别
+          </a-button>
+        </a-space>
+
         <a-form-item>
           <a-space>
             <a-switch v-model:checked="targetAlertFormUseCustomExpr" />
@@ -364,10 +417,18 @@ const targetAlertForm = reactive({
   auto_recover: true,
   recover_times: 2,
   notify_on_recovered: true,
+  escalation_enabled: false,
   notice_rule_id: undefined as number | undefined,
   notice_rule_ids: [] as number[],
   enabled: true
 })
+const targetAlertEscalationLevels = ref<Array<{
+  level: number
+  delay_seconds: number
+  notice_rule_ids: number[]
+  title_template: string
+  content_template: string
+}>>([])
 const targetAlertFormUseCustomExpr = ref(false)
 
 const CORE_RULE_HINTS = ['实例不可用', '内存使用率过高', '内存碎片严重', '连接数饱和', '拒绝连接', 'RDB', 'AOF', '主从延迟过高']
@@ -559,7 +620,7 @@ function openAlertDetail(record: AlertItem) {
     message.warning('告警ID无效，无法跳转详情')
     return
   }
-  router.push(`/monitoring/alert/detail/${alertId}`)
+  router.push(`/alert-center/detail/${alertId}`)
 }
 
 async function refreshTargetAlerts() {
@@ -660,6 +721,7 @@ async function openTargetAlertRuleEditor(record: AlertRule) {
   targetAlertForm.auto_recover = (record as any).auto_recover !== false
   targetAlertForm.recover_times = Math.max(Number((record as any).recover_times || 2), 1)
   targetAlertForm.notify_on_recovered = (record as any).notify_on_recovered !== false
+  targetAlertForm.escalation_enabled = Boolean((record as any).escalation_config?.enabled)
   const noticeRuleIds = Array.isArray((record as any).notice_rule_ids)
     ? ((record as any).notice_rule_ids as number[])
     : []
@@ -670,6 +732,16 @@ async function openTargetAlertRuleEditor(record: AlertRule) {
       : []
   targetAlertForm.notice_rule_id = (record as any).notice_rule_id ? Number((record as any).notice_rule_id) : undefined
   targetAlertForm.enabled = (record as any).enabled !== false
+  targetAlertEscalationLevels.value = Array.isArray((record as any).escalation_config?.levels)
+    ? ((record as any).escalation_config.levels as any[])
+      .map((item: any, idx: number) => ({
+        level: Number(item?.level || idx + 1),
+        delay_seconds: Math.max(Number(item?.delay_seconds || 300), 1),
+        notice_rule_ids: Array.isArray(item?.notice_rule_ids) ? item.notice_rule_ids.map((v: any) => Number(v)).filter((v: number) => v > 0) : [],
+        title_template: String(item?.title_template || ''),
+        content_template: String(item?.content_template || '')
+      }))
+    : []
   targetAlertFormUseCustomExpr.value = Boolean(String(targetAlertForm.expr || '').trim())
 
   await Promise.all([loadTargetAlertNoticeOptions(), loadTargetAlertMetricOptions()])
@@ -696,9 +768,11 @@ async function openCreateTargetAlertRule() {
   targetAlertForm.auto_recover = true
   targetAlertForm.recover_times = 2
   targetAlertForm.notify_on_recovered = true
+  targetAlertForm.escalation_enabled = false
   targetAlertForm.notice_rule_id = undefined
   targetAlertForm.notice_rule_ids = []
   targetAlertForm.enabled = true
+  targetAlertEscalationLevels.value = []
   targetAlertFormUseCustomExpr.value = false
 
   await Promise.all([loadTargetAlertNoticeOptions(), loadTargetAlertMetricOptions()])
@@ -714,6 +788,10 @@ async function openCreateTargetAlertRule() {
 async function saveTargetAlertRule() {
   if (!targetDetail.value?.id || !targetAlertForm.name.trim()) {
     message.warning('规则名称不能为空')
+    return
+  }
+  if (targetAlertForm.escalation_enabled && !targetAlertEscalationLevels.value.length) {
+    message.warning('已启用告警升级，请至少配置一个升级级别')
     return
   }
 
@@ -741,6 +819,18 @@ async function saveTargetAlertRule() {
       auto_recover: Boolean(targetAlertForm.auto_recover),
       recover_times: Math.max(Number(targetAlertForm.recover_times || 2), 1),
       notify_on_recovered: Boolean(targetAlertForm.notify_on_recovered),
+      escalation_config: targetAlertForm.escalation_enabled
+        ? {
+          enabled: true,
+          levels: targetAlertEscalationLevels.value.map((item, idx) => ({
+            level: idx + 1,
+            delay_seconds: Math.max(Number(item.delay_seconds || 0), 1),
+            notice_rule_ids: Array.isArray(item.notice_rule_ids) ? item.notice_rule_ids.filter((id) => Number(id) > 0).map((id) => Number(id)) : [],
+            title_template: String(item.title_template || '').trim(),
+            content_template: String(item.content_template || '').trim()
+          }))
+        }
+        : { enabled: false, levels: [] as any[] },
       notice_rule_ids: targetAlertForm.notice_rule_ids,
       notice_rule_id: targetAlertForm.notice_rule_id,
       labels: {},
@@ -773,6 +863,21 @@ async function removeTargetAlertRule(record: AlertRule) {
   } catch (error: any) {
     message.error(error?.response?.data?.message || '删除规则失败')
   }
+}
+
+function addTargetEscalationLevel() {
+  targetAlertEscalationLevels.value.push({
+    level: targetAlertEscalationLevels.value.length + 1,
+    delay_seconds: 300,
+    notice_rule_ids: [],
+    title_template: '',
+    content_template: ''
+  })
+}
+
+function removeTargetEscalationLevel(index: number) {
+  targetAlertEscalationLevels.value.splice(index, 1)
+  targetAlertEscalationLevels.value = targetAlertEscalationLevels.value.map((item, idx) => ({ ...item, level: idx + 1 }))
 }
 
 function goBack() {

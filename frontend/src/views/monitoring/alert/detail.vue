@@ -72,7 +72,9 @@
           >
             <a-table-column title="级别" data-index="level" key="level" width="90">
               <template #default="{ record }">
-                <a-tag :color="levelColor(record.level)">{{ record.level || '-' }}</a-tag>
+                <a-tag :color="levelColor(record.level)">
+                  {{ record.escalation_level ? `L${record.escalation_level}` : (record.level || '-') }}
+                </a-tag>
               </template>
             </a-table-column>
             <a-table-column title="告警名称" data-index="name" key="name" />
@@ -108,6 +110,31 @@
               <template #default="{ record }">{{ formatTime(record.recovered_at) }}</template>
             </a-table-column>
           </a-table>
+        </a-tab-pane>
+
+        <a-tab-pane key="escalation" tab="升级记录">
+          <a-table
+            :loading="escalationLoading"
+            :data-source="escalationRecords"
+            :pagination="escalationPagination"
+            row-key="id"
+            @change="handleEscalationTableChange"
+          >
+            <a-table-column title="级别" data-index="level" key="level" width="90">
+              <template #default="{ record }">
+                <a-tag :color="levelColor(record.level)">{{ record.level || '-' }}</a-tag>
+              </template>
+            </a-table-column>
+            <a-table-column title="升级内容" data-index="content" key="content">
+              <template #default="{ record }">
+                {{ record.content || record.note || '-' }}
+              </template>
+            </a-table-column>
+            <a-table-column title="发生时间" data-index="triggered_at" key="triggered_at" width="180">
+              <template #default="{ record }">{{ formatTime(record.triggered_at) }}</template>
+            </a-table-column>
+          </a-table>
+          <a-empty v-if="!escalationLoading && !escalationRecords.length" description="暂无升级记录" />
         </a-tab-pane>
 
         <a-tab-pane key="topology" tab="资源拓扑">
@@ -260,13 +287,19 @@ const route = useRoute()
 const userStore = useUserStore()
 const alertDetail = ref<AlertItem | null>(null)
 const monitorDetail = ref<MonitoringTarget | null>(null)
-const activeTab = ref<'metrics' | 'related' | 'history' | 'topology' | 'rules' | 'notices'>('metrics')
+const activeTab = ref<'metrics' | 'related' | 'history' | 'escalation' | 'topology' | 'rules' | 'notices'>('metrics')
 
 const canClaim = computed(() =>
-  userStore.hasPermission('monitoring:alert:claim') || userStore.hasPermission('monitoring:alert:center')
+  userStore.hasPermission('monitoring:alert:claim') ||
+  userStore.hasPermission('monitoring:alert:my') ||
+  userStore.hasPermission('monitoring:alert:current') ||
+  userStore.hasPermission('monitoring:alert:center')
 )
 const canClose = computed(() =>
-  userStore.hasPermission('monitoring:alert:close') || userStore.hasPermission('monitoring:alert:center')
+  userStore.hasPermission('monitoring:alert:close') ||
+  userStore.hasPermission('monitoring:alert:my') ||
+  userStore.hasPermission('monitoring:alert:current') ||
+  userStore.hasPermission('monitoring:alert:center')
 )
 
 const relatedAlerts = ref<AlertItem[]>([])
@@ -276,6 +309,9 @@ const relatedPagination = reactive({ current: 1, pageSize: 10, total: 0 })
 const historyAlerts = ref<AlertItem[]>([])
 const historyLoading = ref(false)
 const historyPagination = reactive({ current: 1, pageSize: 10, total: 0 })
+const escalationRecords = ref<AlertItem[]>([])
+const escalationLoading = ref(false)
+const escalationPagination = reactive({ current: 1, pageSize: 10, total: 0 })
 
 const alertRules = ref<AlertRule[]>([])
 const rulesLoading = ref(false)
@@ -525,6 +561,7 @@ const loadAlertDetail = async () => {
   if (activeTab.value === 'metrics') loadMetricTrend()
   if (activeTab.value === 'related') loadRelatedAlerts()
   if (activeTab.value === 'history') loadHistoryAlerts()
+  if (activeTab.value === 'escalation') loadEscalationRecords()
   if (activeTab.value === 'rules') loadAlertRules()
   if (activeTab.value === 'notices') loadAlertNotifications()
 }
@@ -584,6 +621,33 @@ const loadHistoryAlerts = async () => {
   }
 }
 
+const loadEscalationRecords = async () => {
+  if (!alertDetail.value?.rule_id && !alertDetail.value?.name) return
+  escalationLoading.value = true
+  try {
+    const params: Record<string, any> = {
+      page: escalationPagination.current,
+      page_size: escalationPagination.pageSize
+    }
+    if (alertDetail.value?.rule_id) {
+      params.rule_id = alertDetail.value.rule_id
+    } else if (alertDetail.value?.name) {
+      params.name = alertDetail.value.name
+    }
+    if (alertDetail.value?.monitor_id) {
+      params.monitor_id = alertDetail.value.monitor_id
+    }
+    const res = await getAlertHistory(params)
+    const parsed = normalizeList((res as any)?.data || res)
+    const items = (parsed.items || []) as AlertItem[]
+    const filtered = items.filter((item) => String(item.action || '').toLowerCase() === 'escalated')
+    escalationRecords.value = filtered
+    escalationPagination.total = filtered.length
+  } finally {
+    escalationLoading.value = false
+  }
+}
+
 const loadAlertRules = async () => {
   if (!alertDetail.value?.id) return
   rulesLoading.value = true
@@ -622,6 +686,7 @@ const handleTabChange = (key: string) => {
   if (key === 'metrics') loadMetricTrend()
   if (key === 'related') loadRelatedAlerts()
   if (key === 'history') loadHistoryAlerts()
+  if (key === 'escalation') loadEscalationRecords()
   if (key === 'rules') loadAlertRules()
   if (key === 'notices') loadAlertNotifications()
 }
@@ -636,6 +701,12 @@ const handleHistoryTableChange = (pager: any) => {
   historyPagination.current = pager.current
   historyPagination.pageSize = pager.pageSize
   loadHistoryAlerts()
+}
+
+const handleEscalationTableChange = (pager: any) => {
+  escalationPagination.current = pager.current
+  escalationPagination.pageSize = pager.pageSize
+  loadEscalationRecords()
 }
 
 const handleNoticeTableChange = (pager: any) => {
@@ -657,9 +728,13 @@ const resetNoticeFilters = () => {
 const handleClaim = async () => {
   if (!alertDetail.value?.id) return
   if (actionDisabled.value) return
-  await claimAlert(alertDetail.value.id)
-  message.success('认领成功')
-  loadAlertDetail()
+  try {
+    await claimAlert(alertDetail.value.id)
+    message.success('认领成功')
+    await loadAlertDetail()
+  } catch (error: any) {
+    message.error(error?.response?.data?.message || '认领失败')
+  }
 }
 
 const handleClose = async () => {
@@ -669,9 +744,13 @@ const handleClose = async () => {
     title: '确认关闭',
     content: `确定要关闭告警 "${alertDetail.value.name}" 吗？`,
     onOk: async () => {
-      await closeAlert(alertDetail.value!.id)
-      message.success('关闭成功')
-      loadAlertDetail()
+      try {
+        await closeAlert(alertDetail.value!.id)
+        message.success('关闭成功')
+        await loadAlertDetail()
+      } catch (error: any) {
+        message.error(error?.response?.data?.message || '关闭失败')
+      }
     }
   })
 }
@@ -694,6 +773,7 @@ watch(
   () => {
     relatedPagination.current = 1
     historyPagination.current = 1
+    escalationPagination.current = 1
     noticePagination.current = 1
     noticeFilters.status = undefined
     noticeFilters.notify_type = undefined
@@ -702,6 +782,7 @@ watch(
     noticeTimeRange.value = null
     metricRangePreset.value = '1h'
     metricCustomRange.value = null
+    escalationRecords.value = []
     loadAlertDetail()
   }
 )

@@ -101,6 +101,9 @@ export interface AlertItem {
   id: number
   rule_id?: number
   name?: string
+  content?: string
+  action?: string
+  escalation_level?: number
   level: 'critical' | 'warning' | 'info' | string
   status?: string
   monitor_name?: string
@@ -174,6 +177,17 @@ export interface AlertRule {
   auto_recover?: boolean
   recover_times?: number
   notify_on_recovered?: boolean
+  escalation_enabled?: boolean
+  escalation_config?: {
+    enabled?: boolean
+    levels?: Array<{
+      level?: number
+      delay_seconds?: number
+      notice_rule_ids?: number[]
+      title_template?: string
+      content_template?: string
+    }>
+  } | null
 }
 
 export interface MonitoringTarget {

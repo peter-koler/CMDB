@@ -173,76 +173,6 @@ const routes = [
             meta: { title: '监控模板', icon: 'FileTextOutlined', permission: 'monitoring:template' }
           },
           {
-            path: 'alert/current',
-            name: 'MonitoringAlertCurrent',
-            component: () => import('@/views/monitoring/alert/index.vue'),
-            meta: { title: '当前告警', icon: 'BellOutlined', permission: 'monitoring:alert:current' }
-          },
-          {
-            path: 'alert/history',
-            name: 'MonitoringAlertHistory',
-            component: () => import('@/views/monitoring/alert/index.vue'),
-            meta: { title: '告警历史', icon: 'HistoryOutlined', permission: 'monitoring:alert:history' }
-          },
-          {
-            path: 'alert/detail/:id',
-            name: 'MonitoringAlertDetail',
-            component: () => import('@/views/monitoring/alert/detail.vue'),
-            meta: { title: '告警明细', permission: 'monitoring:alert:detail', hideInMenu: true }
-          },
-          {
-            path: 'alert/rule',
-            name: 'MonitoringAlertRule',
-            component: () => import('@/views/monitoring/alert/index.vue'),
-            meta: { title: '告警配置', icon: 'FileProtectOutlined', permission: 'monitoring:alert:rule' }
-          },
-          {
-            path: 'alert/integration',
-            name: 'MonitoringAlertIntegration',
-            component: () => import('@/views/monitoring/alert/integration.vue'),
-            meta: { title: '告警集成', icon: 'ApiOutlined', permission: 'monitoring:alert:integration' }
-          },
-          {
-            path: 'alert/group',
-            name: 'MonitoringAlertGroup',
-            component: () => import('@/views/monitoring/alert/group.vue'),
-            meta: { title: '告警分组', icon: 'ClusterOutlined', permission: 'monitoring:alert:group' }
-          },
-          {
-            path: 'alert/inhibit',
-            name: 'MonitoringAlertInhibit',
-            component: () => import('@/views/monitoring/alert/inhibit.vue'),
-            meta: { title: '告警抑制', icon: 'StopOutlined', permission: 'monitoring:alert:inhibit' }
-          },
-          {
-            path: 'alert/silence',
-            name: 'MonitoringAlertSilence',
-            component: () => import('@/views/monitoring/alert/silence.vue'),
-            meta: { title: '告警静默', icon: 'SoundOutlined', permission: 'monitoring:alert:silence' }
-          },
-          {
-            path: 'alert/notice',
-            name: 'MonitoringAlertNotice',
-            component: () => import('@/views/monitoring/alert/notice.vue'),
-            meta: { title: '通知规则', icon: 'NotificationOutlined', permission: 'monitoring:alert:notice' }
-          },
-          {
-            path: 'alert/notice-receiver',
-            name: 'MonitoringAlertNoticeReceiver',
-            component: () => import('@/views/monitoring/alert/notice-receiver.vue'),
-            meta: { title: '通知渠道', icon: 'MailOutlined', permission: 'monitoring:alert:notice' }
-          },
-          {
-            path: 'alert/setting',
-            name: 'MonitoringAlertSetting',
-            component: () => import('@/views/monitoring/alert/setting.vue'),
-            meta: { title: '告警配置', icon: 'SettingOutlined', permission: 'monitoring:alert:setting' }
-          },
-          {
-            path: 'alert',
-            redirect: '/monitoring/alert/current'
-          },
-          {
             path: 'collector',
             name: 'MonitoringCollector',
             component: () => import('@/views/monitoring/collector/index.vue'),
@@ -259,6 +189,89 @@ const routes = [
             name: 'MonitoringStatus',
             component: () => import('@/views/monitoring/status/index.vue'),
             meta: { title: '状态页', icon: 'MobileOutlined', permission: 'monitoring:status' }
+          }
+        ]
+      },
+      {
+        path: 'alert-center',
+        name: 'AlertCenter',
+        meta: { title: '告警中心', icon: 'BellOutlined' },
+        children: [
+          {
+            path: 'current',
+            name: 'MonitoringAlertCurrent',
+            component: () => import('@/views/monitoring/alert/index.vue'),
+            meta: { title: '当前告警', icon: 'BellOutlined', permission: 'monitoring:alert:current' }
+          },
+          {
+            path: 'my',
+            name: 'MonitoringAlertMy',
+            component: () => import('@/views/monitoring/alert/index.vue'),
+            meta: { title: '我的告警', icon: 'UserOutlined', permission: 'monitoring:alert:my' }
+          },
+          {
+            path: 'history',
+            name: 'MonitoringAlertHistory',
+            component: () => import('@/views/monitoring/alert/index.vue'),
+            meta: { title: '告警历史', icon: 'HistoryOutlined', permission: 'monitoring:alert:history' }
+          },
+          {
+            path: 'detail/:id',
+            name: 'MonitoringAlertDetail',
+            component: () => import('@/views/monitoring/alert/detail.vue'),
+            meta: { title: '告警明细', permission: 'monitoring:alert:detail', hideInMenu: true }
+          },
+          {
+            path: '',
+            redirect: '/alert-center/current'
+          },
+          {
+            path: 'rule',
+            name: 'MonitoringAlertRule',
+            component: () => import('@/views/monitoring/alert/index.vue'),
+            meta: { title: '告警配置', icon: 'FileProtectOutlined', permission: 'monitoring:alert:rule' }
+          },
+          {
+            path: 'integration',
+            name: 'MonitoringAlertIntegration',
+            component: () => import('@/views/monitoring/alert/integration.vue'),
+            meta: { title: '告警集成', icon: 'ApiOutlined', permission: 'monitoring:alert:integration' }
+          },
+          {
+            path: 'group',
+            name: 'MonitoringAlertGroup',
+            component: () => import('@/views/monitoring/alert/group.vue'),
+            meta: { title: '告警分组', icon: 'ClusterOutlined', permission: 'monitoring:alert:group' }
+          },
+          {
+            path: 'inhibit',
+            name: 'MonitoringAlertInhibit',
+            component: () => import('@/views/monitoring/alert/inhibit.vue'),
+            meta: { title: '告警抑制', icon: 'StopOutlined', permission: 'monitoring:alert:inhibit' }
+          },
+          {
+            path: 'silence',
+            name: 'MonitoringAlertSilence',
+            component: () => import('@/views/monitoring/alert/silence.vue'),
+            meta: { title: '告警静默', icon: 'SoundOutlined', permission: 'monitoring:alert:silence' }
+          },
+          {
+            path: 'notice',
+            name: 'MonitoringAlertNotice',
+            component: () => import('@/views/monitoring/alert/notice.vue'),
+            meta: { title: '通知规则', icon: 'NotificationOutlined', permission: 'monitoring:alert:notice' }
+          },
+          {
+            path: 'notice-receiver',
+            name: 'MonitoringAlertNoticeReceiver',
+            component: () => import('@/views/monitoring/alert/notice-receiver.vue'),
+            meta: { title: '通知渠道', icon: 'MailOutlined', permission: 'monitoring:alert:notice' }
+          },
+          {
+            path: 'setting',
+            name: 'MonitoringAlertSetting',
+            component: () => import('@/views/monitoring/alert/setting.vue'),
+            meta: { title: '告警配置', icon: 'SettingOutlined', permission: 'monitoring:alert:setting' }
           }
         ]
       },
@@ -358,7 +371,18 @@ const router = createRouter({
 
 const routePermissionAliases: Record<string, string[]> = {
   'monitoring:list': ['monitoring:target'],
-  'monitoring:alert:detail': ['monitoring:alert:current', 'monitoring:alert:history', 'monitoring:alert:center']
+  'monitoring:alert:current': ['monitoring:alert:center'],
+  'monitoring:alert:my': ['monitoring:alert:center'],
+  'monitoring:alert:history': ['monitoring:alert:center'],
+  'monitoring:alert:setting': ['monitoring:alert:rule', 'monitoring:alert:center'],
+  'monitoring:alert:rule': ['monitoring:alert:setting', 'monitoring:alert:center'],
+  'monitoring:alert:integration': ['monitoring:alert:external', 'monitoring:alert:center'],
+  'monitoring:alert:external': ['monitoring:alert:integration', 'monitoring:alert:center'],
+  'monitoring:alert:group': ['monitoring:alert:center'],
+  'monitoring:alert:inhibit': ['monitoring:alert:center'],
+  'monitoring:alert:silence': ['monitoring:alert:center'],
+  'monitoring:alert:notice': ['monitoring:alert:center'],
+  'monitoring:alert:detail': ['monitoring:alert:current', 'monitoring:alert:my', 'monitoring:alert:history', 'monitoring:alert:center']
 }
 
 router.beforeEach(async (to, from, next) => {

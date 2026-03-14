@@ -358,20 +358,52 @@ def get_menu_tree():
                     ]
                 },
                 {
-                    'key': 'monitoring:alert',
-                    'title': '告警管理',
+                    'key': 'monitoring:dashboard',
+                    'title': '监控大盘',
                     'actions': [
-                        {'key': 'monitoring:alert:view', 'title': '查看'},
-                        {'key': 'monitoring:alert:create', 'title': '创建'},
-                        {'key': 'monitoring:alert:update', 'title': '编辑'},
-                        {'key': 'monitoring:alert:delete', 'title': '删除'}
+                        {'key': 'monitoring:dashboard:view', 'title': '查看'}
                     ]
                 },
+                {
+                    'key': 'monitoring:collector',
+                    'title': '采集器管理',
+                    'actions': [
+                        {'key': 'monitoring:collector:view', 'title': '查看'},
+                        {'key': 'monitoring:collector:delete', 'title': '删除'}
+                    ]
+                },
+                {
+                    'key': 'monitoring:labels',
+                    'title': '标签管理',
+                    'actions': [
+                        {'key': 'monitoring:labels:view', 'title': '查看'},
+                        {'key': 'monitoring:labels:create', 'title': '创建'},
+                        {'key': 'monitoring:labels:edit', 'title': '编辑'},
+                        {'key': 'monitoring:labels:delete', 'title': '删除'}
+                    ]
+                },
+                {
+                    'key': 'monitoring:status',
+                    'title': '状态页',
+                    'actions': [
+                        {'key': 'monitoring:status:view', 'title': '查看'},
+                        {'key': 'monitoring:status:create', 'title': '创建'},
+                        {'key': 'monitoring:status:edit', 'title': '编辑'},
+                        {'key': 'monitoring:status:delete', 'title': '删除'}
+                    ]
+                }
+            ]
+        },
+        {
+            'key': 'alert-center',
+            'title': '告警中心',
+            'children': [
                 {
                     'key': 'monitoring:alert:center',
                     'title': '告警中心',
                     'actions': [
                         {'key': 'monitoring:alert:current', 'title': '当前告警'},
+                        {'key': 'monitoring:alert:my', 'title': '我的告警'},
                         {'key': 'monitoring:alert:history', 'title': '告警历史'},
                         {'key': 'monitoring:alert:rule', 'title': '告警规则'},
                         {'key': 'monitoring:alert:claim', 'title': '认领'},
@@ -451,41 +483,6 @@ def get_menu_tree():
                         {'key': 'monitoring:alert:notice:edit', 'title': '编辑'},
                         {'key': 'monitoring:alert:notice:delete', 'title': '删除'},
                         {'key': 'monitoring:alert:notice:test', 'title': '测试'}
-                    ]
-                },
-                {
-                    'key': 'monitoring:dashboard',
-                    'title': '监控大盘',
-                    'actions': [
-                        {'key': 'monitoring:dashboard:view', 'title': '查看'}
-                    ]
-                },
-                {
-                    'key': 'monitoring:collector',
-                    'title': '采集器管理',
-                    'actions': [
-                        {'key': 'monitoring:collector:view', 'title': '查看'},
-                        {'key': 'monitoring:collector:delete', 'title': '删除'}
-                    ]
-                },
-                {
-                    'key': 'monitoring:labels',
-                    'title': '标签管理',
-                    'actions': [
-                        {'key': 'monitoring:labels:view', 'title': '查看'},
-                        {'key': 'monitoring:labels:create', 'title': '创建'},
-                        {'key': 'monitoring:labels:edit', 'title': '编辑'},
-                        {'key': 'monitoring:labels:delete', 'title': '删除'}
-                    ]
-                },
-                {
-                    'key': 'monitoring:status',
-                    'title': '状态页',
-                    'actions': [
-                        {'key': 'monitoring:status:view', 'title': '查看'},
-                        {'key': 'monitoring:status:create', 'title': '创建'},
-                        {'key': 'monitoring:status:edit', 'title': '编辑'},
-                        {'key': 'monitoring:status:delete', 'title': '删除'}
                     ]
                 }
             ]

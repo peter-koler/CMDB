@@ -26,6 +26,7 @@ type RuntimeAlertRule struct {
 	Annotations map[string]any
 	NoticeRule  int64
 	NoticeRules []int64
+	Escalation  string
 }
 
 type RuntimeAlertGroup struct {
@@ -90,6 +91,16 @@ type RuntimeAlertEvent struct {
 	ElapsedMs   int64
 }
 
+type RuntimeSingleAlertSnapshot struct {
+	ID           int64
+	Status       string
+	Labels       map[string]string
+	Annotations  map[string]string
+	Content      string
+	StartAtMs    int64
+	TriggerTimes int
+}
+
 type AlertRuntimeStore struct {
 	db *sql.DB
 }
@@ -113,12 +124,18 @@ func (s *AlertRuntimeStore) LoadEnabledRealtimeMetricRules() ([]RuntimeAlertRule
 	if s == nil || s.db == nil {
 		return nil, nil
 	}
-	rows, err := s.db.Query(`
-SELECT id, name, type, expr, template, period, times, enabled, labels_json, annotations_json, notice_rule_id, notice_rule_ids_json
+	hasEscalation := s.hasTableColumn("alert_defines", "escalation_config")
+	query := `
+SELECT id, name, type, expr, template, period, times, enabled, labels_json, annotations_json, notice_rule_id, notice_rule_ids_json`
+	if hasEscalation {
+		query += `, escalation_config`
+	}
+	query += `
 FROM alert_defines
 WHERE enabled = 1 AND type = 'realtime_metric'
 ORDER BY updated_at DESC, id DESC
-`)
+`
+	rows, err := s.db.Query(query)
 	if err != nil {
 		return nil, err
 	}
@@ -136,8 +153,14 @@ ORDER BY updated_at DESC, id DESC
 			annotationsJSON string
 			noticeRuleID    sql.NullInt64
 			noticeRuleIDs   sql.NullString
+			escalation      sql.NullString
 		)
-		if err := rows.Scan(&r.ID, &r.Name, &r.Type, &r.Expr, &template, &period, &times, &enabled, &labelsJSON, &annotationsJSON, &noticeRuleID, &noticeRuleIDs); err != nil {
+		if hasEscalation {
+			err = rows.Scan(&r.ID, &r.Name, &r.Type, &r.Expr, &template, &period, &times, &enabled, &labelsJSON, &annotationsJSON, &noticeRuleID, &noticeRuleIDs, &escalation)
+		} else {
+			err = rows.Scan(&r.ID, &r.Name, &r.Type, &r.Expr, &template, &period, &times, &enabled, &labelsJSON, &annotationsJSON, &noticeRuleID, &noticeRuleIDs)
+		}
+		if err != nil {
 			return nil, err
 		}
 		if template.Valid {
@@ -158,6 +181,9 @@ ORDER BY updated_at DESC, id DESC
 		}
 		if len(r.NoticeRules) == 0 && r.NoticeRule > 0 {
 			r.NoticeRules = []int64{r.NoticeRule}
+		}
+		if escalation.Valid {
+			r.Escalation = strings.TrimSpace(escalation.String)
 		}
 		_ = json.Unmarshal([]byte(defaultJSON(labelsJSON)), &r.Labels)
 		_ = json.Unmarshal([]byte(defaultJSON(annotationsJSON)), &r.Annotations)
@@ -173,12 +199,18 @@ func (s *AlertRuntimeStore) LoadEnabledPeriodicMetricRules() ([]RuntimeAlertRule
 	if s == nil || s.db == nil {
 		return nil, nil
 	}
-	rows, err := s.db.Query(`
-SELECT id, name, type, expr, template, period, times, enabled, labels_json, annotations_json, notice_rule_id, notice_rule_ids_json
+	hasEscalation := s.hasTableColumn("alert_defines", "escalation_config")
+	query := `
+SELECT id, name, type, expr, template, period, times, enabled, labels_json, annotations_json, notice_rule_id, notice_rule_ids_json`
+	if hasEscalation {
+		query += `, escalation_config`
+	}
+	query += `
 FROM alert_defines
 WHERE enabled = 1 AND type = 'periodic_metric'
 ORDER BY updated_at DESC, id DESC
-`)
+`
+	rows, err := s.db.Query(query)
 	if err != nil {
 		return nil, err
 	}
@@ -196,8 +228,14 @@ ORDER BY updated_at DESC, id DESC
 			annotationsJSON string
 			noticeRuleID    sql.NullInt64
 			noticeRuleIDs   sql.NullString
+			escalation      sql.NullString
 		)
-		if err := rows.Scan(&r.ID, &r.Name, &r.Type, &r.Expr, &template, &period, &times, &enabled, &labelsJSON, &annotationsJSON, &noticeRuleID, &noticeRuleIDs); err != nil {
+		if hasEscalation {
+			err = rows.Scan(&r.ID, &r.Name, &r.Type, &r.Expr, &template, &period, &times, &enabled, &labelsJSON, &annotationsJSON, &noticeRuleID, &noticeRuleIDs, &escalation)
+		} else {
+			err = rows.Scan(&r.ID, &r.Name, &r.Type, &r.Expr, &template, &period, &times, &enabled, &labelsJSON, &annotationsJSON, &noticeRuleID, &noticeRuleIDs)
+		}
+		if err != nil {
 			return nil, err
 		}
 		if template.Valid {
@@ -218,6 +256,9 @@ ORDER BY updated_at DESC, id DESC
 		}
 		if len(r.NoticeRules) == 0 && r.NoticeRule > 0 {
 			r.NoticeRules = []int64{r.NoticeRule}
+		}
+		if escalation.Valid {
+			r.Escalation = strings.TrimSpace(escalation.String)
 		}
 		_ = json.Unmarshal([]byte(defaultJSON(labelsJSON)), &r.Labels)
 		_ = json.Unmarshal([]byte(defaultJSON(annotationsJSON)), &r.Annotations)
@@ -516,6 +557,98 @@ LIMIT 1
 		return 0, err
 	}
 	return id, nil
+}
+
+func (s *AlertRuntimeStore) LoadSingleAlertSnapshot(ruleID int64, monitorID int64) (RuntimeSingleAlertSnapshot, bool, error) {
+	if s == nil || s.db == nil {
+		return RuntimeSingleAlertSnapshot{}, false, nil
+	}
+	fingerprint := alertFingerprint(ruleID, monitorID)
+	var (
+		snap            RuntimeSingleAlertSnapshot
+		labelsJSON      string
+		annotationsJSON string
+		content         sql.NullString
+		startAt         sql.NullInt64
+	)
+	row := s.db.QueryRow(`
+SELECT id, status, labels_json, annotations_json, content, start_at, trigger_times
+FROM single_alerts
+WHERE fingerprint = ?
+LIMIT 1
+`, fingerprint)
+	if err := row.Scan(&snap.ID, &snap.Status, &labelsJSON, &annotationsJSON, &content, &startAt, &snap.TriggerTimes); err != nil {
+		if err == sql.ErrNoRows {
+			return RuntimeSingleAlertSnapshot{}, false, nil
+		}
+		return RuntimeSingleAlertSnapshot{}, false, err
+	}
+	snap.Status = strings.TrimSpace(strings.ToLower(snap.Status))
+	snap.Labels = parseStringMapJSON(labelsJSON)
+	snap.Annotations = parseStringMapJSON(annotationsJSON)
+	snap.Content = strings.TrimSpace(content.String)
+	if startAt.Valid {
+		snap.StartAtMs = startAt.Int64
+	}
+	if snap.TriggerTimes <= 0 {
+		snap.TriggerTimes = 1
+	}
+	return snap, true, nil
+}
+
+func (s *AlertRuntimeStore) AddEscalationHistory(alertID int64, level int, content string, createdAt time.Time) error {
+	if s == nil || s.db == nil || alertID <= 0 {
+		return nil
+	}
+	if createdAt.IsZero() {
+		createdAt = time.Now()
+	}
+	var (
+		labelsJSON      string
+		annotationsJSON string
+		triggerTimes    int
+		startAt         sql.NullInt64
+	)
+	row := s.db.QueryRow(`
+SELECT labels_json, annotations_json, trigger_times, start_at
+FROM single_alerts
+WHERE id = ?
+LIMIT 1
+`, alertID)
+	if err := row.Scan(&labelsJSON, &annotationsJSON, &triggerTimes, &startAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil
+		}
+		return err
+	}
+	if triggerTimes <= 0 {
+		triggerTimes = 1
+	}
+	startMs := createdAt.UnixMilli()
+	if startMs <= 0 && startAt.Valid && startAt.Int64 > 0 {
+		startMs = startAt.Int64
+	}
+
+	// Attach explicit escalation action markers for stable timeline filtering.
+	annotations := map[string]any{}
+	_ = json.Unmarshal([]byte(defaultJSON(annotationsJSON)), &annotations)
+	if annotations == nil {
+		annotations = map[string]any{}
+	}
+	annotations["action"] = "escalated"
+	annotations["escalation_level"] = level
+	annotations["escalated_at"] = createdAt.UTC().Format(time.RFC3339Nano)
+	annotationsJSONBytes, _ := json.Marshal(annotations)
+
+	if _, err := s.db.Exec(`
+INSERT INTO alert_history
+  (alert_id, alert_type, labels_json, annotations_json, content, status, trigger_times, start_at, end_at, duration_ms, created_at)
+VALUES
+  (?, 'single', ?, ?, ?, 'firing', ?, ?, NULL, NULL, ?)
+`, alertID, defaultJSON(labelsJSON), defaultJSON(string(annotationsJSONBytes)), strings.TrimSpace(content), triggerTimes, startMs, createdAt.UTC().Format(time.RFC3339Nano)); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *AlertRuntimeStore) SaveAlertNotification(
@@ -1258,4 +1391,48 @@ func asStringAny(v any) string {
 
 func alertFingerprint(ruleID int64, monitorID int64) string {
 	return fmt.Sprintf("manager:%d:%d", ruleID, monitorID)
+}
+
+func (s *AlertRuntimeStore) hasTableColumn(table, column string) bool {
+	if s == nil || s.db == nil {
+		return false
+	}
+	rows, err := s.db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		return false
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			cid       int
+			name      string
+			typ       string
+			notnull   int
+			dfltValue sql.NullString
+			pk        int
+		)
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dfltValue, &pk); err != nil {
+			return false
+		}
+		if strings.EqualFold(strings.TrimSpace(name), strings.TrimSpace(column)) {
+			return true
+		}
+	}
+	return false
+}
+
+func parseStringMapJSON(raw string) map[string]string {
+	out := map[string]string{}
+	parsed := map[string]any{}
+	if err := json.Unmarshal([]byte(defaultJSON(raw)), &parsed); err != nil {
+		return out
+	}
+	for k, v := range parsed {
+		key := strings.TrimSpace(k)
+		if key == "" {
+			continue
+		}
+		out[key] = strings.TrimSpace(asStringAny(v))
+	}
+	return out
 }

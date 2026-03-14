@@ -399,7 +399,7 @@ const onReceiverChange = (value: number) => {
 
 const goToReceiverConfig = () => {
   modalOpen.value = false
-  router.push('/monitoring/alert/notice-receiver')
+  router.push('/alert-center/notice-receiver')
 }
 
 const normalizeList = (payload: any) => {

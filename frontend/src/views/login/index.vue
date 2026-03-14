@@ -202,7 +202,7 @@ import {
   SafetyOutlined
 } from '@ant-design/icons-vue'
 import { useUserStore } from '@/stores/user'
-import { login, getCaptcha } from '@/api/auth'
+import { getCaptcha } from '@/api/auth'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -282,11 +282,8 @@ const handleLockModalOk = () => {
 const handleLogin = async () => {
   loading.value = true
   try {
-    const res = await login(formState.username, formState.password, formState.captcha)
-    if (res.code === 200) {
-      userStore.setToken(res.data.access_token, res.data.refresh_token)
-      userStore.userInfo = res.data.user
-
+    const success = await userStore.loginAction(formState.username, formState.password, formState.captcha)
+    if (success) {
       if (formState.remember) {
         localStorage.setItem('rememberMe', 'true')
         localStorage.setItem('savedUsername', formState.username)
@@ -296,7 +293,9 @@ const handleLogin = async () => {
       }
       message.success('登录成功')
       router.push('/')
+      return
     }
+    message.error('登录失败')
   } catch (error: any) {
     const response = error.response
     if (response?.status === 400) {

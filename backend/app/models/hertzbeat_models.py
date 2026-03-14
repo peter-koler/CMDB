@@ -208,6 +208,7 @@ class AlertDefine(db.Model):
     notice_rule_id = db.Column(db.Integer, db.ForeignKey("notice_rules.id"), nullable=True)
     notice_rule = db.relationship("NoticeRule", backref="alert_defines", lazy="joined")
     notice_rule_ids_json = db.Column(db.Text, nullable=False, default="[]")
+    escalation_config = db.Column(db.Text, nullable=False, default="")
     
     creator = db.Column(db.String(100), nullable=True)
     modifier = db.Column(db.String(100), nullable=True)

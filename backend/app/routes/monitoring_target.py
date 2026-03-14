@@ -460,6 +460,12 @@ def _extract_alert_item(
     note = annotations.get("note")
     app = str(labels.get("app") or "")
     instance = str(labels.get("instance") or labels.get("target") or "")
+    action = str(annotations.get("action") or labels.get("action") or "").strip().lower() or None
+    escalation_level = annotations.get("escalation_level", labels.get("escalation_level"))
+    try:
+        escalation_level = int(escalation_level) if escalation_level is not None else None
+    except (TypeError, ValueError):
+        escalation_level = None
     triggered_ms = start_at or (int(created_at.replace(tzinfo=timezone.utc).timestamp() * 1000) if created_at else None)
     recovered_ms = end_at
     duration_seconds = 0
@@ -493,6 +499,7 @@ def _extract_alert_item(
         "id": row_id,
         "level": level,
         "name": str(name),
+        "content": str(content or ""),
         "status": "open" if status == "firing" else "closed",
         "monitor_name": str(monitor_name),
         "monitor_id": monitor_id,
@@ -507,6 +514,8 @@ def _extract_alert_item(
         "duration_seconds": duration_seconds,
         "assignee": assignee,
         "note": note,
+        "action": action,
+        "escalation_level": escalation_level,
         "source_type": source_type,
         "source_name": source_name,
     }
@@ -689,6 +698,7 @@ def _filter_alert_items(items: list[dict]) -> list[dict]:
     app = (request.args.get("app") or "").strip().lower()
     instance = (request.args.get("instance") or "").strip().lower()
     metric = (request.args.get("metric") or "").strip().lower()
+    assignee = (request.args.get("assignee") or "").strip().lower()
     rule_id = (request.args.get("rule_id") or "").strip()
     start_ms = _parse_rfc3339_to_ms(request.args.get("start_at"))
     end_ms = _parse_rfc3339_to_ms(request.args.get("end_at"))
@@ -722,12 +732,17 @@ def _filter_alert_items(items: list[dict]) -> list[dict]:
             item_rule_id = str(item.get("rule_id") or "").strip()
             if item_rule_id != rule_id:
                 continue
+        if assignee:
+            item_assignee = str(item.get("assignee") or "").strip().lower()
+            if assignee not in item_assignee:
+                continue
         if q:
             hay = " ".join(
                 [
                     str(item.get("name") or ""),
                     str(item.get("monitor_name") or ""),
                     str(item.get("metric") or ""),
+                    str(item.get("assignee") or ""),
                     str(item.get("note") or ""),
                 ]
             ).lower()
@@ -772,6 +787,13 @@ def _rule_from_model(row: AlertDefine) -> dict:
     auto_recover = _to_bool(labels.get("auto_recover"), True)
     recover_times = max(_to_int(labels.get("recover_times"), 2), 1)
     notify_on_recovered = _to_bool(labels.get("notify_on_recovered"), True)
+    escalation_config = None
+    raw_escalation = str(getattr(row, "escalation_config", "") or "").strip()
+    if raw_escalation:
+        try:
+            escalation_config = json.loads(raw_escalation)
+        except (TypeError, ValueError):
+            escalation_config = None
     return {
         "id": row.id,
         "name": row.name,
@@ -796,6 +818,7 @@ def _rule_from_model(row: AlertDefine) -> dict:
         "auto_recover": auto_recover,
         "recover_times": recover_times,
         "notify_on_recovered": notify_on_recovered,
+        "escalation_config": escalation_config,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
     }
 
@@ -856,6 +879,71 @@ def _extract_notice_rule_ids(payload: dict) -> tuple[list[int] | None, str | Non
         if val not in ids:
             ids.append(val)
     return ids, None
+
+
+def _normalize_escalation_config(raw) -> tuple[str | None, str | None]:
+    if raw is None or raw == "":
+        return "", None
+
+    payload = raw
+    if isinstance(raw, str):
+        text = raw.strip()
+        if not text:
+            return "", None
+        try:
+            payload = json.loads(text)
+        except (TypeError, ValueError):
+            return None, "escalation_config 必须是合法 JSON"
+
+    enabled = True
+    levels_raw = payload
+    if isinstance(payload, dict):
+        enabled = bool(payload.get("enabled", True))
+        levels_raw = payload.get("levels", [])
+    if not isinstance(levels_raw, list):
+        return None, "escalation_config.levels 必须是数组"
+
+    levels: list[dict] = []
+    for idx, item in enumerate(levels_raw):
+        if not isinstance(item, dict):
+            return None, f"escalation_config.levels[{idx}] 必须是对象"
+        try:
+            delay_seconds = int(item.get("delay_seconds") or item.get("wait_seconds") or 0)
+        except (TypeError, ValueError):
+            return None, f"escalation_config.levels[{idx}].delay_seconds 必须是整数"
+        if delay_seconds <= 0:
+            return None, f"escalation_config.levels[{idx}].delay_seconds 必须大于0"
+        notice_rule_ids: list[int] = []
+        raw_ids = item.get("notice_rule_ids")
+        if raw_ids is None and "notice_rule_id" in item:
+            raw_ids = [item.get("notice_rule_id")]
+        if raw_ids is None:
+            raw_ids = []
+        if not isinstance(raw_ids, list):
+            raw_ids = [raw_ids]
+        for v in raw_ids:
+            if v in (None, ""):
+                continue
+            try:
+                notice_id = int(v)
+            except (TypeError, ValueError):
+                return None, f"escalation_config.levels[{idx}].notice_rule_ids 必须是整数数组"
+            if notice_id > 0 and notice_id not in notice_rule_ids:
+                notice_rule_ids.append(notice_id)
+        levels.append(
+            {
+                "level": max(int(item.get("level") or (idx + 1)), 1),
+                "delay_seconds": delay_seconds,
+                "notice_rule_ids": notice_rule_ids,
+                "title_template": str(item.get("title_template") or "").strip(),
+                "content_template": str(item.get("content_template") or item.get("template") or "").strip(),
+            }
+        )
+
+    if enabled and not levels:
+        return None, "escalation_config 启用时 levels 不能为空"
+    normalized = {"enabled": enabled, "levels": levels}
+    return _json_dump(normalized), None
 
 
 def _validate_notice_rule_ids(ids: list[int]) -> str | None:
@@ -1255,6 +1343,10 @@ def _apply_default_rules_for_monitor(monitor_id: int, monitor: dict | None = Non
             except (TypeError, ValueError):
                 notice_rule_ids = []
         notice_rule_id = notice_rule_ids[0] if notice_rule_ids else None
+        escalation_config_raw = ""
+        if "escalation_config" in item:
+            escalation_config_raw, _ = _normalize_escalation_config(item.get("escalation_config"))
+            escalation_config_raw = escalation_config_raw or ""
 
         labels = {
             "monitor_id": monitor_id,
@@ -1286,6 +1378,7 @@ def _apply_default_rules_for_monitor(monitor_id: int, monitor: dict | None = Non
                 enabled=bool(item["enabled"]),
                 notice_rule_id=notice_rule_id,
                 notice_rule_ids_json=_json_dump(notice_rule_ids),
+                escalation_config=escalation_config_raw,
                 creator="python-web",
                 modifier="python-web",
             )
@@ -1302,6 +1395,7 @@ def _apply_default_rules_for_monitor(monitor_id: int, monitor: dict | None = Non
             row.enabled = bool(item["enabled"])
             row.notice_rule_id = notice_rule_id
             row.notice_rule_ids_json = _json_dump(notice_rule_ids)
+            row.escalation_config = escalation_config_raw
             row.modifier = "python-web"
             row.updated_at = _now_naive_utc()
             updated += 1
@@ -1716,6 +1810,9 @@ def create_target_alert_rule(monitor_id: int):
         if validate_msg:
             return jsonify({"code": 400, "message": validate_msg}), 400
     notice_rule_id = notice_rule_ids[0] if notice_rule_ids else None
+    escalation_config_raw, escalation_err = _normalize_escalation_config(payload.get("escalation_config"))
+    if escalation_err:
+        return jsonify({"code": 400, "message": escalation_err}), 400
 
     labels = {
         "monitor_id": monitor_id,
@@ -1761,6 +1858,7 @@ def create_target_alert_rule(monitor_id: int):
         enabled=bool(payload.get("enabled", True)),
         notice_rule_id=notice_rule_id,
         notice_rule_ids_json=_json_dump(notice_rule_ids or []),
+        escalation_config=escalation_config_raw or "",
         creator=(payload.get("creator") or "python-web"),
         modifier=(payload.get("modifier") or "python-web"),
     )
@@ -1862,6 +1960,11 @@ def update_target_alert_rule(monitor_id: int, rule_id: int):
             return jsonify({"code": 400, "message": validate_msg}), 400
         row.notice_rule_id = notice_rule_ids[0] if notice_rule_ids else None
         row.notice_rule_ids_json = _json_dump(notice_rule_ids or [])
+    if "escalation_config" in payload:
+        escalation_config_raw, escalation_err = _normalize_escalation_config(payload.get("escalation_config"))
+        if escalation_err:
+            return jsonify({"code": 400, "message": escalation_err}), 400
+        row.escalation_config = escalation_config_raw or ""
 
     row.updated_at = _now_naive_utc()
     db.session.commit()
@@ -2042,7 +2145,7 @@ def reload_target_alert_rules(monitor_id: int):
 
 @monitoring_target_bp.route("/alerts", methods=["GET"])
 @jwt_required()
-@require_any_permission("monitoring:alert", "monitoring:alert:current")
+@require_any_permission("monitoring:alert", "monitoring:alert:current", "monitoring:alert:my")
 def list_alerts():
     scope = (request.args.get("scope") or "current").strip().lower()
     if scope == "history":
@@ -2052,7 +2155,7 @@ def list_alerts():
 
 @monitoring_target_bp.route("/alerts/current", methods=["GET"])
 @jwt_required()
-@require_any_permission("monitoring:alert:current", "monitoring:alert:center")
+@require_any_permission("monitoring:alert:current", "monitoring:alert:my", "monitoring:alert:center")
 def list_current_alerts():
     status = (request.args.get("status") or "").strip().lower()
     query = SingleAlert.query
@@ -2106,7 +2209,7 @@ def list_history_alerts():
 
 @monitoring_target_bp.route("/alerts/<int:alert_id>", methods=["GET"])
 @jwt_required()
-@require_any_permission("monitoring:alert:current", "monitoring:alert:history", "monitoring:alert:center")
+@require_any_permission("monitoring:alert:current", "monitoring:alert:my", "monitoring:alert:history", "monitoring:alert:center")
 def get_alert_detail(alert_id: int):
     row = SingleAlert.query.get(alert_id)
     if row:
@@ -2151,6 +2254,7 @@ def get_alert_detail(alert_id: int):
 @jwt_required()
 @require_any_permission(
     "monitoring:alert:current",
+    "monitoring:alert:my",
     "monitoring:alert:history",
     "monitoring:alert:center",
     "monitoring:alert:notice",
@@ -2211,7 +2315,7 @@ def list_alert_notifications(alert_id: int):
 
 @monitoring_target_bp.route("/alerts/<int:alert_id>/rule", methods=["GET"])
 @jwt_required()
-@require_any_permission("monitoring:alert:current", "monitoring:alert:history", "monitoring:alert:center")
+@require_any_permission("monitoring:alert:current", "monitoring:alert:my", "monitoring:alert:history", "monitoring:alert:center")
 def get_alert_rule(alert_id: int):
     row = SingleAlert.query.get(alert_id)
     scope = "current"
@@ -2280,7 +2384,7 @@ def get_alert_rule(alert_id: int):
 
 @monitoring_target_bp.route("/alerts/<int:alert_id>/acknowledge", methods=["POST"])
 @jwt_required()
-@require_any_permission("monitoring:alert:update", "monitoring:alert:center", "monitoring:alert:current")
+@require_any_permission("monitoring:alert:update", "monitoring:alert:center", "monitoring:alert:current", "monitoring:alert:my")
 def acknowledge_alert(alert_id: int):
     payload = request.get_json() or {}
     row = SingleAlert.query.get(alert_id)
@@ -2321,7 +2425,7 @@ def acknowledge_alert(alert_id: int):
 
 @monitoring_target_bp.route("/alerts/<int:alert_id>/claim", methods=["POST"])
 @jwt_required()
-@require_any_permission("monitoring:alert:current", "monitoring:alert:center", "monitoring:alert:claim")
+@require_any_permission("monitoring:alert:current", "monitoring:alert:my", "monitoring:alert:center", "monitoring:alert:claim")
 def claim_alert(alert_id: int):
     payload = request.get_json() or {}
     row = SingleAlert.query.get(alert_id)
@@ -2361,7 +2465,7 @@ def claim_alert(alert_id: int):
 
 @monitoring_target_bp.route("/alerts/<int:alert_id>/close", methods=["POST"])
 @jwt_required()
-@require_any_permission("monitoring:alert:current", "monitoring:alert:center", "monitoring:alert:close")
+@require_any_permission("monitoring:alert:current", "monitoring:alert:my", "monitoring:alert:center", "monitoring:alert:close")
 def close_alert(alert_id: int):
     row = SingleAlert.query.get(alert_id)
     if not row:

@@ -38,12 +38,16 @@ export const useUserStore = defineStore('user', () => {
     stopTokenExpirationCheck()
   }
 
-  const loginAction = async (username: string, password: string) => {
-    const res = await login(username, password)
+  const loginAction = async (username: string, password: string, captcha?: string) => {
+    const res = await login(username, password, captcha)
     if (res.code === 200) {
       setToken(res.data.access_token, res.data.refresh_token)
-      userInfo.value = res.data.user
-      return true
+      // 登录接口返回的 user 字段可能不包含完整权限，强制拉取当前用户信息
+      const ok = await getUserInfo()
+      if (ok) return true
+      // 若拉取失败，回退使用登录响应中的用户信息，至少保证基础展示
+      userInfo.value = res.data.user || null
+      return !!userInfo.value
     }
     return false
   }

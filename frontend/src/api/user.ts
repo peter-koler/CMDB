@@ -16,6 +16,8 @@ export interface User {
   email?: string
   phone?: string
   department?: string
+  department_name?: string
+  departments?: Array<{ id: number; name: string }>
   role: string
   status: string
   created_at: string

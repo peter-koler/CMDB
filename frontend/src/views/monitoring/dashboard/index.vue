@@ -555,7 +555,7 @@ async function loadDashboard() {
 }
 
 function goToAlertCenter() {
-  router.push('/monitoring/alert/current')
+  router.push('/alert-center/current')
 }
 
 watch(refreshSeconds, () => {

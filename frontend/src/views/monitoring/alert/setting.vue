@@ -331,6 +331,60 @@
           </a-col>
         </a-row>
 
+        <a-divider orientation="left">告警升级</a-divider>
+        <a-form-item label="启用告警升级" extra="告警持续未处理时，按阶梯延时升级通知">
+          <a-switch v-model:checked="formState.escalation_enabled" />
+        </a-form-item>
+        <a-space v-if="formState.escalation_enabled" direction="vertical" style="width: 100%" :size="8">
+          <a-card
+            v-for="(level, idx) in escalationLevels"
+            :key="idx"
+            size="small"
+            :title="`Level ${idx + 1}`"
+          >
+            <a-row :gutter="12">
+              <a-col :span="8">
+                <a-form-item label="等待时间(秒)">
+                  <a-input-number v-model:value="level.delay_seconds" :min="1" style="width: 100%" />
+                </a-form-item>
+              </a-col>
+              <a-col :span="16">
+                <a-form-item label="升级通知规则">
+                  <a-select
+                    v-model:value="level.notice_rule_ids"
+                    mode="multiple"
+                    allow-clear
+                    placeholder="不填则回退本规则通知配置"
+                  >
+                    <a-select-option v-for="rule in noticeRules" :key="rule.id" :value="Number(rule.id)">
+                      {{ rule.name }}
+                    </a-select-option>
+                  </a-select>
+                </a-form-item>
+              </a-col>
+            </a-row>
+            <a-row :gutter="12">
+              <a-col :span="24">
+                <a-form-item label="升级标题模板">
+                  <a-input v-model:value="level.title_template" placeholder="示例: [Level {{level}}] {{rule_name}}" />
+                </a-form-item>
+              </a-col>
+            </a-row>
+            <a-row :gutter="12">
+              <a-col :span="24">
+                <a-form-item label="升级内容模板">
+                  <a-textarea v-model:value="level.content_template" :rows="2" placeholder="示例: 告警 {{rule_name}} 在 {{instance}} 持续未恢复" />
+                </a-form-item>
+              </a-col>
+            </a-row>
+            <a-button danger type="link" @click="removeEscalationLevel(idx)">删除该级</a-button>
+          </a-card>
+          <a-button type="dashed" block @click="addEscalationLevel">
+            <PlusOutlined />
+            新增升级级别
+          </a-button>
+        </a-space>
+
         <!-- 消息模板 -->
         <a-divider orientation="left">消息模板</a-divider>
         <a-form-item label="告警标题模板" name="title_template" extra="支持变量: {{$severity}}, {{$rule_name}}, {{$labels.app}}, {{$labels.instance}}">
@@ -468,9 +522,18 @@ const formState = reactive<Partial<AlertRule>>({
   auto_recover: true,
   recover_times: 2,
   notify_on_recovered: true,
+  escalation_enabled: false,
   notice_rule_id: undefined,
   notice_rule_ids: []
 })
+
+const escalationLevels = ref<Array<{
+  level: number
+  delay_seconds: number
+  notice_rule_ids: number[]
+  title_template: string
+  content_template: string
+}>>([])
 
 // 标签列表
 const tagList = ref<{ key: string; value: string }[]>([])
@@ -613,7 +676,7 @@ const loadNoticeRules = async () => {
 
 // 跳转到通知规则配置
 const goToNoticeConfig = () => {
-  window.open('/monitoring/alert/notice', '_blank')
+  window.open('/alert-center/notice', '_blank')
 }
 
 // 加载数据
@@ -690,8 +753,10 @@ const resetForm = () => {
   formState.auto_recover = true
   formState.recover_times = 2
   formState.notify_on_recovered = true
+  formState.escalation_enabled = false
   formState.notice_rule_id = undefined
   formState.notice_rule_ids = []
+  escalationLevels.value = []
   tagList.value = []
   formUseCustomExpr.value = false
 }
@@ -720,6 +785,7 @@ const handleEdit = (record: AlertRule) => {
     auto_recover: (record as any).auto_recover !== false,
     recover_times: Math.max(Number((record as any).recover_times || 2), 1),
     notify_on_recovered: (record as any).notify_on_recovered !== false,
+    escalation_enabled: Boolean((record as any).escalation_config?.enabled),
     notice_rule_id: (record as any).notice_rule_id,
     notice_rule_ids: (record as any).notice_rule_ids && (record as any).notice_rule_ids.length
         ? [...(record as any).notice_rule_ids]
@@ -727,6 +793,16 @@ const handleEdit = (record: AlertRule) => {
           ? [(record as any).notice_rule_id]
           : []
   })
+  escalationLevels.value = Array.isArray((record as any).escalation_config?.levels)
+    ? ((record as any).escalation_config.levels as any[])
+      .map((item: any, idx: number) => ({
+        level: Number(item?.level || idx + 1),
+        delay_seconds: Math.max(Number(item?.delay_seconds || 300), 1),
+        notice_rule_ids: Array.isArray(item?.notice_rule_ids) ? item.notice_rule_ids.map((v: any) => Number(v)).filter((v: number) => v > 0) : [],
+        title_template: String(item?.title_template || ''),
+        content_template: String(item?.content_template || '')
+      }))
+    : []
   // 转换标签列表
   tagList.value = Object.entries(((record as any).labels || {}) as Record<string, string>)
     .filter(([key]) => !['severity', 'auto_recover', 'recover_times', 'notify_on_recovered'].includes(String(key)))
@@ -742,6 +818,10 @@ const handleEdit = (record: AlertRule) => {
 const handleSave = async () => {
   try {
     await formRef.value?.validate()
+    if (formState.escalation_enabled && !escalationLevels.value.length) {
+      message.warning('已启用告警升级，请至少配置一个升级级别')
+      return
+    }
     saving.value = true
 
     // 构建标签
@@ -778,6 +858,18 @@ const handleSave = async () => {
         ...(formState.annotations || {}),
         ...(String(formState.title_template || '').trim() ? { title_template: String(formState.title_template || '').trim() } : {})
       },
+      escalation_config: (formState as any).escalation_enabled
+        ? {
+          enabled: true,
+          levels: escalationLevels.value.map((item, idx) => ({
+            level: idx + 1,
+            delay_seconds: Math.max(Number(item.delay_seconds || 0), 1),
+            notice_rule_ids: Array.isArray(item.notice_rule_ids) ? item.notice_rule_ids.filter((id) => Number(id) > 0).map((id) => Number(id)) : [],
+            title_template: String(item.title_template || '').trim(),
+            content_template: String(item.content_template || '').trim()
+          }))
+        }
+        : { enabled: false, levels: [] as any[] },
       title_template: String(formState.title_template || '').trim(),
       auto_recover: formState.auto_recover !== false,
       recover_times: Math.max(Number(formState.recover_times || 2), 1),
@@ -895,6 +987,21 @@ const addTag = () => {
 // 移除标签
 const removeTag = (index: number) => {
   tagList.value.splice(index, 1)
+}
+
+const addEscalationLevel = () => {
+  escalationLevels.value.push({
+    level: escalationLevels.value.length + 1,
+    delay_seconds: 300,
+    notice_rule_ids: [],
+    title_template: '',
+    content_template: ''
+  })
+}
+
+const removeEscalationLevel = (index: number) => {
+  escalationLevels.value.splice(index, 1)
+  escalationLevels.value = escalationLevels.value.map((item, idx) => ({ ...item, level: idx + 1 }))
 }
 
 onMounted(() => {
