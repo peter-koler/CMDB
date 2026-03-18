@@ -43,6 +43,7 @@ from app.models.hertzbeat_models import (
     GroupAlert,
     AlertHistory,
     AlertNotification,
+    AlertTimelineEvent,
     # 数据仓库
     MetricsHistory,
 )
@@ -106,6 +107,7 @@ __all__ = [
     "GroupAlert",
     "AlertHistory",
     "AlertNotification",
+    "AlertTimelineEvent",
     "MetricsHistory",
     "Notification",
     "NotificationRecipient",

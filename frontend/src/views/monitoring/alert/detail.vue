@@ -112,6 +112,29 @@
           </a-table>
         </a-tab-pane>
 
+        <a-tab-pane key="process" tab="处理历史">
+          <a-table
+            :loading="processLoading"
+            :data-source="processEvents"
+            :pagination="processPagination"
+            row-key="id"
+            @change="handleProcessTableChange"
+          >
+            <a-table-column title="阶段" data-index="event_type" key="event_type" width="150">
+              <template #default="{ record }">
+                <a-tag :color="timelineTypeColor(record.event_type)">{{ timelineTypeText(record.event_type) }}</a-tag>
+              </template>
+            </a-table-column>
+            <a-table-column title="事件" data-index="title" key="title" width="180" />
+            <a-table-column title="详情" data-index="content" key="content" />
+            <a-table-column title="处理人" data-index="operator" key="operator" width="140" />
+            <a-table-column title="发生时间" data-index="happened_at" key="happened_at" width="180">
+              <template #default="{ record }">{{ formatTime(record.happened_at) }}</template>
+            </a-table-column>
+          </a-table>
+          <a-empty v-if="!processLoading && !processEvents.length" description="暂无处理历史" />
+        </a-tab-pane>
+
         <a-tab-pane key="escalation" tab="升级记录">
           <a-table
             :loading="escalationLoading"
@@ -267,11 +290,14 @@ import {
   getAlertHistory,
   getAlertNotifications,
   getAlertRuleByAlertId,
+  getAlertTimeline,
+  getCurrentAlerts,
   getTargetMetricSeries,
   getMonitoringTarget,
   type AlertItem,
   type AlertNotificationRecord,
   type AlertRule,
+  type AlertTimelineEvent,
   type MonitoringTarget
 } from '@/api/monitoring'
 import { fetchTrendSeries, formatMetricValue } from '@/composables/useMonitorMetrics'
@@ -287,7 +313,7 @@ const route = useRoute()
 const userStore = useUserStore()
 const alertDetail = ref<AlertItem | null>(null)
 const monitorDetail = ref<MonitoringTarget | null>(null)
-const activeTab = ref<'metrics' | 'related' | 'history' | 'escalation' | 'topology' | 'rules' | 'notices'>('metrics')
+const activeTab = ref<'metrics' | 'related' | 'history' | 'process' | 'escalation' | 'topology' | 'rules' | 'notices'>('metrics')
 
 const canClaim = computed(() =>
   userStore.hasPermission('monitoring:alert:claim') ||
@@ -309,6 +335,9 @@ const relatedPagination = reactive({ current: 1, pageSize: 10, total: 0 })
 const historyAlerts = ref<AlertItem[]>([])
 const historyLoading = ref(false)
 const historyPagination = reactive({ current: 1, pageSize: 10, total: 0 })
+const processEvents = ref<AlertTimelineEvent[]>([])
+const processLoading = ref(false)
+const processPagination = reactive({ current: 1, pageSize: 10, total: 0 })
 const escalationRecords = ref<AlertItem[]>([])
 const escalationLoading = ref(false)
 const escalationPagination = reactive({ current: 1, pageSize: 10, total: 0 })
@@ -404,6 +433,34 @@ const notificationChannelText = (notifyType?: string) => {
   if (key === 'dingtalk') return '钉钉'
   if (key === 'feishu') return '飞书'
   return notifyType || '-'
+}
+
+const timelineTypeText = (eventType?: string) => {
+  const key = String(eventType || '').trim().toLowerCase()
+  if (key === 'triggered') return '产生'
+  if (key === 'source') return '来源'
+  if (key === 'dispatch') return '分派'
+  if (key === 'acknowledge') return '受理'
+  if (key === 'notification_dispatch') return '通知分派'
+  if (key === 'notification_received') return '通知接收'
+  if (key === 'notification_failed') return '通知失败'
+  if (key === 'closed') return '关闭'
+  if (key === 'escalated') return '升级'
+  return eventType || '-'
+}
+
+const timelineTypeColor = (eventType?: string) => {
+  const key = String(eventType || '').trim().toLowerCase()
+  if (key === 'triggered') return 'red'
+  if (key === 'source') return 'blue'
+  if (key === 'dispatch') return 'purple'
+  if (key === 'acknowledge') return 'cyan'
+  if (key === 'notification_dispatch') return 'orange'
+  if (key === 'notification_received') return 'green'
+  if (key === 'notification_failed') return 'red'
+  if (key === 'closed') return 'default'
+  if (key === 'escalated') return 'magenta'
+  return 'default'
 }
 
 const normalizeList = (payload: any): { items: any[]; total: number } => {
@@ -561,6 +618,7 @@ const loadAlertDetail = async () => {
   if (activeTab.value === 'metrics') loadMetricTrend()
   if (activeTab.value === 'related') loadRelatedAlerts()
   if (activeTab.value === 'history') loadHistoryAlerts()
+  if (activeTab.value === 'process') loadProcessTimeline()
   if (activeTab.value === 'escalation') loadEscalationRecords()
   if (activeTab.value === 'rules') loadAlertRules()
   if (activeTab.value === 'notices') loadAlertNotifications()
@@ -618,6 +676,22 @@ const loadHistoryAlerts = async () => {
     historyPagination.total = allMatch ? parsed.total : filtered.length
   } finally {
     historyLoading.value = false
+  }
+}
+
+const loadProcessTimeline = async () => {
+  if (!alertDetail.value?.id) return
+  processLoading.value = true
+  try {
+    const res = await getAlertTimeline(alertDetail.value.id, {
+      page: processPagination.current,
+      page_size: processPagination.pageSize
+    })
+    const parsed = normalizeList((res as any)?.data || res)
+    processEvents.value = (parsed.items || []) as AlertTimelineEvent[]
+    processPagination.total = parsed.total
+  } finally {
+    processLoading.value = false
   }
 }
 
@@ -686,6 +760,7 @@ const handleTabChange = (key: string) => {
   if (key === 'metrics') loadMetricTrend()
   if (key === 'related') loadRelatedAlerts()
   if (key === 'history') loadHistoryAlerts()
+  if (key === 'process') loadProcessTimeline()
   if (key === 'escalation') loadEscalationRecords()
   if (key === 'rules') loadAlertRules()
   if (key === 'notices') loadAlertNotifications()
@@ -701,6 +776,12 @@ const handleHistoryTableChange = (pager: any) => {
   historyPagination.current = pager.current
   historyPagination.pageSize = pager.pageSize
   loadHistoryAlerts()
+}
+
+const handleProcessTableChange = (pager: any) => {
+  processPagination.current = pager.current
+  processPagination.pageSize = pager.pageSize
+  loadProcessTimeline()
 }
 
 const handleEscalationTableChange = (pager: any) => {
@@ -773,6 +854,7 @@ watch(
   () => {
     relatedPagination.current = 1
     historyPagination.current = 1
+    processPagination.current = 1
     escalationPagination.current = 1
     noticePagination.current = 1
     noticeFilters.status = undefined
@@ -782,6 +864,7 @@ watch(
     noticeTimeRange.value = null
     metricRangePreset.value = '1h'
     metricCustomRange.value = null
+    processEvents.value = []
     escalationRecords.value = []
     loadAlertDetail()
   }

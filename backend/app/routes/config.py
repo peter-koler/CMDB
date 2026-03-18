@@ -10,6 +10,7 @@ config_bp = Blueprint("config", __name__, url_prefix="/api/v1/configs")
 CONFIG_DESCRIPTIONS = {
     "access_token_expire": "Access Token有效期（分钟）",
     "refresh_token_expire": "Refresh Token有效期（分钟）",
+    "idle_logout_minutes": "无操作自动登出时间（分钟）",
     "password_min_length": "密码最小长度",
     "password_force_change_days": "强制修改密码周期（天）",
     "password_history_count": "密码历史检查次数",

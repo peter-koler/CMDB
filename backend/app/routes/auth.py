@@ -202,6 +202,12 @@ def login():
 
     access_token_expires = int(SystemConfig.get_value("access_token_expire", "30"))
     refresh_token_expires = int(SystemConfig.get_value("refresh_token_expire", "10080"))
+    try:
+        idle_logout_minutes = max(
+            1, int(SystemConfig.get_value("idle_logout_minutes", "30"))
+        )
+    except (TypeError, ValueError):
+        idle_logout_minutes = 30
 
     access_token = create_access_token(
         identity=str(user.id),
@@ -226,6 +232,7 @@ def login():
                 "refresh_token": refresh_token,
                 "token_type": "Bearer",
                 "expires_in": access_token_expires * 60,
+                "idle_logout_minutes": idle_logout_minutes,
                 "user": {
                     "id": user.id,
                     "username": user.username,

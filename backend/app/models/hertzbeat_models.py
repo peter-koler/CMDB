@@ -924,6 +924,33 @@ class AlertNotification(db.Model):
     updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class AlertTimelineEvent(db.Model):
+    """告警处理时间线事件"""
+    __tablename__ = "alert_timeline_events"
+    __table_args__ = (
+        Index("idx_alert_timeline_events_alert_id", "alert_id"),
+        Index("idx_alert_timeline_events_time", "created_at"),
+        Index("idx_alert_timeline_events_event", "event_type"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    alert_id = db.Column(db.Integer, nullable=False)
+    event_type = db.Column(db.String(40), nullable=False)
+    title = db.Column(db.String(200), nullable=False)
+    content = db.Column(db.Text, nullable=True)
+    operator = db.Column(db.String(100), nullable=True)
+    payload_json = db.Column(db.Text, nullable=False, default="{}")
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    @property
+    def payload(self) -> dict:
+        try:
+            data = json.loads(self.payload_json or "{}")
+            return data if isinstance(data, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+
+
 # ==================== 数据仓库 ====================
 
 class MetricsHistory(db.Model):

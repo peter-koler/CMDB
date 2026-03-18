@@ -128,6 +128,7 @@ export default {
     log: 'Log Config',
     accessTokenExpire: 'Access Token Expire (minutes)',
     refreshTokenExpire: 'Refresh Token Expire (minutes)',
+    idleLogoutMinutes: 'Idle Auto Logout (minutes)',
     passwordMinLength: 'Password Min Length',
     passwordForceChangeDays: 'Password Force Change Days',
     passwordHistoryCount: 'Password History Count',

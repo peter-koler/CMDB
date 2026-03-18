@@ -85,6 +85,7 @@ def init_default_data(app):
     default_configs = {
         "access_token_expire": "30",
         "refresh_token_expire": "10080",
+        "idle_logout_minutes": "30",
         "password_min_length": "8",
         "password_force_change_days": "90",
         "password_history_count": "5",

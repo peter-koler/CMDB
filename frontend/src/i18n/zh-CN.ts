@@ -133,6 +133,7 @@ export default {
     log: '日志配置',
     accessTokenExpire: 'Access Token有效期(分钟)',
     refreshTokenExpire: 'Refresh Token有效期(分钟)',
+    idleLogoutMinutes: '无操作自动登出时间(分钟)',
     passwordMinLength: '密码最小长度',
     passwordForceChangeDays: '强制修改密码周期(天)',
     passwordHistoryCount: '密码历史检查次数',

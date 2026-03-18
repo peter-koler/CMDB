@@ -139,6 +139,18 @@ export interface AlertNotificationRecord {
   updated_at?: string
 }
 
+export interface AlertTimelineEvent {
+  id: string | number
+  event_type?: string
+  title?: string
+  content?: string
+  operator?: string
+  source?: string
+  payload?: Record<string, any>
+  happened_at?: string
+  happened_ms?: number
+}
+
 export interface AlertRule {
   id: number
   name: string
@@ -368,6 +380,14 @@ export const getAlertRuleByAlertId = (alertId: number) => {
 export const getAlertNotifications = (alertId: number, params?: Record<string, any>) => {
   return request({
     url: `/monitoring/alerts/${alertId}/notifications`,
+    method: 'GET',
+    params
+  })
+}
+
+export const getAlertTimeline = (alertId: number, params?: Record<string, any>) => {
+  return request({
+    url: `/monitoring/alerts/${alertId}/timeline`,
     method: 'GET',
     params
   })

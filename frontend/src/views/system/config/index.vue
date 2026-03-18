@@ -90,6 +90,16 @@
                 />
                 <span class="unit">分钟</span>
               </a-descriptions-item>
+              <a-descriptions-item :label="t('config.idleLogoutMinutes')">
+                <a-input-number 
+                  v-model:value="configs.idle_logout_minutes" 
+                  :min="1" 
+                  :max="1440"
+                  style="width: 100%"
+                  class="config-input"
+                />
+                <span class="unit">分钟</span>
+              </a-descriptions-item>
             </a-descriptions>
           </a-card>
         </a-col>
@@ -249,6 +259,7 @@ const saving = ref(false)
 const configs = reactive({
   access_token_expire: 30,
   refresh_token_expire: 10080,
+  idle_logout_minutes: 30,
   password_min_length: 8,
   password_force_change_days: 90,
   password_history_count: 5,

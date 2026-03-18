@@ -23,11 +23,36 @@ from app.models import (
     AlertSilence,
     AlertIntegration,
     AlertNotification,
+    AlertTimelineEvent,
     NoticeReceiver,
     NoticeRule,
 )
-from app.notifications.models import Notification, NotificationRecipient
 from app.notifications.websocket import socketio
+from app.services.alert_timeline_service import (
+    append_base_events,
+    append_closed_event,
+    append_escalation_events,
+    append_notification_events,
+    finalize_timeline,
+    record_alert_timeline_event,
+    timeline_event_from_row,
+)
+from app.services.alert_query_service import (
+    extract_alert_item,
+    extract_rule_id,
+    filter_alert_items,
+)
+from app.services.alert_notification_service import (
+    list_system_notifications_for_alert,
+    notification_from_model,
+)
+from app.services.alert_rule_match_service import resolve_rule_for_alert
+from app.services.alert_action_service import (
+    apply_acknowledge,
+    apply_claim,
+    apply_close,
+    apply_delete,
+)
 from app.services.manager_api_service import ManagerError, manager_api_service
 
 
@@ -420,342 +445,6 @@ def _now_ms() -> int:
 
 def _now_naive_utc() -> datetime:
     return datetime.utcnow()
-
-
-def _extract_alert_item(
-    *,
-    row_id: int,
-    labels_json: str | None,
-    annotations_json: str | None,
-    content: str | None,
-    status: str,
-    start_at: int | None,
-    end_at: int | None,
-    created_at: datetime | None,
-) -> dict:
-    labels = _json_load(labels_json, {})
-    annotations = _json_load(annotations_json, {})
-    rule_id = _extract_rule_id(labels, annotations)
-    level = str(labels.get("severity") or annotations.get("severity") or "warning")
-    name = (
-        labels.get("alertname")
-        or annotations.get("summary")
-        or annotations.get("title")
-        or content
-        or f"alert-{row_id}"
-    )
-    monitor_name = (
-        labels.get("monitor_name")
-        or labels.get("instance")
-        or labels.get("app")
-        or labels.get("target")
-        or "-"
-    )
-    monitor_id = labels.get("monitor_id")
-    try:
-        monitor_id = int(monitor_id) if monitor_id is not None else None
-    except (TypeError, ValueError):
-        monitor_id = None
-    assignee = labels.get("assignee") or annotations.get("assignee")
-    note = annotations.get("note")
-    app = str(labels.get("app") or "")
-    instance = str(labels.get("instance") or labels.get("target") or "")
-    action = str(annotations.get("action") or labels.get("action") or "").strip().lower() or None
-    escalation_level = annotations.get("escalation_level", labels.get("escalation_level"))
-    try:
-        escalation_level = int(escalation_level) if escalation_level is not None else None
-    except (TypeError, ValueError):
-        escalation_level = None
-    triggered_ms = start_at or (int(created_at.replace(tzinfo=timezone.utc).timestamp() * 1000) if created_at else None)
-    recovered_ms = end_at
-    duration_seconds = 0
-    if triggered_ms:
-        tail = recovered_ms or _now_ms()
-        duration_seconds = max(int((tail - triggered_ms) / 1000), 0)
-    source_keys = (
-        "source",
-        "integration",
-        "integration_source",
-        "provider",
-        "alert_source",
-        "origin",
-        "from",
-    )
-    source_value = None
-    for key in source_keys:
-        if key in labels and labels.get(key):
-            source_value = labels.get(key)
-            break
-        if key in annotations and annotations.get(key):
-            source_value = annotations.get(key)
-            break
-    source_type, source_name = _normalize_source_value(source_value)
-    if not source_type:
-        if monitor_id:
-            source_type = "local"
-        else:
-            source_type = "external"
-    return {
-        "id": row_id,
-        "level": level,
-        "name": str(name),
-        "content": str(content or ""),
-        "status": "open" if status == "firing" else "closed",
-        "monitor_name": str(monitor_name),
-        "monitor_id": monitor_id,
-        "app": app,
-        "instance": instance,
-        "metric": labels.get("metric"),
-        "metric_value": labels.get("value"),
-        "threshold": labels.get("threshold"),
-        "rule_id": rule_id,
-        "triggered_at": _ms_to_rfc3339(triggered_ms),
-        "recovered_at": _ms_to_rfc3339(recovered_ms),
-        "duration_seconds": duration_seconds,
-        "assignee": assignee,
-        "note": note,
-        "action": action,
-        "escalation_level": escalation_level,
-        "source_type": source_type,
-        "source_name": source_name,
-    }
-
-
-def _extract_rule_id(labels: dict, annotations: dict) -> int | None:
-    if not isinstance(labels, dict):
-        labels = {}
-    if not isinstance(annotations, dict):
-        annotations = {}
-    for key in (
-        "rule_id",
-        "alert_rule_id",
-        "alert_rule",
-        "alert_rule_id",
-        "ruleId",
-        "alertRuleId",
-        "alert_ruleId",
-    ):
-        raw = labels.get(key) if key in labels else annotations.get(key)
-        if raw is None:
-            continue
-        try:
-            return int(raw)
-        except (TypeError, ValueError):
-            continue
-    return None
-
-
-def _normalize_source_value(value: str | None) -> tuple[str | None, str | None]:
-    if value is None:
-        return None, None
-    raw = str(value).strip()
-    if not raw:
-        return None, None
-    normalized = raw.lower()
-    if normalized in {"local", "internal", "hertzbeat", "hb", "self"}:
-        return "local", None
-    return "external", raw
-
-
-def _notification_from_model(row: AlertNotification) -> dict:
-    return {
-        "id": row.id,
-        "alert_id": row.alert_id,
-        "rule_id": row.rule_id,
-        "receiver_type": row.receiver_type,
-        "receiver_id": row.receiver_id,
-        "notify_type": row.notify_type,
-        "status": row.status,
-        "content": row.content,
-        "error_msg": row.error_msg,
-        "retry_times": row.retry_times,
-        "sent_at": _ms_to_rfc3339(row.sent_at),
-        "created_at": row.created_at.isoformat() if row.created_at else None,
-        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
-    }
-
-
-def _system_notify_status_code(delivery_status: str | None) -> int:
-    state = str(delivery_status or "").strip().lower()
-    # 站内消息创建成功即视为送达，notification_recipients 默认常为 pending。
-    if state in {"", "pending"}:
-        return 2
-    if state in {"delivered", "success", "sent"}:
-        return 2
-    if state in {"failed", "permanent_failure"}:
-        return 3
-    if state in {"sending", "processing"}:
-        return 1
-    return 0
-
-
-def _get_alert_context(alert_id: int) -> dict:
-    row = SingleAlert.query.get(alert_id)
-    if row:
-        labels = _json_load(row.labels_json, {})
-        return {
-            "rule_name": str(labels.get("alertname") or "").strip(),
-            "monitor_id": str(labels.get("monitor_id") or "").strip(),
-        }
-    history = AlertHistory.query.get(alert_id)
-    if history:
-        labels = _json_load(history.labels_json, {})
-        return {
-            "rule_name": str(labels.get("alertname") or "").strip(),
-            "monitor_id": str(labels.get("monitor_id") or "").strip(),
-        }
-    return {"rule_name": "", "monitor_id": ""}
-
-
-def _list_system_notifications_for_alert(alert_id: int) -> list[dict]:
-    notify_type = (request.args.get("notify_type") or "").strip().lower()
-    receiver_type = (request.args.get("receiver_type") or "").strip().lower()
-    status = request.args.get("status")
-    q = (request.args.get("q") or "").strip().lower()
-    start_ms = _parse_rfc3339_to_ms(request.args.get("start_at"))
-    end_ms = _parse_rfc3339_to_ms(request.args.get("end_at"))
-
-    if notify_type and notify_type != "system":
-        return []
-    if receiver_type and receiver_type != "user":
-        return []
-
-    ctx = _get_alert_context(alert_id)
-    monitor_id = str(ctx.get("monitor_id") or "").strip()
-    rule_name = str(ctx.get("rule_name") or "").strip()
-    if not monitor_id:
-        return []
-
-    query = (
-        db.session.query(NotificationRecipient, Notification)
-        .join(Notification, NotificationRecipient.notification_id == Notification.id)
-        .filter(Notification.content.ilike(f"%monitor={monitor_id}%"))
-        .order_by(Notification.created_at.desc(), NotificationRecipient.id.desc())
-    )
-    if rule_name:
-        query = query.filter(
-            db.or_(
-                Notification.title.ilike(f"%{rule_name}%"),
-                Notification.content.ilike(f"%{rule_name}%"),
-            )
-        )
-
-    items: list[dict] = []
-    for recipient, notice in query.all():
-        status_code = _system_notify_status_code(recipient.delivery_status)
-        if status is not None and str(status).strip() != "":
-            try:
-                status_val = int(status)
-                if status_code != status_val:
-                    continue
-            except (TypeError, ValueError):
-                pass
-        sent_at_ms = None
-        if notice.created_at:
-            sent_at_ms = int(notice.created_at.replace(tzinfo=timezone.utc).timestamp() * 1000)
-        if start_ms and (not sent_at_ms or sent_at_ms < start_ms):
-            continue
-        if end_ms and (not sent_at_ms or sent_at_ms > end_ms):
-            continue
-        if q:
-            hay = " ".join(
-                [
-                    str(notice.title or ""),
-                    str(notice.content or ""),
-                    str(recipient.user_id or ""),
-                    str(recipient.delivery_status or ""),
-                ]
-            ).lower()
-            if q not in hay:
-                continue
-        items.append(
-            {
-                "id": int(recipient.id) + 10_000_000,
-                "alert_id": alert_id,
-                "rule_id": None,
-                "receiver_type": "user",
-                "receiver_id": recipient.user_id,
-                "notify_type": "system",
-                "status": status_code,
-                "content": notice.content,
-                "error_msg": None,
-                "retry_times": recipient.delivery_attempts or 0,
-                "sent_at": _ms_to_rfc3339(sent_at_ms) if sent_at_ms else None,
-                "created_at": recipient.created_at.isoformat() if recipient.created_at else None,
-                "updated_at": notice.created_at.isoformat() if notice.created_at else None,
-            }
-        )
-    return items
-
-
-def _filter_alert_items(items: list[dict]) -> list[dict]:
-    level = (request.args.get("level") or "").strip().lower()
-    status = (request.args.get("status") or "").strip().lower()
-    name = (request.args.get("name") or "").strip().lower()
-    monitor_name = (request.args.get("monitor_name") or "").strip().lower()
-    q = (request.args.get("q") or "").strip().lower()
-    monitor_id = (request.args.get("monitor_id") or "").strip()
-    app = (request.args.get("app") or "").strip().lower()
-    instance = (request.args.get("instance") or "").strip().lower()
-    metric = (request.args.get("metric") or "").strip().lower()
-    assignee = (request.args.get("assignee") or "").strip().lower()
-    rule_id = (request.args.get("rule_id") or "").strip()
-    start_ms = _parse_rfc3339_to_ms(request.args.get("start_at"))
-    end_ms = _parse_rfc3339_to_ms(request.args.get("end_at"))
-    out: list[dict] = []
-    for item in items:
-        if level and str(item.get("level", "")).lower() != level:
-            continue
-        if status in {"open", "closed"} and str(item.get("status", "")).lower() != status:
-            continue
-        if monitor_id and str(item.get("monitor_id") or "") != monitor_id:
-            continue
-        if app and str(item.get("app") or "").strip().lower() != app:
-            continue
-        if name:
-            item_name = str(item.get("name") or "").strip().lower()
-            if name not in item_name:
-                continue
-        if monitor_name:
-            item_monitor_name = str(item.get("monitor_name") or "").strip().lower()
-            if monitor_name not in item_monitor_name:
-                continue
-        if instance:
-            item_instance = str(item.get("instance") or "").strip().lower()
-            if instance not in item_instance:
-                continue
-        if metric:
-            item_metric = str(item.get("metric") or "").strip().lower()
-            if item_metric != metric:
-                continue
-        if rule_id:
-            item_rule_id = str(item.get("rule_id") or "").strip()
-            if item_rule_id != rule_id:
-                continue
-        if assignee:
-            item_assignee = str(item.get("assignee") or "").strip().lower()
-            if assignee not in item_assignee:
-                continue
-        if q:
-            hay = " ".join(
-                [
-                    str(item.get("name") or ""),
-                    str(item.get("monitor_name") or ""),
-                    str(item.get("metric") or ""),
-                    str(item.get("assignee") or ""),
-                    str(item.get("note") or ""),
-                ]
-            ).lower()
-            if q not in hay:
-                continue
-        if start_ms or end_ms:
-            ts = _parse_rfc3339_to_ms(item.get("triggered_at"))
-            if start_ms and (not ts or ts < start_ms):
-                continue
-            if end_ms and (not ts or ts > end_ms):
-                continue
-        out.append(item)
-    return out
 
 
 def _rule_from_model(row: AlertDefine) -> dict:
@@ -2165,7 +1854,7 @@ def list_current_alerts():
         query = query.filter_by(status="firing")
     rows = query.order_by(SingleAlert.updated_at.desc(), SingleAlert.id.desc()).all()
     items = [
-        _extract_alert_item(
+        extract_alert_item(
             row_id=row.id,
             labels_json=row.labels_json,
             annotations_json=row.annotations_json,
@@ -2174,10 +1863,17 @@ def list_current_alerts():
             start_at=row.start_at,
             end_at=row.end_at,
             created_at=row.created_at,
+            json_load=_json_load,
+            ms_to_rfc3339=_ms_to_rfc3339,
+            now_ms_provider=_now_ms,
         )
         for row in rows
     ]
-    items = _filter_alert_items(items)
+    items = filter_alert_items(
+        items,
+        query_args=request.args,
+        parse_rfc3339_to_ms=_parse_rfc3339_to_ms,
+    )
     page, page_size = _page_args()
     page_items, total = _paginate_items(items, page, page_size)
     return _list_response(page_items, total, page, page_size)
@@ -2189,7 +1885,7 @@ def list_current_alerts():
 def list_history_alerts():
     rows = AlertHistory.query.order_by(AlertHistory.created_at.desc(), AlertHistory.id.desc()).all()
     items = [
-        _extract_alert_item(
+        extract_alert_item(
             row_id=row.id,
             labels_json=row.labels_json,
             annotations_json=row.annotations_json,
@@ -2198,10 +1894,17 @@ def list_history_alerts():
             start_at=row.start_at,
             end_at=row.end_at,
             created_at=row.created_at,
+            json_load=_json_load,
+            ms_to_rfc3339=_ms_to_rfc3339,
+            now_ms_provider=_now_ms,
         )
         for row in rows
     ]
-    items = _filter_alert_items(items)
+    items = filter_alert_items(
+        items,
+        query_args=request.args,
+        parse_rfc3339_to_ms=_parse_rfc3339_to_ms,
+    )
     page, page_size = _page_args()
     page_items, total = _paginate_items(items, page, page_size)
     return _list_response(page_items, total, page, page_size)
@@ -2215,7 +1918,7 @@ def get_alert_detail(alert_id: int):
     if row:
         labels = _json_load(row.labels_json, {})
         annotations = _json_load(row.annotations_json, {})
-        item = _extract_alert_item(
+        item = extract_alert_item(
             row_id=row.id,
             labels_json=row.labels_json,
             annotations_json=row.annotations_json,
@@ -2224,8 +1927,11 @@ def get_alert_detail(alert_id: int):
             start_at=row.start_at,
             end_at=row.end_at,
             created_at=row.created_at,
+            json_load=_json_load,
+            ms_to_rfc3339=_ms_to_rfc3339,
+            now_ms_provider=_now_ms,
         )
-        item["rule_id"] = _extract_rule_id(labels, annotations)
+        item["rule_id"] = extract_rule_id(labels, annotations)
         item["scope"] = "current"
         return jsonify({"code": 200, "data": item})
 
@@ -2233,7 +1939,7 @@ def get_alert_detail(alert_id: int):
     if history:
         labels = _json_load(history.labels_json, {})
         annotations = _json_load(history.annotations_json, {})
-        item = _extract_alert_item(
+        item = extract_alert_item(
             row_id=history.id,
             labels_json=history.labels_json,
             annotations_json=history.annotations_json,
@@ -2242,8 +1948,11 @@ def get_alert_detail(alert_id: int):
             start_at=history.start_at,
             end_at=history.end_at,
             created_at=history.created_at,
+            json_load=_json_load,
+            ms_to_rfc3339=_ms_to_rfc3339,
+            now_ms_provider=_now_ms,
         )
-        item["rule_id"] = _extract_rule_id(labels, annotations)
+        item["rule_id"] = extract_rule_id(labels, annotations)
         item["scope"] = "history"
         return jsonify({"code": 200, "data": item})
 
@@ -2303,13 +2012,135 @@ def list_alert_notifications(alert_id: int):
                 ]
             ).lower()
             if q in hay:
-                items.append(_notification_from_model(row))
+                items.append(
+                    notification_from_model(
+                        row,
+                        ms_to_rfc3339=_ms_to_rfc3339,
+                    )
+                )
     else:
-        items = [_notification_from_model(row) for row in rows]
+        items = [
+            notification_from_model(
+                row,
+                ms_to_rfc3339=_ms_to_rfc3339,
+            )
+            for row in rows
+        ]
     page, page_size = _page_args()
     if not items:
-        items = _list_system_notifications_for_alert(alert_id)
+        items = list_system_notifications_for_alert(
+            alert_id,
+            query_args=request.args,
+            parse_rfc3339_to_ms=_parse_rfc3339_to_ms,
+            ms_to_rfc3339=_ms_to_rfc3339,
+            json_load=_json_load,
+        )
     page_items, total = _paginate_items(items, page, page_size)
+    return _list_response(page_items, total, page, page_size)
+
+
+@monitoring_target_bp.route("/alerts/<int:alert_id>/timeline", methods=["GET"])
+@jwt_required()
+@require_any_permission(
+    "monitoring:alert:current",
+    "monitoring:alert:my",
+    "monitoring:alert:history",
+    "monitoring:alert:center",
+)
+def list_alert_timeline(alert_id: int):
+    current = SingleAlert.query.get(alert_id)
+    history = None
+    scope = "current"
+    root_alert_id = alert_id
+    if not current:
+        history = AlertHistory.query.get(alert_id)
+        if not history:
+            return jsonify({"code": 404, "message": "告警不存在"}), 404
+        scope = "history"
+        root_alert_id = int(history.alert_id or alert_id)
+        current = SingleAlert.query.get(root_alert_id)
+
+    base_labels_json = current.labels_json if current else history.labels_json
+    base_annotations_json = current.annotations_json if current else history.annotations_json
+    base_content = current.content if current else history.content
+    base_status = current.status if current else history.status
+    base_start_at = current.start_at if current else history.start_at
+    base_end_at = current.end_at if current else history.end_at
+    base_created_at = current.created_at if current else history.created_at
+
+    base_item = extract_alert_item(
+        row_id=root_alert_id,
+        labels_json=base_labels_json,
+        annotations_json=base_annotations_json,
+        content=base_content,
+        status=base_status,
+        start_at=base_start_at,
+        end_at=base_end_at,
+        created_at=base_created_at,
+        json_load=_json_load,
+        ms_to_rfc3339=_ms_to_rfc3339,
+        now_ms_provider=_now_ms,
+    )
+    triggered_ms = _parse_rfc3339_to_ms(base_item.get("triggered_at"))
+
+    events: list[dict] = []
+    append_base_events(
+        events,
+        root_alert_id=root_alert_id,
+        base_item=base_item,
+        scope=scope,
+        triggered_ms=triggered_ms,
+        ms_to_rfc3339=_ms_to_rfc3339,
+    )
+
+    manual_rows = (
+        AlertTimelineEvent.query.filter_by(alert_id=root_alert_id)
+        .order_by(AlertTimelineEvent.created_at.desc(), AlertTimelineEvent.id.desc())
+        .all()
+    )
+    events.extend(
+        [
+            timeline_event_from_row(
+                row,
+                ms_to_rfc3339=_ms_to_rfc3339,
+            )
+            for row in manual_rows
+        ]
+    )
+
+    notify_rows = (
+        AlertNotification.query.filter_by(alert_id=root_alert_id)
+        .order_by(AlertNotification.created_at.desc(), AlertNotification.id.desc())
+        .all()
+    )
+    append_notification_events(
+        events,
+        notify_rows=notify_rows,
+        ms_to_rfc3339=_ms_to_rfc3339,
+    )
+
+    escalation_rows = (
+        AlertHistory.query.filter_by(alert_id=root_alert_id, alert_type="single", status="firing")
+        .order_by(AlertHistory.created_at.desc(), AlertHistory.id.desc())
+        .all()
+    )
+    append_escalation_events(
+        events,
+        escalation_rows=escalation_rows,
+        ms_to_rfc3339=_ms_to_rfc3339,
+    )
+
+    resolved_ms = base_end_at if base_status == "resolved" else None
+    append_closed_event(
+        events,
+        root_alert_id=root_alert_id,
+        resolved_ms=resolved_ms,
+        ms_to_rfc3339=_ms_to_rfc3339,
+    )
+
+    events = finalize_timeline(events)
+    page, page_size = _page_args()
+    page_items, total = _paginate_items(events, page, page_size)
     return _list_response(page_items, total, page, page_size)
 
 
@@ -2327,51 +2158,14 @@ def get_alert_rule(alert_id: int):
 
     labels = _json_load(row.labels_json, {})
     annotations = _json_load(row.annotations_json, {})
-    rule_id = _extract_rule_id(labels, annotations)
-    alert_metric = str(labels.get("metric") or annotations.get("metric") or "").strip()
-    monitor_id = None
-    try:
-        monitor_id = int(labels.get("monitor_id")) if labels.get("monitor_id") is not None else None
-    except (TypeError, ValueError):
-        monitor_id = None
-
-    matched_by = None
-    rule = None
-
-    if rule_id:
-        rule = AlertDefine.query.get(rule_id)
-        matched_by = "rule_id"
-
-    if not rule:
-        notice_row = (
-            AlertNotification.query.filter(
-                AlertNotification.alert_id == alert_id,
-                AlertNotification.rule_id.isnot(None),
-            )
-            .order_by(
-                AlertNotification.sent_at.is_(None),
-                AlertNotification.sent_at.desc(),
-                AlertNotification.id.desc(),
-            )
-            .first()
-        )
-        if notice_row and notice_row.rule_id:
-            rule = AlertDefine.query.get(int(notice_row.rule_id))
-            matched_by = "notification_rule"
-
-    if not rule and monitor_id:
-        monitor = _monitor_payload(monitor_id)
-        for row_rule in AlertDefine.query.order_by(AlertDefine.updated_at.desc(), AlertDefine.id.desc()).all():
-            if not _rule_match_monitor(row_rule, monitor):
-                continue
-            rule_labels = _json_load(row_rule.labels_json, {})
-            rule_annotations = _json_load(row_rule.annotations_json, {})
-            rule_metric = str(rule_labels.get("metric") or rule_annotations.get("metric") or "").strip()
-            if alert_metric and rule_metric and alert_metric != rule_metric:
-                continue
-            rule = row_rule
-            matched_by = "heuristic"
-            break
+    rule, matched_by = resolve_rule_for_alert(
+        alert_id,
+        labels=labels,
+        annotations=annotations,
+        json_load=_json_load,
+        monitor_payload_loader=_monitor_payload,
+        rule_match_monitor=_rule_match_monitor,
+    )
 
     if not rule:
         return jsonify({"code": 404, "message": "未找到匹配的告警规则"}), 404
@@ -2387,27 +2181,27 @@ def get_alert_rule(alert_id: int):
 @require_any_permission("monitoring:alert:update", "monitoring:alert:center", "monitoring:alert:current", "monitoring:alert:my")
 def acknowledge_alert(alert_id: int):
     payload = request.get_json() or {}
-    row = SingleAlert.query.get(alert_id)
-    if not row:
-        return jsonify({"code": 404, "message": "告警不存在"}), 404
-    labels = _json_load(row.labels_json, {})
-    annotations = _json_load(row.annotations_json, {})
     identity = get_jwt_identity()
     current_user = User.query.get(int(identity)) if identity else None
-    assignee = str(payload.get("assignee") or (current_user.username if current_user else "system"))
-    labels["assignee"] = assignee
-    note = payload.get("note")
-    if note:
-        annotations["note"] = str(note)
-    row.labels_json = _json_dump(labels)
-    row.annotations_json = _json_dump(annotations)
-    row.modifier = assignee
-    row.updated_at = _now_naive_utc()
-    db.session.commit()
+    row = apply_acknowledge(
+        alert_id,
+        payload=payload,
+        current_username=(current_user.username if current_user else None),
+        json_load=_json_load,
+        json_dump=_json_dump,
+        now_provider=_now_naive_utc,
+        record_timeline_event=lambda **kwargs: record_alert_timeline_event(
+            json_dump=_json_dump,
+            now_provider=_now_naive_utc,
+            **kwargs,
+        ),
+    )
+    if not row:
+        return jsonify({"code": 404, "message": "告警不存在"}), 404
     response = jsonify(
         {
             "code": 200,
-            "data": _extract_alert_item(
+            "data": extract_alert_item(
                 row_id=row.id,
                 labels_json=row.labels_json,
                 annotations_json=row.annotations_json,
@@ -2416,6 +2210,9 @@ def acknowledge_alert(alert_id: int):
                 start_at=row.start_at,
                 end_at=row.end_at,
                 created_at=row.created_at,
+                json_load=_json_load,
+                ms_to_rfc3339=_ms_to_rfc3339,
+                now_ms_provider=_now_ms,
             ),
         }
     )
@@ -2428,28 +2225,28 @@ def acknowledge_alert(alert_id: int):
 @require_any_permission("monitoring:alert:current", "monitoring:alert:my", "monitoring:alert:center", "monitoring:alert:claim")
 def claim_alert(alert_id: int):
     payload = request.get_json() or {}
-    row = SingleAlert.query.get(alert_id)
-    if not row:
-        return jsonify({"code": 404, "message": "告警不存在"}), 404
-    labels = _json_load(row.labels_json, {})
-    annotations = _json_load(row.annotations_json, {})
     identity = get_jwt_identity()
     current_user = User.query.get(int(identity)) if identity else None
-    assignee = str(payload.get("assignee") or (current_user.username if current_user else "system"))
-    labels["assignee"] = assignee
-    note = payload.get("note")
-    if note:
-        annotations["note"] = str(note)
-    row.labels_json = _json_dump(labels)
-    row.annotations_json = _json_dump(annotations)
-    row.modifier = assignee
-    row.updated_at = _now_naive_utc()
-    db.session.commit()
+    row = apply_claim(
+        alert_id,
+        payload=payload,
+        current_username=(current_user.username if current_user else None),
+        json_load=_json_load,
+        json_dump=_json_dump,
+        now_provider=_now_naive_utc,
+        record_timeline_event=lambda **kwargs: record_alert_timeline_event(
+            json_dump=_json_dump,
+            now_provider=_now_naive_utc,
+            **kwargs,
+        ),
+    )
+    if not row:
+        return jsonify({"code": 404, "message": "告警不存在"}), 404
     _emit_alert_event("monitoring:alert:update", {"id": alert_id, "action": "claim"})
     return jsonify(
         {
             "code": 200,
-            "data": _extract_alert_item(
+            "data": extract_alert_item(
                 row_id=row.id,
                 labels_json=row.labels_json,
                 annotations_json=row.annotations_json,
@@ -2458,6 +2255,9 @@ def claim_alert(alert_id: int):
                 start_at=row.start_at,
                 end_at=row.end_at,
                 created_at=row.created_at,
+                json_load=_json_load,
+                ms_to_rfc3339=_ms_to_rfc3339,
+                now_ms_provider=_now_ms,
             ),
         }
     )
@@ -2467,36 +2267,25 @@ def claim_alert(alert_id: int):
 @jwt_required()
 @require_any_permission("monitoring:alert:current", "monitoring:alert:my", "monitoring:alert:center", "monitoring:alert:close")
 def close_alert(alert_id: int):
-    row = SingleAlert.query.get(alert_id)
+    identity = get_jwt_identity()
+    current_user = User.query.get(int(identity)) if identity else None
+    row = apply_close(
+        alert_id,
+        operator=(current_user.username if current_user else "system"),
+        now_ms_provider=_now_ms,
+        now_provider=_now_naive_utc,
+        record_timeline_event=lambda **kwargs: record_alert_timeline_event(
+            json_dump=_json_dump,
+            now_provider=_now_naive_utc,
+            **kwargs,
+        ),
+    )
     if not row:
         return jsonify({"code": 404, "message": "告警不存在"}), 404
-    now_ms = _now_ms()
-    if row.start_at is None:
-        row.start_at = now_ms
-    if row.status != "resolved":
-        row.status = "resolved"
-        row.end_at = now_ms
-        row.updated_at = _now_naive_utc()
-        duration_ms = max((row.end_at or now_ms) - (row.start_at or now_ms), 0)
-        history = AlertHistory(
-            alert_id=row.id,
-            alert_type="single",
-            labels_json=row.labels_json or "{}",
-            annotations_json=row.annotations_json or "{}",
-            content=row.content,
-            status=row.status,
-            trigger_times=max(row.trigger_times or 1, 1),
-            start_at=row.start_at,
-            end_at=row.end_at,
-            duration_ms=duration_ms,
-            created_at=_now_naive_utc(),
-        )
-        db.session.add(history)
-        db.session.commit()
     response = jsonify(
         {
             "code": 200,
-            "data": _extract_alert_item(
+            "data": extract_alert_item(
                 row_id=row.id,
                 labels_json=row.labels_json,
                 annotations_json=row.annotations_json,
@@ -2505,6 +2294,9 @@ def close_alert(alert_id: int):
                 start_at=row.start_at,
                 end_at=row.end_at,
                 created_at=row.created_at,
+                json_load=_json_load,
+                ms_to_rfc3339=_ms_to_rfc3339,
+                now_ms_provider=_now_ms,
             ),
         }
     )
@@ -2517,47 +2309,14 @@ def close_alert(alert_id: int):
 @require_any_permission("monitoring:alert:center", "monitoring:alert:close", "monitoring:alert:history")
 def delete_alert(alert_id: int):
     scope = (request.args.get("scope") or "").strip().lower()
-    deleted_current = False
-    deleted_history = False
-    cascade_history = False
-
-    if scope in {"", "all", "current"}:
-        row = SingleAlert.query.get(alert_id)
-        if row:
-            db.session.delete(row)
-            deleted_current = True
-        if scope in {"", "all"}:
-            removed = AlertHistory.query.filter_by(alert_id=alert_id).delete(synchronize_session=False)
-            cascade_history = bool(removed)
-            deleted_history = deleted_history or cascade_history
-
-    if scope in {"", "all", "history"}:
-        row = AlertHistory.query.get(alert_id)
-        if row:
-            db.session.delete(row)
-            deleted_history = True
-
-    if not deleted_current and not deleted_history:
-        db.session.rollback()
+    result = apply_delete(alert_id, scope=scope)
+    if not result:
         return jsonify({"code": 404, "message": "告警不存在"}), 404
-
-    db.session.commit()
     _emit_alert_event(
         "monitoring:alert:update",
         {"id": alert_id, "action": "delete", "scope": scope or "all"},
     )
-    return jsonify(
-        {
-            "code": 200,
-            "data": {
-                "id": alert_id,
-                "scope": scope or "all",
-                "deleted_current": deleted_current,
-                "deleted_history": deleted_history,
-                "cascade_history": cascade_history,
-            },
-        }
-    )
+    return jsonify({"code": 200, "data": result})
 
 
 @monitoring_target_bp.route("/alert-rules", methods=["GET"])

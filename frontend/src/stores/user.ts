@@ -1,7 +1,12 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { login, logout, getCurrentUser, refreshToken } from '@/api/auth'
-import { startTokenExpirationCheck, stopTokenExpirationCheck } from '@/utils/tokenManager'
+import {
+  startIdleLogoutCheck,
+  startTokenExpirationCheck,
+  stopIdleLogoutCheck,
+  stopTokenExpirationCheck
+} from '@/utils/tokenManager'
 
 interface UserInfo {
   id: number
@@ -36,12 +41,14 @@ export const useUserStore = defineStore('user', () => {
     localStorage.removeItem('token')
     localStorage.removeItem('refreshToken')
     stopTokenExpirationCheck()
+    stopIdleLogoutCheck()
   }
 
   const loginAction = async (username: string, password: string, captcha?: string) => {
     const res = await login(username, password, captcha)
     if (res.code === 200) {
       setToken(res.data.access_token, res.data.refresh_token)
+      startIdleLogoutCheck(Number(res.data.idle_logout_minutes))
       // 登录接口返回的 user 字段可能不包含完整权限，强制拉取当前用户信息
       const ok = await getUserInfo()
       if (ok) return true
