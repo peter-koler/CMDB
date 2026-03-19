@@ -31,6 +31,13 @@ func (c *Collector) Collect(ctx context.Context, task model.MetricsTask) (map[st
 	if reqSpec.BasicAuthUser != "" {
 		req.SetBasicAuth(reqSpec.BasicAuthUser, reqSpec.BasicAuthPass)
 	}
+	if reqSpec.BearerToken != "" {
+		token := reqSpec.BearerToken
+		if !strings.HasPrefix(strings.ToLower(token), "bearer ") {
+			token = "Bearer " + token
+		}
+		req.Header.Set("Authorization", token)
+	}
 	start := time.Now()
 	resp, err := executeRequest(client, req, reqSpec)
 	if err != nil {

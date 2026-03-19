@@ -16,19 +16,19 @@
 # The monitoring type category：service-application service monitoring db-database monitoring custom-custom monitoring os-operating system monitoring
 category: network
 # The monitoring type eg: linux windows tomcat mysql aws...
-app: cisco_switch
+app: hpe_switch
 # The monitoring i18n name
 name:
-  zh-CN: 思科通用交换机
-  en-US: Cisco Switch
+  zh-CN: HPE通用交换机
+  en-US: HPE Switch
 # The description and help of this monitoring type
 help:
-  zh-CN: Hertzbeat 使用 <a class='help_module_content' href='https://hertzbeat.apache.org/docs/advanced/extend-snmp'> SNMP 协议</a> 对 思科交换机 的通用指标(可用性，系统信息，端口流量等)进行采集监控。<br>您可以点击 “<i>新建 思科通用交换机</i>” 并进行配置SNMP相关参数添加，或者选择“<i>更多操作</i>”，导入已有配置。
-  en-US: HertzBeat uses <a class='help_module_content' href='https://hertzbeat.apache.org/docs/advanced/extend-snmp'> SNMP Protocol</a> to monitoring Cisco Switch general performance metrics. <br>You can click the "<i>New Cisco Switch</i>" button and config snmp params to add monitor or import an existing setup through the "<i>More Actions</i>" menu.
-  zh-TW: Hertzbeat 使用 <a class='help_module_content' href='https://hertzbeat.apache.org/docs/advanced/extend-snmp'> SNMP 協議</a> 對 思科交換機 的通用指標(可用性，系統信息，端口流量等)進行采集監控。<br>您可以點擊 “<i>新建 思科通用交換機</i>” 並進行配置SNMP相關參數添加，或者選擇“<i>更多操作</i>”，導入已有配置。
+  zh-CN: Hertzbeat 使用 <a class='help_module_content' href='https://hertzbeat.apache.org/docs/advanced/extend-snmp'> SNMP 协议</a> 对 HPE交换机 的通用指标(可用性，系统信息，端口流量等)进行采集监控。<br>您可以点击 “<i>新建 HPE通用交换机</i>” 并进行配置SNMP相关参数添加，或者选择“<i>更多操作</i>”，导入已有配置。
+  en-US: HertzBeat uses <a class='help_module_content' href='https://hertzbeat.apache.org/docs/advanced/extend-snmp'> SNMP Protocol</a> to monitoring HPE Switch general performance metrics. <br>You can click the "<i>New HPE Switch</i>" button and config snmp params to add monitor or import an existing setup through the "<i>More Actions</i>" menu.
+  zh-TW: Hertzbeat 使用 <a class='help_module_content' href='https://hertzbeat.apache.org/docs/advanced/extend-snmp'> SNMP 協議</a> 對 HPE交換機 的通用指標(可用性，系統信息，端口流量等)進行采集監控。<br>您可以點擊 “<i>新建 HPE通用交換機</i>” 並進行配置SNMP相關參數添加，或者選擇“<i>更多操作</i>”，導入已有配置。
 helpLink:
-  zh-CN: https://hertzbeat.apache.org/zh-cn/docs/help/cisco_switch
-  en-US: https://hertzbeat.apache.org/docs/help/cisco_switch
+  zh-CN: https://hertzbeat.apache.org/zh-cn/docs/help/hpe_switch
+  en-US: https://hertzbeat.apache.org/docs/help/hpe_switch
 # Input params define for monitoring(render web ui by the definition)
 params:
   # field-param field key
@@ -219,7 +219,6 @@ params:
     # hide-is hide this field and put it in advanced layout
     hide: true
     # default value
-    # 默认值
     defaultValue: 6000
 # collect metrics config list
 metrics:
@@ -288,6 +287,7 @@ metrics:
       # snmp connect timeout
       timeout: ^_^timeout^_^
       # snmp community
+      # snmp 团体字
       community: ^_^community^_^
       # snmp version
       version: ^_^snmpVersion^_^
@@ -430,10 +430,10 @@ metrics:
         ifOperStatus: 1.3.6.1.2.1.2.2.1.8
 
 alerts:
-  - key: 'cisco_switch_unavailable'
-    name: 'Cisco交换机设备不可用'
+  - key: 'hpe_switch_unavailable'
+    name: 'HPE交换机设备不可用'
     type: 'realtime_metric'
-    metric: 'cisco_switch_server_up'
+    metric: 'hpe_switch_server_up'
     operator: '=='
     threshold: 0
     level: 'critical'
@@ -441,23 +441,23 @@ alerts:
     times: 1
     mode: 'core'
     enabled: true
-    expr: 'cisco_switch_server_up == 0'
+    expr: 'hpe_switch_server_up == 0'
     template: '设备不可用'
-  - key: 'cisco_switch_response_slow'
-    name: 'Cisco交换机响应时延偏高'
+  - key: 'hpe_switch_response_slow'
+    name: 'HPE交换机响应时延偏高'
     type: 'periodic_metric'
     metric: 'responseTime'
     operator: '>'
-    threshold: 1200
+    threshold: 1000
     level: 'warning'
     period: 120
     times: 2
     mode: 'core'
     enabled: true
-    expr: 'responseTime > 1200'
+    expr: 'responseTime > 1000'
     template: '响应时延偏高'
-  - key: 'cisco_switch_port_down'
-    name: 'Cisco交换机端口运行状态异常'
+  - key: 'hpe_switch_port_down'
+    name: 'HPE交换机端口运行状态异常'
     type: 'realtime_metric'
     metric: 'oper_status'
     operator: '=='
@@ -469,42 +469,42 @@ alerts:
     enabled: true
     expr: 'oper_status != ''1'' && oper_status != ''up'' && oper_status != ''up(1)'''
     template: '端口运行状态异常'
-  - key: 'cisco_switch_in_errors_high'
-    name: 'Cisco交换机入方向错误包偏高'
+  - key: 'hpe_switch_in_discards_high'
+    name: 'HPE交换机入方向丢弃包偏高'
     type: 'periodic_metric'
-    metric: 'in_errors'
+    metric: 'in_discards'
     operator: '>'
-    threshold: 1000
+    threshold: 1200
     level: 'warning'
     period: 300
     times: 2
     mode: 'core'
     enabled: true
-    expr: 'in_errors > 1000'
-    template: '入方向错误包偏高'
-  - key: 'cisco_switch_out_discards_high'
-    name: 'Cisco交换机出方向丢弃包偏高'
+    expr: 'in_discards > 1200'
+    template: '入方向丢弃包偏高'
+  - key: 'hpe_switch_out_errors_high'
+    name: 'HPE交换机出方向错误包偏高'
     type: 'periodic_metric'
-    metric: 'out_discards'
+    metric: 'out_errors'
     operator: '>'
-    threshold: 2000
+    threshold: 800
+    level: 'warning'
+    period: 300
+    times: 2
+    mode: 'core'
+    enabled: true
+    expr: 'out_errors > 800'
+    template: '出方向错误包偏高'
+  - key: 'hpe_switch_speed_low'
+    name: 'HPE交换机端口速率异常偏低'
+    type: 'periodic_metric'
+    metric: 'speed'
+    operator: '<'
+    threshold: 100
     level: 'warning'
     period: 300
     times: 2
     mode: 'extended'
     enabled: false
-    expr: 'out_discards > 2000'
-    template: '出方向丢弃包偏高'
-  - key: 'cisco_switch_admin_oper_mismatch'
-    name: 'Cisco交换机端口配置与状态不一致'
-    type: 'realtime_metric'
-    metric: 'admin_status'
-    operator: '=='
-    threshold: 0
-    level: 'warning'
-    period: 180
-    times: 1
-    mode: 'extended'
-    enabled: false
-    expr: '(admin_status == ''1'' || admin_status == ''up'' || admin_status == ''up(1)'') && oper_status != ''1'' && oper_status != ''up'' && oper_status != ''up(1)'''
-    template: '端口配置与状态不一致'
+    expr: 'speed < 100'
+    template: '端口速率异常偏低'

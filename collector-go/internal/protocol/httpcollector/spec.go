@@ -17,6 +17,7 @@ type requestSpec struct {
 	BasicAuthPass  string
 	DigestAuthUser string
 	DigestAuthPass string
+	BearerToken    string
 }
 
 func buildRequestSpec(task model.MetricsTask) (requestSpec, error) {
@@ -26,6 +27,10 @@ func buildRequestSpec(task model.MetricsTask) (requestSpec, error) {
 		return requestSpec{}, fmt.Errorf("missing url")
 	}
 	fullURL, err := normalizeURL(params, rawURL)
+	if err != nil {
+		return requestSpec{}, err
+	}
+	fullURL, err = appendQueryParams(fullURL, params)
 	if err != nil {
 		return requestSpec{}, err
 	}
@@ -49,6 +54,7 @@ func buildRequestSpec(task model.MetricsTask) (requestSpec, error) {
 		BasicAuthPass:  strings.TrimSpace(firstNonEmpty(params["authorization.basicAuthPassword"], params["http.authorization.basicAuthPassword"], params["password"])),
 		DigestAuthUser: strings.TrimSpace(firstNonEmpty(params["authorization.digestAuthUsername"], params["http.authorization.digestAuthUsername"])),
 		DigestAuthPass: strings.TrimSpace(firstNonEmpty(params["authorization.digestAuthPassword"], params["http.authorization.digestAuthPassword"])),
+		BearerToken:    extractBearerToken(params),
 	}, nil
 }
 
@@ -76,6 +82,56 @@ func normalizeURL(params map[string]string, raw string) (string, error) {
 		raw = "/" + raw
 	}
 	return base + raw, nil
+}
+
+func appendQueryParams(rawURL string, params map[string]string) (string, error) {
+	queryItems := map[string]string{}
+	for key, value := range params {
+		val := strings.TrimSpace(value)
+		if val == "" {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(key, "params."):
+			name := strings.TrimSpace(strings.TrimPrefix(key, "params."))
+			if name != "" {
+				queryItems[name] = val
+			}
+		case strings.HasPrefix(key, "http.params."):
+			name := strings.TrimSpace(strings.TrimPrefix(key, "http.params."))
+			if name != "" {
+				queryItems[name] = val
+			}
+		}
+	}
+	if len(queryItems) == 0 {
+		return rawURL, nil
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return "", err
+	}
+	q := parsed.Query()
+	for key, value := range queryItems {
+		q.Set(key, value)
+	}
+	parsed.RawQuery = q.Encode()
+	return parsed.String(), nil
+}
+
+func extractBearerToken(params map[string]string) string {
+	authType := strings.ToLower(strings.TrimSpace(firstNonEmpty(params["authorization.type"], params["http.authorization.type"])))
+	if authType != "" && authType != "bearer" && authType != "bearer token" {
+		return ""
+	}
+	token := strings.TrimSpace(firstNonEmpty(
+		params["authorization.bearerTokenToken"],
+		params["http.authorization.bearerTokenToken"],
+		params["authorization.bearerToken"],
+		params["http.authorization.bearerToken"],
+		params["token"],
+	))
+	return token
 }
 
 func firstNonEmpty(values ...string) string {

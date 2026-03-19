@@ -13,12 +13,30 @@ var runSNMPCmd = func(ctx context.Context, bin string, args ...string) (string, 
 }
 
 func buildArgs(opts options, oid string) []string {
-	return []string{
+	args := []string{
 		"-v" + opts.Version,
-		"-c", opts.Community,
 		"-t", strconv.Itoa(opts.TimeoutS),
 		"-r", "0",
-		opts.Address,
-		oid,
 	}
+	if opts.Version == "3" {
+		if strings.TrimSpace(opts.SecurityLevel) != "" {
+			args = append(args, "-l", opts.SecurityLevel)
+		}
+		if strings.TrimSpace(opts.Username) != "" {
+			args = append(args, "-u", opts.Username)
+		}
+		if strings.TrimSpace(opts.AuthPassphrase) != "" {
+			args = append(args, "-a", opts.AuthPasswordEncryption, "-A", opts.AuthPassphrase)
+		}
+		if strings.TrimSpace(opts.PrivPassphrase) != "" {
+			args = append(args, "-x", opts.PrivPasswordEncryption, "-X", opts.PrivPassphrase)
+		}
+		if strings.TrimSpace(opts.ContextName) != "" {
+			args = append(args, "-n", opts.ContextName)
+		}
+	} else {
+		args = append(args, "-c", opts.Community)
+	}
+	args = append(args, opts.Address, oid)
+	return args
 }

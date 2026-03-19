@@ -11,13 +11,20 @@ import (
 )
 
 type options struct {
-	Address   string
-	Community string
-	Version   string
-	Operation string
-	TimeoutS  int
-	OIDs      map[string]string
-	Order     []string
+	Address                 string
+	Community               string
+	Version                 string
+	Operation               string
+	TimeoutS                int
+	OIDs                    map[string]string
+	Order                   []string
+	Username                string
+	ContextName             string
+	AuthPassphrase          string
+	PrivPassphrase          string
+	AuthPasswordEncryption  string
+	PrivPasswordEncryption  string
+	SecurityLevel           string
 }
 
 func parseOptions(task model.MetricsTask) (options, error) {
@@ -34,6 +41,13 @@ func parseOptions(task model.MetricsTask) (options, error) {
 		community = "public"
 	}
 	version := normalizeVersion(task.Params["version"], task.Params["snmpVersion"])
+	username := strings.TrimSpace(task.Params["username"])
+	contextName := strings.TrimSpace(task.Params["contextName"])
+	authPassphrase := strings.TrimSpace(task.Params["authPassphrase"])
+	privPassphrase := strings.TrimSpace(task.Params["privPassphrase"])
+	authPasswordEncryption := normalizeAuthProtocol(task.Params["authPasswordEncryption"])
+	privPasswordEncryption := normalizePrivProtocol(task.Params["privPasswordEncryption"])
+	securityLevel := deriveSecurityLevel(version, authPassphrase, privPassphrase)
 	timeout := task.Timeout
 	if timeout <= 0 {
 		timeout = 3 * time.Second
@@ -59,13 +73,20 @@ func parseOptions(task model.MetricsTask) (options, error) {
 	}
 	sort.Strings(order)
 	return options{
-		Address:   host + ":" + port,
-		Community: community,
-		Version:   version,
-		Operation: operation,
-		TimeoutS:  sec,
-		OIDs:      oids,
-		Order:     order,
+		Address:                host + ":" + port,
+		Community:              community,
+		Version:                version,
+		Operation:              operation,
+		TimeoutS:               sec,
+		OIDs:                   oids,
+		Order:                  order,
+		Username:               username,
+		ContextName:            contextName,
+		AuthPassphrase:         authPassphrase,
+		PrivPassphrase:         privPassphrase,
+		AuthPasswordEncryption: authPasswordEncryption,
+		PrivPasswordEncryption: privPasswordEncryption,
+		SecurityLevel:          securityLevel,
 	}, nil
 }
 
@@ -111,4 +132,39 @@ func normalizeVersion(candidates ...string) string {
 		}
 	}
 	return "2c"
+}
+
+func normalizeAuthProtocol(raw string) string {
+	switch strings.TrimSpace(strings.ToLower(raw)) {
+	case "", "0", "md5":
+		return "MD5"
+	case "1", "sha", "sha1":
+		return "SHA"
+	default:
+		return "MD5"
+	}
+}
+
+func normalizePrivProtocol(raw string) string {
+	switch strings.TrimSpace(strings.ToLower(raw)) {
+	case "", "0", "des":
+		return "DES"
+	case "1", "aes", "aes128":
+		return "AES"
+	default:
+		return "DES"
+	}
+}
+
+func deriveSecurityLevel(version string, authPassphrase string, privPassphrase string) string {
+	if version != "3" {
+		return ""
+	}
+	if strings.TrimSpace(authPassphrase) == "" {
+		return "noAuthNoPriv"
+	}
+	if strings.TrimSpace(privPassphrase) == "" {
+		return "authNoPriv"
+	}
+	return "authPriv"
 }

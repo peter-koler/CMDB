@@ -4,8 +4,10 @@ from copy import deepcopy
 
 from scripts.apply_cache_default_alerts import POLICIES as CACHE_POLICIES
 from scripts.apply_bigdata_default_alerts import POLICIES as BIGDATA_POLICIES
+from scripts.apply_cloud_default_alerts import POLICIES as CLOUD_POLICIES
 from scripts.apply_db_default_alerts import POLICIES as DB_POLICIES
 from scripts.apply_middleware_default_alerts import POLICIES as MIDDLEWARE_POLICIES
+from scripts.apply_network_default_alerts import POLICIES as NETWORK_POLICIES
 from scripts.apply_os_default_alerts import POLICIES as OS_POLICIES
 from scripts.apply_server_default_alerts import POLICIES as SERVER_POLICIES
 from scripts.apply_service_default_alerts import POLICIES as SERVICE_POLICIES
@@ -32,6 +34,14 @@ def bigdata_default_alert_rules(app: str) -> list[dict]:
     return _clone_rules(rules)
 
 
+def cloud_default_alert_rules(app: str) -> list[dict]:
+    app_key = str(app or "").strip().lower()
+    rules = CLOUD_POLICIES.get(app_key)
+    if not rules:
+        return []
+    return _clone_rules(rules)
+
+
 def cache_default_alert_rules(app: str) -> list[dict]:
     app_key = str(app or "").strip().lower()
     rules = CACHE_POLICIES.get(app_key)
@@ -43,6 +53,14 @@ def cache_default_alert_rules(app: str) -> list[dict]:
 def middleware_default_alert_rules(app: str) -> list[dict]:
     app_key = str(app or "").strip().lower()
     rules = MIDDLEWARE_POLICIES.get(app_key)
+    if not rules:
+        return []
+    return _clone_rules(rules)
+
+
+def network_default_alert_rules(app: str) -> list[dict]:
+    app_key = str(app or "").strip().lower()
+    rules = NETWORK_POLICIES.get(app_key)
     if not rules:
         return []
     return _clone_rules(rules)

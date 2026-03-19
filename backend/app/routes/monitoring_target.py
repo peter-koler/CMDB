@@ -48,8 +48,10 @@ from app.services.alert_action_service import (
 from app.services.default_alert_policies import (
     bigdata_default_alert_rules,
     cache_default_alert_rules,
+    cloud_default_alert_rules,
     database_default_alert_rules,
     middleware_default_alert_rules,
+    network_default_alert_rules,
     os_default_alert_rules,
     server_default_alert_rules,
     service_default_alert_rules,
@@ -71,6 +73,7 @@ from app.services.monitoring_target_helpers import (
     _now_ms,
     _now_naive_utc,
     _paginate_items,
+    _parse_time,
     _parse_rfc3339_to_ms,
     _redis_default_alert_rules,
     _safe_total,
@@ -182,6 +185,123 @@ def _fetch_manager_payload_any(candidates: list[tuple[str, dict | None]]):
         if items:
             return payload
     return {"items": [], "total": 0}
+
+
+def _dashboard_parse_datetime(raw) -> datetime | None:
+    if raw is None:
+        return None
+    if isinstance(raw, datetime):
+        if raw.tzinfo is None:
+            return raw.replace(tzinfo=timezone.utc)
+        return raw.astimezone(timezone.utc)
+    if isinstance(raw, (int, float)):
+        ts = float(raw)
+        if ts > 1_000_000_000_000:
+            ts = ts / 1000.0
+        try:
+            return datetime.fromtimestamp(ts, tz=timezone.utc)
+        except (OverflowError, OSError, ValueError):
+            return None
+    text = str(raw).strip()
+    if not text:
+        return None
+    if text.isdigit():
+        try:
+            val = int(text)
+        except (TypeError, ValueError):
+            val = 0
+        if val:
+            ts = val / 1000.0 if val > 1_000_000_000_000 else float(val)
+            try:
+                return datetime.fromtimestamp(ts, tz=timezone.utc)
+            except (OverflowError, OSError, ValueError):
+                return None
+    return _parse_time(text)
+
+
+def _dashboard_parse_ts_ms(raw) -> int | None:
+    dt = _dashboard_parse_datetime(raw)
+    if dt:
+        return int(dt.timestamp() * 1000)
+    return None
+
+
+def _dashboard_normalize_alert_item(item: dict, index: int) -> dict:
+    labels = item.get("labels") if isinstance(item.get("labels"), dict) else {}
+    annotations = item.get("annotations") if isinstance(item.get("annotations"), dict) else {}
+    if not labels and item.get("labels_json"):
+        labels = _json_load(item.get("labels_json"), {})
+        if not isinstance(labels, dict):
+            labels = {}
+    if not annotations and item.get("annotations_json"):
+        annotations = _json_load(item.get("annotations_json"), {})
+        if not isinstance(annotations, dict):
+            annotations = {}
+
+    content = (
+        item.get("content")
+        or item.get("message")
+        or item.get("description")
+        or annotations.get("summary")
+        or annotations.get("title")
+        or ""
+    )
+
+    raw_status = str(item.get("status") or item.get("state") or "").strip().lower()
+    if raw_status in {"resolved", "closed", "recovered", "ok"}:
+        status = "resolved"
+    else:
+        status = "firing"
+
+    start_ms = None
+    for key in ("start_at", "startsAt", "startAt", "triggered_at", "triggeredAt", "activeAt", "created_at"):
+        start_ms = _dashboard_parse_ts_ms(item.get(key))
+        if start_ms:
+            break
+
+    end_ms = None
+    for key in ("end_at", "endsAt", "endAt", "recovered_at", "resolvedAt"):
+        end_ms = _dashboard_parse_ts_ms(item.get(key))
+        if end_ms:
+            break
+
+    created_at = None
+    for key in ("created_at", "createdAt", "updated_at", "updatedAt"):
+        created_at = _dashboard_parse_datetime(item.get(key))
+        if created_at:
+            break
+
+    raw_id = item.get("id")
+    try:
+        row_id = int(raw_id)
+    except (TypeError, ValueError):
+        row_id = index + 1
+
+    alert = extract_alert_item(
+        row_id=row_id,
+        labels_json=_json_dump(labels),
+        annotations_json=_json_dump(annotations),
+        content=str(content),
+        status=status,
+        start_at=start_ms,
+        end_at=end_ms,
+        created_at=created_at,
+        json_load=_json_load,
+        ms_to_rfc3339=_ms_to_rfc3339,
+        now_ms_provider=_now_ms,
+    )
+    explicit_name = str(item.get("name") or item.get("title") or "").strip()
+    explicit_monitor_name = str(item.get("monitor_name") or item.get("instance") or item.get("target") or "").strip()
+    if explicit_name:
+        alert["name"] = explicit_name
+    if explicit_monitor_name:
+        alert["monitor_name"] = explicit_monitor_name
+    if not str(alert.get("monitor_name") or "").strip():
+        alert["monitor_name"] = str(item.get("app") or "-")
+    if not str(alert.get("name") or "").strip():
+        fallback_name = str(alert.get("content") or item.get("app") or f"alert-{row_id}").strip()
+        alert["name"] = fallback_name
+    return alert
 
 
 def _page_args() -> tuple[int, int]:
@@ -564,6 +684,9 @@ def _load_monitor_default_alert_rules(monitor: dict) -> list[dict]:
     rules = bigdata_default_alert_rules(app)
     if rules:
         return rules
+    rules = cloud_default_alert_rules(app)
+    if rules:
+        return rules
     rules = database_default_alert_rules(app)
     if rules:
         return rules
@@ -571,6 +694,9 @@ def _load_monitor_default_alert_rules(monitor: dict) -> list[dict]:
     if rules:
         return rules
     rules = middleware_default_alert_rules(app)
+    if rules:
+        return rules
+    rules = network_default_alert_rules(app)
     if rules:
         return rules
     rules = webserver_default_alert_rules(app)
@@ -2131,39 +2257,62 @@ def publish_alert_event():
 def monitoring_dashboard():
     try:
         monitor_payload = _fetch_manager_payload("/api/v1/monitors", params={"page": 1, "page_size": 5000})
-        now = datetime.now(timezone.utc)
-        start = now - timedelta(hours=24)
-        current_alert_payload = _fetch_manager_payload_any(
-            [
-                ("/api/v1/alerts", {"page": 1, "page_size": 200, "status": "pending"}),
-                ("/api/v1/alerts", {"page": 1, "page_size": 200, "scope": "current"}),
-            ]
-        )
-        history_alert_payload = _fetch_manager_payload_any(
-            [
-                (
-                    "/api/v1/alerts",
-                    {
-                        "page": 1,
-                        "page_size": 1000,
-                        "from": start.isoformat().replace("+00:00", "Z"),
-                        "to": now.isoformat().replace("+00:00", "Z"),
-                    },
-                ),
-                ("/api/v1/alerts/history", {"range": "24h", "page": 1, "page_size": 1000}),
-            ]
-        )
     except ManagerError as e:
         return jsonify({"code": e.status, "message": e.message, "error_code": e.code}), e.status
 
     monitors = _normalize_items(monitor_payload)
-    current_alerts = _normalize_items(current_alert_payload)
-    history_alerts = _normalize_items(history_alert_payload)
+    current_rows = (
+        SingleAlert.query.filter_by(status="firing")
+        .order_by(SingleAlert.updated_at.desc(), SingleAlert.id.desc())
+        .limit(200)
+        .all()
+    )
+    current_alerts = [
+        extract_alert_item(
+            row_id=row.id,
+            labels_json=row.labels_json,
+            annotations_json=row.annotations_json,
+            content=row.content,
+            status=row.status,
+            start_at=row.start_at,
+            end_at=row.end_at,
+            created_at=row.created_at,
+            json_load=_json_load,
+            ms_to_rfc3339=_ms_to_rfc3339,
+            now_ms_provider=_now_ms,
+        )
+        for row in current_rows
+    ]
+
+    now_naive = _now_naive_utc()
+    start_naive = now_naive - timedelta(hours=24)
+    history_rows = (
+        AlertHistory.query.filter(AlertHistory.created_at >= start_naive)
+        .order_by(AlertHistory.created_at.desc(), AlertHistory.id.desc())
+        .limit(2000)
+        .all()
+    )
+    history_alerts = [
+        extract_alert_item(
+            row_id=row.id,
+            labels_json=row.labels_json,
+            annotations_json=row.annotations_json,
+            content=row.content,
+            status=row.status,
+            start_at=row.start_at,
+            end_at=row.end_at,
+            created_at=row.created_at,
+            json_load=_json_load,
+            ms_to_rfc3339=_ms_to_rfc3339,
+            now_ms_provider=_now_ms,
+        )
+        for row in history_rows
+    ]
 
     total_monitors = _safe_total(monitor_payload, monitors)
     healthy_monitors = sum(1 for item in monitors if _monitor_is_healthy(item))
     unhealthy_monitors = max(total_monitors - healthy_monitors, 0)
-    open_alerts = _safe_total(current_alert_payload, current_alerts)
+    open_alerts = SingleAlert.query.filter_by(status="firing").count()
 
     success_rate = round((healthy_monitors / total_monitors * 100), 2) if total_monitors > 0 else 100.0
     success_rate_trend = _hourly_alert_trend(history_alerts)
@@ -2184,7 +2333,7 @@ def monitoring_dashboard():
         "alert_trend": _hourly_alert_trend(history_alerts),
         "success_rate_trend": success_rate_trend,
         "top_alert_monitors": _top_alert_monitors(current_alerts),
-        "recent_alerts": current_alerts[:5],
+        "recent_alerts": current_alerts[:8],
     }
     return jsonify({"code": 200, "data": data})
 

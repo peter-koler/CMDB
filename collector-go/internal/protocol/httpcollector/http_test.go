@@ -133,6 +133,41 @@ func TestCollectDigestAuth(t *testing.T) {
 	}
 }
 
+func TestCollectBearerAuthAndQueryParams(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer token-123" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if got := r.URL.Query().Get("stream"); got != "false" {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		_, _ = w.Write([]byte(`{"ok":"true"}`))
+	}))
+	defer srv.Close()
+
+	c := &Collector{}
+	fields, _, err := c.Collect(context.Background(), model.MetricsTask{
+		Name:     "k8s",
+		Protocol: "http",
+		Params: map[string]string{
+			"url":                            srv.URL,
+			"parseType":                      "default",
+			"authorization.type":             "Bearer Token",
+			"authorization.bearerTokenToken": "token-123",
+			"params.stream":                  "false",
+		},
+		FieldSpecs: []model.FieldSpec{{Field: "ok"}},
+	})
+	if err != nil {
+		t.Fatalf("collect failed: %v", err)
+	}
+	if fields["ok"] != "true" {
+		t.Fatalf("ok want=true got=%s", fields["ok"])
+	}
+}
+
 func TestCollectXMLPathAndConfig(t *testing.T) {
 	xmlSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`<DeviceStatus><CPUList><CPU><cpuUtilization>68</cpuUtilization></CPU></CPUList></DeviceStatus>`))
