@@ -122,8 +122,12 @@ def init_monitoring_templates(app):
     if MonitorCategory.query.count() == 0:
         default_categories = [
             {"name": "数据库", "code": "db", "icon": "database"},
+            {"name": "缓存", "code": "cache", "icon": "database"},
+            {"name": "服务器", "code": "server", "icon": "hdd"},
+            {"name": "大数据", "code": "bigdata", "icon": "cluster"},
             {"name": "操作系统", "code": "os", "icon": "desktop"},
             {"name": "中间件", "code": "middleware", "icon": "cluster"},
+            {"name": "Web服务器", "code": "webserver", "icon": "deployment-unit"},
             {"name": "云服务", "code": "cloud", "icon": "cloud"},
             {"name": "网络设备", "code": "network", "icon": "global"},
             {"name": "自定义", "code": "custom", "icon": "code"},

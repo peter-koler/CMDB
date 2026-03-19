@@ -113,7 +113,7 @@
 
     <a-modal
       v-model:open="modalOpen"
-      :title="editing?.id ? '编辑监控' : '新增监控'"
+      :title="modalTitle"
       @ok="saveTarget"
       :confirm-loading="saving"
       width="760px"
@@ -182,7 +182,7 @@
                 @focus="loadTemplates"
                 @change="handleTemplateChange"
               >
-                <a-select-option v-for="t in templates" :key="t.app" :value="t.app">
+                <a-select-option v-for="t in modalTemplates" :key="t.app" :value="t.app">
                   {{ t.name }} ({{ t.app }})
                 </a-select-option>
               </a-select>
@@ -196,9 +196,9 @@
           </a-col>
         </a-row>
 
-        <a-form-item v-if="visibleParamDefs.length" label="模板参数 (params)">
+        <a-form-item v-if="requiredParamDefs.length" label="必填参数 (params)">
           <a-row :gutter="12">
-            <a-col :span="12" v-for="param in visibleParamDefs" :key="param.field" style="margin-bottom: 12px">
+            <a-col :span="12" v-for="param in requiredParamDefs" :key="param.field" style="margin-bottom: 12px">
               <a-form-item :label="paramLabel(param)" :required="Boolean(param.required)" style="margin-bottom: 0">
                 <a-input-number
                   v-if="param.type === 'number'"
@@ -232,6 +232,48 @@
               </a-form-item>
             </a-col>
           </a-row>
+        </a-form-item>
+
+        <a-form-item v-if="optionalParamDefs.length" label="非必填参数">
+          <a-collapse v-model:activeKey="optionalParamsActiveKeys" ghost>
+            <a-collapse-panel key="optional" header="展开配置非必填参数">
+              <a-row :gutter="12">
+                <a-col :span="12" v-for="param in optionalParamDefs" :key="param.field" style="margin-bottom: 12px">
+                  <a-form-item :label="paramLabel(param)" style="margin-bottom: 0">
+                    <a-input-number
+                      v-if="param.type === 'number'"
+                      v-model:value="formState.params[param.field]"
+                      style="width: 100%"
+                    />
+                    <a-select
+                      v-else-if="param.type === 'boolean'"
+                      v-model:value="formState.params[param.field]"
+                      style="width: 100%"
+                    >
+                      <a-select-option value="true">true</a-select-option>
+                      <a-select-option value="false">false</a-select-option>
+                    </a-select>
+                    <a-input-password
+                      v-else-if="param.type === 'password'"
+                      v-model:value="formState.params[param.field]"
+                      :placeholder="paramPlaceholder(param)"
+                    />
+                    <a-textarea
+                      v-else-if="param.type === 'textarea'"
+                      v-model:value="formState.params[param.field]"
+                      :placeholder="paramPlaceholder(param)"
+                      :rows="2"
+                    />
+                    <a-input
+                      v-else
+                      v-model:value="formState.params[param.field]"
+                      :placeholder="paramPlaceholder(param)"
+                    />
+                  </a-form-item>
+                </a-col>
+              </a-row>
+            </a-collapse-panel>
+          </a-collapse>
         </a-form-item>
 
         <a-form-item label="采集器分配">
@@ -353,6 +395,11 @@ const selectedCategoryName = computed(() => {
   }
   return findName(categoryTree.value)
 })
+const modalTitle = computed(() => {
+  if (editing.value?.id) return '编辑监控'
+  if (!createContextCategoryName.value) return '新增监控'
+  return `新增监控（${createContextCategoryName.value}）`
+})
 
 const templates = ref<MonitorTemplate[]>([])
 const templatesLoading = ref(false)
@@ -376,6 +423,9 @@ const batchInterval = ref<number>(60)
 
 const modalOpen = ref(false)
 const editing = ref<MonitoringTarget | null>(null)
+const createContextCategory = ref<string | null>(null)
+const createContextCategoryName = computed(() => resolveCategoryContextName(createContextCategory.value))
+const optionalParamsActiveKeys = ref<string[]>([])
 const formState = reactive({
   name: '',
   app: '',
@@ -424,11 +474,28 @@ const rowSelection = computed(() => ({
 }))
 
 const selectedTemplate = computed(() => templates.value.find((item) => item.app === formState.app))
-const visibleParamDefs = computed(() => {
+const modalTemplates = computed(() => {
+  if (editing.value?.id) return templates.value
+  const categoryKey = createContextCategory.value
+  if (!categoryKey) return templates.value
+  const apps = resolveSelectedApps(categoryKey)
+  if (!apps.size) return templates.value
+  return templates.value.filter((item) => item.app && apps.has(item.app))
+})
+const allParamDefs = computed(() => {
   const parsed = parsedTemplateMap.value[formState.app]
   if (!parsed?.params?.length) return []
-  return parsed.params.filter((item) => item && item.field && !item.hide)
+  return parsed.params.filter((item) => item && item.field)
 })
+const requiredParamDefs = computed(() => allParamDefs.value.filter((item) => isParamRequired(item)))
+const optionalParamDefs = computed(() => allParamDefs.value.filter((item) => !isParamRequired(item)))
+
+function isParamRequired(param: TemplateParamDef): boolean {
+  const raw = param?.required
+  if (typeof raw === 'boolean') return raw
+  const text = String(raw ?? '').trim().toLowerCase()
+  return text === 'true' || text === '1' || text === 'yes' || text === 'on'
+}
 
 function parseTemplateContent(content: string): ParsedTemplate {
   try {
@@ -573,6 +640,24 @@ function findTreeNodeByCode(nodes: CategoryTreeNode[], code: string): CategoryTr
     }
   }
   return null
+}
+
+function resolveCategoryContextName(code: string | null): string {
+  if (!code) return ''
+  const walk = (nodes: CategoryTreeNode[], parentCategoryName = ''): string => {
+    for (const node of nodes) {
+      const currentCategory = node.nodeType === 'category' ? node.name : parentCategoryName
+      if (node.code === code) {
+        return node.nodeType === 'category' ? node.name : parentCategoryName
+      }
+      if (node.children?.length) {
+        const hit = walk(node.children, currentCategory)
+        if (hit) return hit
+      }
+    }
+    return ''
+  }
+  return walk(categoryTree.value)
 }
 
 function collectApps(node: CategoryTreeNode, out: Set<string>) {
@@ -761,12 +846,13 @@ function resetForm() {
   formState.pin_collector = false
   formState.apply_default_alerts = true
   formState.params = {}
+  optionalParamsActiveKeys.value = []
   ciOptions.value = []
 }
 
 function applyTemplateDefaults() {
   const params = { ...(formState.params || {}) }
-  for (const param of visibleParamDefs.value) {
+  for (const param of allParamDefs.value) {
     if (params[param.field] === undefined || params[param.field] === null || params[param.field] === '') {
       if (param.defaultValue !== undefined && param.defaultValue !== null) {
         params[param.field] = String(param.defaultValue)
@@ -777,12 +863,33 @@ function applyTemplateDefaults() {
 }
 
 function handleTemplateChange() {
+  optionalParamsActiveKeys.value = []
   applyTemplateDefaults()
+}
+
+function applyDefaultTemplateByCategory(categoryKey: string | null) {
+  if (!categoryKey) return
+  if (categoryKey.startsWith('tpl:')) {
+    const app = categoryKey.slice(4)
+    if (app && templates.value.some((tpl) => tpl.app === app)) {
+      formState.app = app
+      applyTemplateDefaults()
+    }
+    return
+  }
+  const apps = resolveSelectedApps(categoryKey)
+  if (!apps.size) return
+  const hit = templates.value.find((tpl) => tpl.app && apps.has(tpl.app))
+  if (hit?.app) {
+    formState.app = hit.app
+    applyTemplateDefaults()
+  }
 }
 
 async function openModal(record?: MonitoringTarget) {
   await Promise.all([loadTemplates(), loadCollectors(), loadModels()])
   editing.value = record || null
+  createContextCategory.value = record ? null : selectedCategory.value
   resetForm()
 
   if (record) {
@@ -800,7 +907,14 @@ async function openModal(record?: MonitoringTarget) {
       await loadCiOptions(formState.ci_model_id)
     }
     applyTemplateDefaults()
+    const hasOptionalValues = optionalParamDefs.value.some((param) => {
+      const val = formState.params[param.field]
+      return val !== undefined && val !== null && String(val).trim() !== ''
+    })
+    optionalParamsActiveKeys.value = hasOptionalValues ? ['optional'] : []
     syncingFormFromRecord.value = false
+  } else {
+    applyDefaultTemplateByCategory(createContextCategory.value)
   }
 
   modalOpen.value = true

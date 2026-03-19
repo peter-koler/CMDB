@@ -12,6 +12,7 @@ import (
 	"collector-go/internal/model"
 	"collector-go/internal/protocol"
 
+	_ "github.com/ClickHouse/clickhouse-go/v2"
 	_ "github.com/go-sql-driver/mysql"
 )
 
@@ -31,7 +32,7 @@ func (c *Collector) Collect(ctx context.Context, task model.MetricsTask) (map[st
 	if platform == "" {
 		platform = "mysql"
 	}
-	if platform != "mysql" {
+	if platform != "mysql" && platform != "clickhouse" {
 		return nil, "", fmt.Errorf("unsupported jdbc platform: %s", platform)
 	}
 	sqlQuery := strings.TrimSpace(task.Params["sql"])
@@ -42,8 +43,9 @@ func (c *Collector) Collect(ctx context.Context, task model.MetricsTask) (map[st
 	if queryType == "" {
 		queryType = "columns"
 	}
+	aliasFields := parseAliasFields(task.Params["alias_fields"])
 
-	dsn, err := buildMySQLDSN(task.Params)
+	dsn, err := buildDSN(task.Params, platform)
 	if err != nil {
 		return nil, "", err
 	}
@@ -52,7 +54,7 @@ func (c *Collector) Collect(ctx context.Context, task model.MetricsTask) (map[st
 	if timeout <= 0 {
 		timeout = 5 * time.Second
 	}
-	db, err := getOrCreateDB(dsn, timeout)
+	db, err := getOrCreateDB(platform, dsn, timeout)
 	if err != nil {
 		return nil, "", err
 	}
@@ -60,42 +62,47 @@ func (c *Collector) Collect(ctx context.Context, task model.MetricsTask) (map[st
 	ctx2, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	if err := db.PingContext(ctx2); err != nil {
-		return nil, "", fmt.Errorf("mysql ping failed: %w", err)
+		return nil, "", fmt.Errorf("%s ping failed: %w", platform, err)
 	}
 
 	rows, err := db.QueryContext(ctx2, sqlQuery)
 	if err != nil {
-		return nil, "", fmt.Errorf("mysql query failed: %w", err)
+		return nil, "", fmt.Errorf("%s query failed: %w", platform, err)
 	}
 	defer rows.Close()
 
 	switch queryType {
 	case "columns":
-		return collectColumns(rows)
+		return collectColumns(rows, aliasFields)
 	case "onerow":
-		return collectOneRow(rows)
+		return collectOneRow(rows, aliasFields)
 	case "multirow":
-		return collectMultiRow(rows)
+		return collectMultiRow(rows, aliasFields)
 	default:
 		return nil, "", fmt.Errorf("unsupported queryType: %s", queryType)
 	}
 }
 
-func getOrCreateDB(dsn string, timeout time.Duration) (*sql.DB, error) {
-	if raw, ok := dbPool.Load(dsn); ok {
+func getOrCreateDB(platform, dsn string, timeout time.Duration) (*sql.DB, error) {
+	key := platform + "|" + dsn
+	if raw, ok := dbPool.Load(key); ok {
 		if db, ok2 := raw.(*sql.DB); ok2 {
 			return db, nil
 		}
 	}
-	db, err := sql.Open("mysql", dsn)
+	driver := "mysql"
+	if platform == "clickhouse" {
+		driver = "clickhouse"
+	}
+	db, err := sql.Open(driver, dsn)
 	if err != nil {
-		return nil, fmt.Errorf("open mysql failed: %w", err)
+		return nil, fmt.Errorf("open %s failed: %w", platform, err)
 	}
 	db.SetConnMaxIdleTime(2 * time.Minute)
 	db.SetConnMaxLifetime(15 * time.Minute)
 	db.SetMaxOpenConns(8)
 	db.SetMaxIdleConns(4)
-	actual, loaded := dbPool.LoadOrStore(dsn, db)
+	actual, loaded := dbPool.LoadOrStore(key, db)
 	if loaded {
 		_ = db.Close()
 		if pooled, ok := actual.(*sql.DB); ok {
@@ -104,6 +111,13 @@ func getOrCreateDB(dsn string, timeout time.Duration) (*sql.DB, error) {
 		return nil, fmt.Errorf("invalid db pool entry")
 	}
 	return db, nil
+}
+
+func buildDSN(params map[string]string, platform string) (string, error) {
+	if platform == "clickhouse" {
+		return buildClickHouseDSN(params)
+	}
+	return buildMySQLDSN(params)
 }
 
 func buildMySQLDSN(params map[string]string) (string, error) {
@@ -121,21 +135,15 @@ func buildMySQLDSN(params map[string]string) (string, error) {
 	user := strings.TrimSpace(params["username"])
 	pass := strings.TrimSpace(params["password"])
 	database := strings.TrimSpace(params["database"])
-	timeout := strings.TrimSpace(params["timeout"])
-	if timeout == "" {
-		timeout = "5000"
-	}
-	ms, err := time.ParseDuration(timeout + "ms")
-	if err != nil {
-		ms = 5 * time.Second
-	}
+	ms := parseTimeoutDuration(strings.TrimSpace(params["timeout"]), 5*time.Second)
 	addr := net.JoinHostPort(host, port)
 	return fmt.Sprintf("%s:%s@tcp(%s)/%s?timeout=%s&readTimeout=%s&writeTimeout=%s&parseTime=false",
 		user, pass, addr, database, ms.String(), ms.String(), ms.String()), nil
 }
 
-func collectColumns(rows *sql.Rows) (map[string]string, string, error) {
-	out := map[string]string{}
+func collectColumns(rows *sql.Rows, aliasFields []string) (map[string]string, string, error) {
+	out := make(map[string]string)
+	valuesByLower := make(map[string]string)
 	for rows.Next() {
 		var key sql.NullString
 		var value sql.NullString
@@ -145,15 +153,28 @@ func collectColumns(rows *sql.Rows) (map[string]string, string, error) {
 		if !key.Valid || strings.TrimSpace(key.String) == "" {
 			continue
 		}
-		out[strings.TrimSpace(key.String)] = strings.TrimSpace(value.String)
+		k := strings.TrimSpace(key.String)
+		v := strings.TrimSpace(value.String)
+		out[k] = v
+		valuesByLower[strings.ToLower(k)] = v
 	}
 	if err := rows.Err(); err != nil {
 		return nil, "", err
 	}
+	if len(aliasFields) > 0 {
+		filtered := make(map[string]string, len(aliasFields))
+		for _, alias := range aliasFields {
+			if alias == "" {
+				continue
+			}
+			filtered[alias] = valuesByLower[strings.ToLower(alias)]
+		}
+		return filtered, "ok", nil
+	}
 	return out, "ok", nil
 }
 
-func collectOneRow(rows *sql.Rows) (map[string]string, string, error) {
+func collectOneRow(rows *sql.Rows, aliasFields []string) (map[string]string, string, error) {
 	cols, err := rows.Columns()
 	if err != nil {
 		return nil, "", err
@@ -165,13 +186,18 @@ func collectOneRow(rows *sql.Rows) (map[string]string, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
+	data = projectRow(data, cols, aliasFields)
 	return data, "ok", nil
 }
 
-func collectMultiRow(rows *sql.Rows) (map[string]string, string, error) {
+func collectMultiRow(rows *sql.Rows, aliasFields []string) (map[string]string, string, error) {
 	cols, err := rows.Columns()
 	if err != nil {
 		return nil, "", err
+	}
+	selected := aliasFields
+	if len(selected) == 0 {
+		selected = cols
 	}
 	out := map[string]string{}
 	index := 0
@@ -181,7 +207,12 @@ func collectMultiRow(rows *sql.Rows) (map[string]string, string, error) {
 		if err != nil {
 			return nil, "", err
 		}
-		for k, v := range row {
+		projected := projectRow(row, cols, selected)
+		for k, v := range projected {
+			if index == 1 {
+				// Keep first-row canonical fields for compatibility with field_specs/calculates.
+				out[k] = v
+			}
 			out[fmt.Sprintf("row%d_%s", index, k)] = v
 		}
 	}

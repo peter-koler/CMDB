@@ -91,6 +91,7 @@ func (d *Dispatcher) executeJobCycle(ctx context.Context, job model.Job) {
 	}
 	redisCache := newRedisCycleCache()
 	jdbcCache := newJDBCCycleCache()
+	valueStore := newCycleValueStore()
 	for i := 0; i < len(job.Tasks); {
 		p := job.Tasks[i].Priority
 		j := i + 1
@@ -103,7 +104,7 @@ func (d *Dispatcher) executeJobCycle(ctx context.Context, job model.Job) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				d.executeTask(ctx, job, task, redisCache, jdbcCache)
+				d.executeTask(ctx, job, task, redisCache, jdbcCache, valueStore)
 			}()
 		}
 		wg.Wait()
@@ -136,7 +137,7 @@ func (d *Dispatcher) submitWithRetry(ctx context.Context, task worker.Task, job 
 	}
 }
 
-func (d *Dispatcher) executeTask(ctx context.Context, job model.Job, task model.MetricsTask, redisCache *redisCycleCache, jdbcCache *jdbcCycleCache) {
+func (d *Dispatcher) executeTask(ctx context.Context, job model.Job, task model.MetricsTask, redisCache *redisCycleCache, jdbcCache *jdbcCycleCache, valueStore *cycleValueStore) {
 	collector, err := protocol.Get(task.Protocol)
 	if err != nil {
 		d.pushResult(ctx, model.Result{
@@ -152,7 +153,7 @@ func (d *Dispatcher) executeTask(ctx context.Context, job model.Job, task model.
 		ctx2 = cancelCtx
 	}
 	start := time.Now()
-	fields, msg, err := d.collectWithCache(ctx2, collector, task, redisCache, jdbcCache)
+	fields, msg, err := d.collectDynamicTask(ctx2, collector, task, redisCache, jdbcCache, valueStore)
 	latency := time.Since(start)
 	if err == nil {
 		fields, err = pipeline.Apply(fields, task.Transform)
@@ -189,7 +190,37 @@ func (d *Dispatcher) executeTask(ctx context.Context, job model.Job, task model.
 			res.Fields["__precompute_summary__"] = summary
 		}
 	}
+	if err == nil && valueStore != nil {
+		valueStore.Save(fields)
+	}
 	d.pushResult(ctx, res)
+}
+
+func (d *Dispatcher) collectDynamicTask(ctx context.Context, collector protocol.Collector, task model.MetricsTask, redisCache *redisCycleCache, jdbcCache *jdbcCycleCache, valueStore *cycleValueStore) (map[string]string, string, error) {
+	variants := []model.MetricsTask{task}
+	if valueStore != nil {
+		resolved := valueStore.Resolve(task)
+		if len(resolved) == 0 && taskHasDynamicPlaceholders(task) {
+			return nil, "", fmt.Errorf("dynamic placeholder values missing")
+		}
+		if len(resolved) > 0 {
+			variants = resolved
+		}
+	}
+	if len(variants) == 1 {
+		return d.collectWithCache(ctx, collector, variants[0], redisCache, jdbcCache)
+	}
+	parts := make([]map[string]string, 0, len(variants))
+	msg := "ok"
+	for _, variant := range variants {
+		fields, oneMsg, err := d.collectWithCache(ctx, collector, variant, redisCache, jdbcCache)
+		if err != nil {
+			return nil, oneMsg, err
+		}
+		msg = oneMsg
+		parts = append(parts, fields)
+	}
+	return mergeCollectedFields(parts), msg, nil
 }
 
 func (d *Dispatcher) collectWithCache(ctx context.Context, collector protocol.Collector, task model.MetricsTask, redisCache *redisCycleCache, jdbcCache *jdbcCycleCache) (map[string]string, string, error) {

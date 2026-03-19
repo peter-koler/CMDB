@@ -26,6 +26,11 @@ metrics:
     calculates:
       - query_cache_hit_rate=(Qcache_hits + 1) / (Qcache_hits + Qcache_inserts + 1) * 100
       - cache_hits=Qcache_hits
+    aliasFields:
+      - Qcache_hits
+      - Qcache_inserts
+    units:
+      - cache_hits=B->KB
     jdbc:
       host: ^_^host^_^
       port: ^_^port^_^
@@ -65,6 +70,12 @@ metrics:
 	}
 	if len(task.GetCalculateSpecs()) != 2 {
 		t.Fatalf("unexpected calculates: %+v", task.GetCalculateSpecs())
+	}
+	if got := task.GetParams()["alias_fields"]; got != "Qcache_hits,Qcache_inserts" {
+		t.Fatalf("unexpected alias_fields: %q", got)
+	}
+	if len(task.GetTransform()) != 1 || task.GetTransform()[0].GetField() != "cache_hits" {
+		t.Fatalf("unexpected unit transforms: %+v", task.GetTransform())
 	}
 	if task.GetFieldSpecs()[0].GetField() != "query_cache_hit_rate" {
 		t.Fatalf("unexpected field specs: %+v", task.GetFieldSpecs())

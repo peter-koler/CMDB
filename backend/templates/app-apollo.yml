@@ -436,3 +436,148 @@ metrics:
       url: /prometheus
       method: GET
       parseType: prometheus
+
+alerts:
+  - key: 'apollo_unavailable'
+    name: 'Apollo实例不可用'
+    type: 'realtime_metric'
+    metric: 'apollo_server_up'
+    operator: '=='
+    threshold: 0
+    level: 'critical'
+    period: 60
+    times: 1
+    mode: 'core'
+    enabled: true
+    expr: 'apollo_server_up == 0'
+    template: '实例不可用'
+  - key: 'apollo_ready_time_high'
+    name: 'Apollo启动耗时偏高'
+    type: 'periodic_metric'
+    metric: 'metric_value'
+    operator: '>'
+    threshold: 60
+    level: 'warning'
+    period: 1800
+    times: 1
+    mode: 'extended'
+    enabled: false
+    expr: 'metric_value > 60'
+    template: '启动耗时偏高'
+  - key: 'apollo_uptime_short'
+    name: 'Apollo运行时长过短'
+    type: 'periodic_metric'
+    metric: 'metric_value'
+    operator: '<'
+    threshold: 3600
+    level: 'warning'
+    period: 600
+    times: 1
+    mode: 'extended'
+    enabled: false
+    expr: 'metric_value < 3600'
+    template: '运行时长过短'
+  - key: 'apollo_process_cpu_high'
+    name: 'Apollo进程CPU使用率偏高'
+    type: 'periodic_metric'
+    metric: 'metric_value'
+    operator: '>'
+    threshold: 75
+    level: 'warning'
+    period: 300
+    times: 2
+    mode: 'core'
+    enabled: true
+    expr: 'metric_value > 75'
+    template: '进程CPU使用率偏高'
+  - key: 'apollo_process_cpu_critical'
+    name: 'Apollo进程CPU使用率过高'
+    type: 'periodic_metric'
+    metric: 'metric_value'
+    operator: '>'
+    threshold: 90
+    level: 'critical'
+    period: 300
+    times: 1
+    mode: 'core'
+    enabled: true
+    expr: 'metric_value > 90'
+    template: '进程CPU使用率过高'
+  - key: 'apollo_system_cpu_high'
+    name: 'Apollo系统CPU使用率偏高'
+    type: 'periodic_metric'
+    metric: 'metric_value'
+    operator: '>'
+    threshold: 80
+    level: 'warning'
+    period: 300
+    times: 2
+    mode: 'core'
+    enabled: true
+    expr: 'metric_value > 80'
+    template: '系统CPU使用率偏高'
+  - key: 'apollo_system_load_high'
+    name: 'Apollo系统负载偏高'
+    type: 'periodic_metric'
+    metric: 'metric_value'
+    operator: '>'
+    threshold: 8
+    level: 'warning'
+    period: 300
+    times: 2
+    mode: 'extended'
+    enabled: false
+    expr: 'metric_value > 8'
+    template: '系统负载偏高'
+  - key: 'apollo_heap_committed_high'
+    name: 'Apollo堆内存提交量偏高'
+    type: 'periodic_metric'
+    metric: 'metric_value'
+    operator: '>'
+    threshold: 2147483648
+    level: 'warning'
+    period: 300
+    times: 2
+    mode: 'core'
+    enabled: true
+    expr: '(area == ''heap'') && metric_value > 2147483648'
+    template: '堆内存提交量偏高'
+  - key: 'apollo_heap_used_high'
+    name: 'Apollo堆内存使用偏高'
+    type: 'periodic_metric'
+    metric: 'metric_value'
+    operator: '>'
+    threshold: 1717986918
+    level: 'warning'
+    period: 300
+    times: 2
+    mode: 'core'
+    enabled: true
+    expr: '(area == ''heap'') && metric_value > 1717986918'
+    template: '堆内存使用偏高'
+  - key: 'apollo_heap_used_critical'
+    name: 'Apollo堆内存使用过高'
+    type: 'periodic_metric'
+    metric: 'metric_value'
+    operator: '>'
+    threshold: 3221225472
+    level: 'critical'
+    period: 300
+    times: 1
+    mode: 'extended'
+    enabled: false
+    expr: '(area == ''heap'') && metric_value > 3221225472'
+    template: '堆内存使用过高'
+  - key: 'apollo_nonheap_used_high'
+    name: 'Apollo非堆内存使用偏高'
+    type: 'periodic_metric'
+    metric: 'metric_value'
+    operator: '>'
+    threshold: 1073741824
+    level: 'warning'
+    period: 300
+    times: 2
+    mode: 'extended'
+    enabled: false
+    expr: '(area == ''nonheap'') && metric_value > 1073741824'
+    template: '非堆内存使用偏高'

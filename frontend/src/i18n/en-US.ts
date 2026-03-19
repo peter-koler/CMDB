@@ -270,6 +270,11 @@ export default {
     categoryName: 'Category Name',
     categoryNamePlaceholder: 'Enter category name',
     categoryNameRequired: 'Please enter category name',
+    categoryCode: 'Category Code',
+    categoryCodePlaceholder: 'Enter category code, e.g. server, webserver, network_device',
+    categoryCodeRequired: 'Please enter category code',
+    categoryCodeInvalid: 'Category code supports lowercase letters, numbers, "_" and "-", and must start with a letter or number',
+    categoryCodeDuplicate: 'Category code already exists',
     confirmDeleteCategory: 'Confirm Delete Category',
     confirmDeleteCategoryContent: 'Deleting this category will also delete all its sub-categories. Continue?'
   }

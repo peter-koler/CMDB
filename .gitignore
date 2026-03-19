@@ -69,6 +69,9 @@ backend/app/static/avatars/*
 
 # Tools
 tools/
+!collector-go/tools/
+!collector-go/tools/ipmitool/
+!collector-go/tools/ipmitool/**
 
 # Images in docs (optional, can be kept if needed)
 # docs/images/

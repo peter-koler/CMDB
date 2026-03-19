@@ -240,4 +240,147 @@ metrics:
       sql: SELECT DISTINCT NAME, COUNT(*)  AS NUM FROM V$THREADS GROUP BY NAME ORDER BY NUM DESC;
       url: ^_^url^_^
 
-
+alerts:
+  - key: 'dm_unavailable'
+    name: 'DM实例不可用'
+    type: 'realtime_metric'
+    metric: 'dm_server_up'
+    operator: '=='
+    threshold: 0
+    level: 'critical'
+    period: 60
+    times: 1
+    mode: 'core'
+    enabled: true
+    expr: 'dm_server_up == 0'
+    template: '实例不可用'
+  - key: 'dm_sql_thread_high'
+    name: 'DM SQL线程偏高'
+    type: 'periodic_metric'
+    metric: 'dm_sql_thd'
+    operator: '>'
+    threshold: 50
+    level: 'warning'
+    period: 300
+    times: 2
+    mode: 'core'
+    enabled: true
+    expr: 'dm_sql_thd > 50'
+    template: 'SQL线程偏高'
+  - key: 'dm_sql_thread_critical'
+    name: 'DM SQL线程过高'
+    type: 'periodic_metric'
+    metric: 'dm_sql_thd'
+    operator: '>'
+    threshold: 80
+    level: 'critical'
+    period: 300
+    times: 1
+    mode: 'core'
+    enabled: true
+    expr: 'dm_sql_thd > 80'
+    template: 'SQL线程过高'
+  - key: 'dm_io_thread_high'
+    name: 'DM IO线程偏高'
+    type: 'periodic_metric'
+    metric: 'dm_io_thd'
+    operator: '>'
+    threshold: 50
+    level: 'warning'
+    period: 300
+    times: 2
+    mode: 'core'
+    enabled: true
+    expr: 'dm_io_thd > 50'
+    template: 'IO线程偏高'
+  - key: 'dm_io_thread_critical'
+    name: 'DM IO线程过高'
+    type: 'periodic_metric'
+    metric: 'dm_io_thd'
+    operator: '>'
+    threshold: 80
+    level: 'critical'
+    period: 300
+    times: 1
+    mode: 'core'
+    enabled: true
+    expr: 'dm_io_thd > 80'
+    template: 'IO线程过高'
+  - key: 'dm_quit_thread_detected'
+    name: 'DM退出线程告警'
+    type: 'realtime_metric'
+    metric: 'dm_quit_thd'
+    operator: '>'
+    threshold: 0
+    level: 'critical'
+    period: 60
+    times: 1
+    mode: 'core'
+    enabled: true
+    expr: 'dm_quit_thd > 0'
+    template: '检测到退出线程'
+  - key: 'dm_thread_sum_high'
+    name: 'DM线程总量偏高'
+    type: 'periodic_metric'
+    metric: 'dm_sql_thd'
+    operator: '>'
+    threshold: 120
+    level: 'warning'
+    period: 300
+    times: 2
+    mode: 'extended'
+    enabled: false
+    expr: '(dm_sql_thd + dm_io_thd + dm_quit_thd) > 120'
+    template: '线程总量偏高'
+  - key: 'dm_thread_sum_critical'
+    name: 'DM线程总量过高'
+    type: 'periodic_metric'
+    metric: 'dm_sql_thd'
+    operator: '>'
+    threshold: 180
+    level: 'critical'
+    period: 300
+    times: 1
+    mode: 'extended'
+    enabled: false
+    expr: '(dm_sql_thd + dm_io_thd + dm_quit_thd) > 180'
+    template: '线程总量过高'
+  - key: 'dm_sql_thread_util_high'
+    name: 'DM SQL线程占比偏高'
+    type: 'periodic_metric'
+    metric: 'dm_sql_thd'
+    operator: '>'
+    threshold: 50
+    level: 'warning'
+    period: 300
+    times: 2
+    mode: 'extended'
+    enabled: false
+    expr: '(MAX_SESSIONS > 0) && ((dm_sql_thd / MAX_SESSIONS) * 100 > 50)'
+    template: 'SQL线程占比偏高'
+  - key: 'dm_io_thread_util_high'
+    name: 'DM IO线程占比偏高'
+    type: 'periodic_metric'
+    metric: 'dm_io_thd'
+    operator: '>'
+    threshold: 50
+    level: 'warning'
+    period: 300
+    times: 2
+    mode: 'extended'
+    enabled: false
+    expr: '(MAX_SESSIONS > 0) && ((dm_io_thd / MAX_SESSIONS) * 100 > 50)'
+    template: 'IO线程占比偏高'
+  - key: 'dm_max_sessions_small'
+    name: 'DM最大会话配置偏低'
+    type: 'periodic_metric'
+    metric: 'MAX_SESSIONS'
+    operator: '<'
+    threshold: 200
+    level: 'info'
+    period: 3600
+    times: 1
+    mode: 'extended'
+    enabled: false
+    expr: 'MAX_SESSIONS < 200'
+    template: '最大会话配置偏低'

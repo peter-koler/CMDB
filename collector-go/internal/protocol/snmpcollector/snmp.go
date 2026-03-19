@@ -3,9 +3,6 @@ package snmpcollector
 import (
 	"context"
 	"fmt"
-	"os/exec"
-	"strings"
-	"time"
 
 	"collector-go/internal/model"
 	"collector-go/internal/protocol"
@@ -18,38 +15,37 @@ func init() {
 }
 
 func (c *Collector) Collect(ctx context.Context, task model.MetricsTask) (map[string]string, string, error) {
-	host := task.Params["host"]
-	oid := task.Params["oid"]
-	community := task.Params["community"]
-	if community == "" {
-		community = "public"
-	}
-	if host == "" || oid == "" {
-		return nil, "", fmt.Errorf("missing host/oid")
-	}
-	port := task.Params["port"]
-	if port == "" {
-		port = "161"
-	}
-	timeout := task.Timeout
-	if timeout <= 0 {
-		timeout = 3 * time.Second
-	}
-	sec := int(timeout.Seconds())
-	if sec < 1 {
-		sec = 1
-	}
-	cmd := exec.CommandContext(ctx, "snmpget", "-v2c", "-c", community, "-t", fmt.Sprintf("%d", sec), "-r", "0", fmt.Sprintf("%s:%s", host, port), oid)
-	out, err := cmd.CombinedOutput()
-	s := strings.TrimSpace(string(out))
+	opts, err := parseOptions(task)
 	if err != nil {
-		return map[string]string{"output": s}, "snmpget failed", err
+		return nil, "", err
 	}
-	// output usually: iso.3.6... = INTEGER: 1
-	parts := strings.SplitN(s, "=", 2)
-	if len(parts) != 2 {
-		return map[string]string{"output": s}, "ok", nil
+	fields := map[string]string{}
+	if opts.Operation == "walk" {
+		for _, field := range opts.Order {
+			oid := opts.OIDs[field]
+			raw, oneErr := runSNMPCmd(ctx, "snmpwalk", buildArgs(opts, oid)...)
+			if oneErr != nil {
+				return map[string]string{"output": raw}, "snmpwalk failed", oneErr
+			}
+			vals := parseWalkValues(raw)
+			if len(vals) == 0 {
+				continue
+			}
+			fields[field] = vals[0]
+			fields[field+"_count"] = fmt.Sprintf("%d", len(vals))
+			for idx, item := range vals {
+				fields[fmt.Sprintf("row%d_%s", idx+1, field)] = item
+			}
+		}
+		return fields, "ok", nil
 	}
-	val := strings.TrimSpace(parts[1])
-	return map[string]string{"oid": oid, "value": val}, "ok", nil
+	for _, field := range opts.Order {
+		oid := opts.OIDs[field]
+		raw, oneErr := runSNMPCmd(ctx, "snmpget", buildArgs(opts, oid)...)
+		if oneErr != nil {
+			return map[string]string{"output": raw}, "snmpget failed", oneErr
+		}
+		fields[field] = parseSNMPValue(raw)
+	}
+	return fields, "ok", nil
 }

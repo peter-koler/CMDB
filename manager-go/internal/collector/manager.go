@@ -587,7 +587,7 @@ func (m *Manager) buildMetricsTasks(monitor *model.Monitor) []*pb.MetricsTask {
 	}
 	app := strings.TrimSpace(strings.ToLower(monitor.App))
 	switch app {
-	case "redis":
+	case "redis", "valkey":
 		return buildRedisTasks(monitor)
 	default:
 		return buildDefaultTasks(monitor)
@@ -638,6 +638,8 @@ func buildDefaultTasks(monitor *model.Monitor) []*pb.MetricsTask {
 	switch protocolName {
 	case "mysql", "mariadb", "postgres", "postgresql":
 		protocolName = "jdbc"
+	case "valkey":
+		protocolName = "redis"
 	}
 	params := cloneStringMap(monitor.Params)
 	if params == nil {

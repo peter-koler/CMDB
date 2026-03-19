@@ -292,6 +292,11 @@ export default {
     categoryName: '分类名称',
     categoryNamePlaceholder: '请输入分类名称',
     categoryNameRequired: '请输入分类名称',
+    categoryCode: '分类编码(category)',
+    categoryCodePlaceholder: '请输入分类编码，例如 server、webserver、network_device',
+    categoryCodeRequired: '请输入分类编码',
+    categoryCodeInvalid: '分类编码仅支持小写字母、数字、下划线、中划线，且必须以字母或数字开头',
+    categoryCodeDuplicate: '分类编码已存在，请更换',
     confirmDeleteCategory: '确认删除分类',
     confirmDeleteCategoryContent: '删除分类将同时删除该分类下的所有子分类，是否继续？',
     previewDetail: {

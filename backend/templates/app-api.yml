@@ -401,3 +401,70 @@ metrics:
       # http response data parse type: default-hertzbeat rule, jsonpath-jsonpath script, website-for website monitoring, prometheus-prometheus exporter rule
       parseType: header
       keyword: ^_^keyword^_^
+
+alerts:
+  - key: 'api_unavailable'
+    name: 'HTTP API实例不可用'
+    type: 'realtime_metric'
+    metric: 'api_server_up'
+    operator: '=='
+    threshold: 0
+    level: 'critical'
+    period: 60
+    times: 1
+    mode: 'core'
+    enabled: true
+    expr: 'api_server_up == 0'
+    template: '实例不可用'
+  - key: 'api_latency_high'
+    name: 'HTTP API响应时间偏高'
+    type: 'periodic_metric'
+    metric: 'responseTime'
+    operator: '>'
+    threshold: 800
+    level: 'warning'
+    period: 180
+    times: 2
+    mode: 'core'
+    enabled: true
+    expr: 'responseTime > 800'
+    template: '响应时间偏高'
+  - key: 'api_latency_critical'
+    name: 'HTTP API响应时间过高'
+    type: 'periodic_metric'
+    metric: 'responseTime'
+    operator: '>'
+    threshold: 2000
+    level: 'critical'
+    period: 120
+    times: 1
+    mode: 'core'
+    enabled: true
+    expr: 'responseTime > 2000'
+    template: '响应时间过高'
+  - key: 'api_status_code_abnormal'
+    name: 'HTTP API状态码异常'
+    type: 'periodic_metric'
+    metric: 'statusCode'
+    operator: '>='
+    threshold: 400
+    level: 'critical'
+    period: 120
+    times: 1
+    mode: 'core'
+    enabled: true
+    expr: 'statusCode >= 400'
+    template: '状态码异常'
+  - key: 'api_keyword_mismatch'
+    name: 'HTTP API关键字校验失败'
+    type: 'periodic_metric'
+    metric: 'keyword'
+    operator: '=='
+    threshold: 0
+    level: 'warning'
+    period: 180
+    times: 1
+    mode: 'extended'
+    enabled: false
+    expr: 'keyword == ''false'''
+    template: '关键字校验失败'

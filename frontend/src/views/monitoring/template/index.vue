@@ -214,6 +214,13 @@
             :placeholder="t('template.categoryNamePlaceholder')"
           />
         </a-form-item>
+        <a-form-item :label="t('template.categoryCode')" required>
+          <a-input
+            v-model:value="categoryForm.code"
+            :disabled="isEditMode"
+            :placeholder="t('template.categoryCodePlaceholder')"
+          />
+        </a-form-item>
       </a-form>
     </a-modal>
 
@@ -405,6 +412,11 @@ import {
   getAlertNotices,
   type AlertNotice
 } from '@/api/monitoring'
+import {
+  REDIS_DEFAULT_POLICY,
+  getBuiltinDefaultPolicyByApp,
+  type DefaultPolicyItem
+} from './default-policies'
 
 const { t, locale } = useI18n()
 
@@ -434,50 +446,10 @@ interface TreeNode {
   count?: number
 }
 
-interface DefaultPolicyItem {
-  key: string
-  name: string
-  type: 'realtime_metric' | 'periodic_metric'
-  metric: string
-  operator: string
-  threshold: number
-  level: 'critical' | 'warning' | 'info'
-  period: number
-  times: number
-  mode: 'core' | 'extended'
-  enabled: boolean
-  expr?: string
-  template?: string
-  notice_rule_id?: number
-  labels?: Record<string, string>
-  auto_recover?: boolean
-  recover_times?: number
-  notify_on_recovered?: boolean
-}
-
 interface MetricOption {
   value: string
   label: string
 }
-
-const REDIS_DEFAULT_POLICY: DefaultPolicyItem[] = [
-  { key: 'redis_unavailable', name: '实例不可用', type: 'realtime_metric', metric: 'redis_server_up', operator: '==', threshold: 0, level: 'critical', period: 60, times: 1, mode: 'core', enabled: true, expr: 'redis_server_up == 0' },
-  { key: 'redis_memory_usage_high', name: '内存使用率过高', type: 'periodic_metric', metric: 'used_memory', operator: '>', threshold: 85, level: 'warning', period: 300, times: 1, mode: 'core', enabled: true, expr: '(maxmemory > 0) && ((used_memory / maxmemory) * 100 > 85)' },
-  { key: 'redis_memory_fragmentation_high', name: '内存碎片严重', type: 'periodic_metric', metric: 'mem_fragmentation_ratio', operator: '>', threshold: 2.0, level: 'warning', period: 600, times: 1, mode: 'core', enabled: true, expr: 'mem_fragmentation_ratio > 2.0' },
-  { key: 'redis_connections_saturated', name: '连接数饱和', type: 'realtime_metric', metric: 'connected_clients', operator: '>', threshold: 90, level: 'critical', period: 300, times: 1, mode: 'core', enabled: true, expr: '(maxclients > 0) && ((connected_clients / maxclients) * 100 > 90)' },
-  { key: 'redis_rejected_connections', name: '拒绝连接', type: 'realtime_metric', metric: 'rejected_connections', operator: '>', threshold: 0, level: 'critical', period: 300, times: 1, mode: 'core', enabled: true, expr: 'rejected_connections > 0' },
-  { key: 'redis_rdb_failed', name: 'RDB 失败', type: 'realtime_metric', metric: 'rdb_last_bgsave_status_ok', operator: '==', threshold: 0, level: 'critical', period: 60, times: 1, mode: 'core', enabled: true, expr: 'rdb_last_bgsave_status_ok == 0' },
-  { key: 'redis_aof_failed', name: 'AOF 失败', type: 'realtime_metric', metric: 'aof_last_bgrewrite_status_ok', operator: '==', threshold: 0, level: 'critical', period: 60, times: 1, mode: 'core', enabled: true, expr: 'aof_last_bgrewrite_status_ok == 0' },
-  { key: 'redis_master_slave_lag_high', name: '主从延迟过高', type: 'periodic_metric', metric: 'master_last_io_seconds_ago', operator: '>', threshold: 5, level: 'warning', period: 300, times: 1, mode: 'core', enabled: true, expr: 'master_last_io_seconds_ago > 5' },
-  { key: 'redis_memory_usage_warn', name: '内存使用率预警', type: 'periodic_metric', metric: 'used_memory', operator: '>', threshold: 75, level: 'warning', period: 300, times: 1, mode: 'extended', enabled: false },
-  { key: 'redis_memory_fragmentation_warn', name: '内存碎片预警', type: 'periodic_metric', metric: 'mem_fragmentation_ratio', operator: '>', threshold: 1.5, level: 'warning', period: 600, times: 1, mode: 'extended', enabled: false },
-  { key: 'redis_hit_rate_drop', name: '命中率突降', type: 'periodic_metric', metric: 'keyspace_hit_rate', operator: '<', threshold: 50, level: 'warning', period: 300, times: 1, mode: 'extended', enabled: false },
-  { key: 'redis_hit_rate_abnormal', name: '命中率异常', type: 'periodic_metric', metric: 'keyspace_hit_rate', operator: '<', threshold: 30, level: 'critical', period: 300, times: 1, mode: 'extended', enabled: false },
-  { key: 'redis_master_slave_lag_warn', name: '主从延迟预警', type: 'periodic_metric', metric: 'master_last_io_seconds_ago', operator: '>', threshold: 3, level: 'warning', period: 300, times: 1, mode: 'extended', enabled: false },
-  { key: 'redis_slave_offline', name: '从节点离线', type: 'realtime_metric', metric: 'slave_online', operator: '<', threshold: 0.5, level: 'critical', period: 60, times: 1, mode: 'extended', enabled: false },
-  { key: 'redis_blocked_clients_high', name: '阻塞客户端过多', type: 'realtime_metric', metric: 'blocked_clients', operator: '>', threshold: 10, level: 'warning', period: 300, times: 1, mode: 'extended', enabled: false },
-  { key: 'redis_slowlog_high', name: '慢查询过多', type: 'periodic_metric', metric: 'slowlog_length', operator: '>', threshold: 50, level: 'warning', period: 300, times: 1, mode: 'extended', enabled: false }
-]
 
 const categories = ref<CategoryNode[]>([])
 const templates = ref<TemplateItem[]>([])
@@ -495,7 +467,7 @@ const contextMenuKey = ref('')
 
 const categoryModalVisible = ref(false)
 const categoryModalTitle = ref('')
-const categoryForm = ref({ name: '', key: '', parentKey: '' })
+const categoryForm = ref({ name: '', code: '', key: '', parentKey: '' })
 const isEditMode = ref(false)
 const isSubCategory = ref(false)
 const defaultPolicyDraft = ref<DefaultPolicyItem[]>([])
@@ -712,8 +684,7 @@ const loadDefaultPolicyDraft = () => {
   if (fromTemplate.length) {
     defaultPolicyDraft.value = fromTemplate
   } else {
-    const app = String(selectedTemplate.value?.app || '').toLowerCase()
-    defaultPolicyDraft.value = app === 'redis' ? [...REDIS_DEFAULT_POLICY] : []
+    defaultPolicyDraft.value = getBuiltinDefaultPolicyByApp(String(selectedTemplate.value?.app || ''))
   }
   mutePolicySync.value = false
 }
@@ -930,6 +901,8 @@ const normalizeCode = (name: string) => {
   const normalized = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
   return normalized || `cat_${Date.now()}`
 }
+
+const isValidCategoryCode = (code: string) => /^[a-z0-9][a-z0-9_-]*$/.test(code)
 
 const findCategoryByKey = (key: string, list: CategoryNode[]): CategoryNode | null => {
   for (const item of list) {
@@ -1187,7 +1160,7 @@ const showAddCategoryModal = () => {
   isEditMode.value = false
   isSubCategory.value = false
   categoryModalTitle.value = t('template.addCategory')
-  categoryForm.value = { name: '', key: '', parentKey: '' }
+  categoryForm.value = { name: '', code: '', key: '', parentKey: '' }
   categoryModalVisible.value = true
 }
 
@@ -1197,7 +1170,7 @@ const showAddSubCategoryModal = () => {
   isEditMode.value = false
   isSubCategory.value = true
   categoryModalTitle.value = t('template.addSubCategory')
-  categoryForm.value = { name: '', key: '', parentKey }
+  categoryForm.value = { name: '', code: '', key: '', parentKey }
   categoryModalVisible.value = true
 }
 
@@ -1208,7 +1181,7 @@ const handleRenameCategory = () => {
   isEditMode.value = true
   isSubCategory.value = Boolean(category.parent_id)
   categoryModalTitle.value = t('template.renameCategory')
-  categoryForm.value = { name: category.name, key: category.key, parentKey: '' }
+  categoryForm.value = { name: category.name, code: category.key, key: category.key, parentKey: '' }
   categoryModalVisible.value = true
 }
 
@@ -1218,7 +1191,7 @@ const handleAddSubCategory = () => {
   isEditMode.value = false
   isSubCategory.value = true
   categoryModalTitle.value = t('template.addSubCategory')
-  categoryForm.value = { name: '', key: '', parentKey: contextMenuKey.value }
+  categoryForm.value = { name: '', code: '', key: '', parentKey: contextMenuKey.value }
   categoryModalVisible.value = true
 }
 
@@ -1250,8 +1223,21 @@ const handleDeleteCategory = () => {
 
 const handleSaveCategory = async () => {
   const name = categoryForm.value.name.trim()
+  const codeInput = categoryForm.value.code.trim().toLowerCase()
   if (!name) {
     message.error(t('template.categoryNameRequired'))
+    return
+  }
+  if (!codeInput) {
+    message.error(t('template.categoryCodeRequired'))
+    return
+  }
+  if (!isValidCategoryCode(codeInput)) {
+    message.error(t('template.categoryCodeInvalid'))
+    return
+  }
+  if (!isEditMode.value && findCategoryByKey(codeInput, categories.value)) {
+    message.error(t('template.categoryCodeDuplicate'))
     return
   }
 
@@ -1263,7 +1249,7 @@ const handleSaveCategory = async () => {
       const parent = isSubCategory.value
         ? findCategoryByKey(categoryForm.value.parentKey, categories.value)
         : null
-      const code = normalizeCode(name)
+      const code = codeInput || normalizeCode(name)
       await createCategoryApi({
         name,
         code,

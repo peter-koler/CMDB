@@ -73,6 +73,9 @@ class MonitorTemplateService:
     
     def get_all_categories(self) -> List[Dict[str, Any]]:
         return list(self._categories_cache.values())
+
+    def get_category(self, code: str) -> Optional[Dict[str, Any]]:
+        return self._categories_cache.get(code)
     
     def save_template(self, app: str, name: str, category: str, content: str) -> Dict[str, Any]:
         existing = MonitorTemplate.query.filter_by(app=app).first()

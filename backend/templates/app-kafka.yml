@@ -1,0 +1,471 @@
+category: mid
+app: kafka
+name:
+  zh-CN: Kafka消息系统
+  en-US: Kafka Message
+help:
+  zh-CN: 基于 Jolokia HTTP 接口采集 Kafka 关键控制器与 JVM 指标。请确保 Broker 已启用 Jolokia Agent，并开放对应端口。
+  en-US: Monitor Kafka controller and JVM metrics through Jolokia HTTP endpoint.
+helpLink:
+  zh-CN: https://hertzbeat.apache.org/zh-cn/docs/help/kafka
+  en-US: https://hertzbeat.apache.org/docs/help/kafka
+params:
+  - field: host
+    name:
+      zh-CN: 目标 Host
+      en-US: Target Host
+    type: host
+    required: true
+  - field: port
+    name:
+      zh-CN: Jolokia 端口
+      en-US: Jolokia Port
+    type: number
+    range: '[0,65535]'
+    required: true
+    defaultValue: 8778
+  - field: path
+    name:
+      zh-CN: Jolokia 路径
+      en-US: Jolokia Path
+    type: text
+    required: true
+    defaultValue: /jolokia/
+  - field: ssl
+    name:
+      zh-CN: 启用 HTTPS
+      en-US: Enable HTTPS
+    type: boolean
+    required: false
+    defaultValue: false
+  - field: username
+    name:
+      zh-CN: 用户名
+      en-US: Username
+    type: text
+    required: false
+    hide: true
+  - field: password
+    name:
+      zh-CN: 密码
+      en-US: Password
+    type: password
+    required: false
+    hide: true
+metrics:
+  - name: server_info
+    i18n:
+      zh-CN: 服务器信息
+      en-US: Server Info
+    priority: 0
+    fields:
+      - field: Version
+        type: 1
+      - field: StartTimeMs
+        type: 1
+      - field: CommitId
+        type: 1
+    protocol: http
+    http:
+      host: ^_^host^_^
+      port: ^_^port^_^
+      ssl: ^_^ssl^_^
+      url: ^_^path^_^
+      method: POST
+      headers.Content-Type: application/json
+      headers.Accept: application/json
+      body: '{"type":"read","mbean":"kafka.server:type=app-info,id=*","attribute":["Version","StartTimeMs","CommitId"]}'
+      parseType: jsonPath
+      parseScript: $.value.*
+      authorization.basicAuthUsername: ^_^username^_^
+      authorization.basicAuthPassword: ^_^password^_^
+  - name: jvm_basic
+    i18n:
+      zh-CN: 虚拟机基础信息
+      en-US: JVM Basic
+    priority: 1
+    fields:
+      - field: VmName
+        type: 1
+      - field: VmVendor
+        type: 1
+      - field: VmVersion
+        type: 1
+      - field: Uptime
+        type: 0
+        unit: ms
+    protocol: http
+    http:
+      host: ^_^host^_^
+      port: ^_^port^_^
+      ssl: ^_^ssl^_^
+      url: ^_^path^_^
+      method: POST
+      headers.Content-Type: application/json
+      headers.Accept: application/json
+      body: '{"type":"read","mbean":"java.lang:type=Runtime","attribute":["VmName","VmVendor","VmVersion","Uptime"]}'
+      parseType: jsonPath
+      parseScript: $.value
+      authorization.basicAuthUsername: ^_^username^_^
+      authorization.basicAuthPassword: ^_^password^_^
+  - name: kafka_controller_active_broker_count
+    i18n:
+      zh-CN: Kafka活跃Broker数量
+      en-US: Active Broker Count
+    priority: 2
+    fields:
+      - field: ActiveBrokerCount
+        type: 0
+    calculates:
+      - ActiveBrokerCount=$.value
+    protocol: http
+    http:
+      host: ^_^host^_^
+      port: ^_^port^_^
+      ssl: ^_^ssl^_^
+      url: ^_^path^_^
+      method: POST
+      headers.Content-Type: application/json
+      headers.Accept: application/json
+      body: '{"type":"read","mbean":"kafka.controller:type=KafkaController,name=ActiveBrokerCount","attribute":"Value"}'
+      parseType: jsonPath
+      parseScript: $
+      authorization.basicAuthUsername: ^_^username^_^
+      authorization.basicAuthPassword: ^_^password^_^
+  - name: kafka_controller_active_controller_count
+    i18n:
+      zh-CN: Kafka活跃控制器数量
+      en-US: Active Controller Count
+    priority: 2
+    fields:
+      - field: ActiveControllerCount
+        type: 0
+    calculates:
+      - ActiveControllerCount=$.value
+    protocol: http
+    http:
+      host: ^_^host^_^
+      port: ^_^port^_^
+      ssl: ^_^ssl^_^
+      url: ^_^path^_^
+      method: POST
+      headers.Content-Type: application/json
+      headers.Accept: application/json
+      body: '{"type":"read","mbean":"kafka.controller:type=KafkaController,name=ActiveControllerCount","attribute":"Value"}'
+      parseType: jsonPath
+      parseScript: $
+      authorization.basicAuthUsername: ^_^username^_^
+      authorization.basicAuthPassword: ^_^password^_^
+  - name: kafka_controller_offline_partitions_count
+    i18n:
+      zh-CN: Kafka离线分区数量
+      en-US: Offline Partitions Count
+    priority: 2
+    fields:
+      - field: OfflinePartitionsCount
+        type: 0
+    calculates:
+      - OfflinePartitionsCount=$.value
+    protocol: http
+    http:
+      host: ^_^host^_^
+      port: ^_^port^_^
+      ssl: ^_^ssl^_^
+      url: ^_^path^_^
+      method: POST
+      headers.Content-Type: application/json
+      headers.Accept: application/json
+      body: '{"type":"read","mbean":"kafka.controller:type=KafkaController,name=OfflinePartitionsCount","attribute":"Value"}'
+      parseType: jsonPath
+      parseScript: $
+      authorization.basicAuthUsername: ^_^username^_^
+      authorization.basicAuthPassword: ^_^password^_^
+  - name: kafka_controller_preferred_replica_imbalance_count
+    i18n:
+      zh-CN: Kafka副本不平衡数量
+      en-US: Preferred Replica Imbalance Count
+    priority: 2
+    fields:
+      - field: PreferredReplicaImbalanceCount
+        type: 0
+    calculates:
+      - PreferredReplicaImbalanceCount=$.value
+    protocol: http
+    http:
+      host: ^_^host^_^
+      port: ^_^port^_^
+      ssl: ^_^ssl^_^
+      url: ^_^path^_^
+      method: POST
+      headers.Content-Type: application/json
+      headers.Accept: application/json
+      body: '{"type":"read","mbean":"kafka.controller:type=KafkaController,name=PreferredReplicaImbalanceCount","attribute":"Value"}'
+      parseType: jsonPath
+      parseScript: $
+      authorization.basicAuthUsername: ^_^username^_^
+      authorization.basicAuthPassword: ^_^password^_^
+  - name: kafka_controller_fenced_broker_count
+    i18n:
+      zh-CN: Kafka隔离Broker数量
+      en-US: Fenced Broker Count
+    priority: 2
+    fields:
+      - field: FencedBrokerCount
+        type: 0
+    calculates:
+      - FencedBrokerCount=$.value
+    protocol: http
+    http:
+      host: ^_^host^_^
+      port: ^_^port^_^
+      ssl: ^_^ssl^_^
+      url: ^_^path^_^
+      method: POST
+      headers.Content-Type: application/json
+      headers.Accept: application/json
+      body: '{"type":"read","mbean":"kafka.controller:type=KafkaController,name=FencedBrokerCount","attribute":"Value"}'
+      parseType: jsonPath
+      parseScript: $
+      authorization.basicAuthUsername: ^_^username^_^
+      authorization.basicAuthPassword: ^_^password^_^
+  - name: kafka_controller_topics_to_delete_count
+    i18n:
+      zh-CN: Kafka待删除主题数量
+      en-US: Topics To Delete Count
+    priority: 2
+    fields:
+      - field: TopicsToDeleteCount
+        type: 0
+    calculates:
+      - TopicsToDeleteCount=$.value
+    protocol: http
+    http:
+      host: ^_^host^_^
+      port: ^_^port^_^
+      ssl: ^_^ssl^_^
+      url: ^_^path^_^
+      method: POST
+      headers.Content-Type: application/json
+      headers.Accept: application/json
+      body: '{"type":"read","mbean":"kafka.controller:type=KafkaController,name=TopicsToDeleteCount","attribute":"Value"}'
+      parseType: jsonPath
+      parseScript: $
+      authorization.basicAuthUsername: ^_^username^_^
+      authorization.basicAuthPassword: ^_^password^_^
+  - name: kafka_controller_replicas_to_delete_count
+    i18n:
+      zh-CN: Kafka待删除副本数量
+      en-US: Replicas To Delete Count
+    priority: 2
+    fields:
+      - field: ReplicasToDeleteCount
+        type: 0
+    calculates:
+      - ReplicasToDeleteCount=$.value
+    protocol: http
+    http:
+      host: ^_^host^_^
+      port: ^_^port^_^
+      ssl: ^_^ssl^_^
+      url: ^_^path^_^
+      method: POST
+      headers.Content-Type: application/json
+      headers.Accept: application/json
+      body: '{"type":"read","mbean":"kafka.controller:type=KafkaController,name=ReplicasToDeleteCount","attribute":"Value"}'
+      parseType: jsonPath
+      parseScript: $
+      authorization.basicAuthUsername: ^_^username^_^
+      authorization.basicAuthPassword: ^_^password^_^
+  - name: kafka_controller_global_topic_count
+    i18n:
+      zh-CN: Kafka全局主题数量
+      en-US: Global Topic Count
+    priority: 2
+    fields:
+      - field: GlobalTopicCount
+        type: 0
+    calculates:
+      - GlobalTopicCount=$.value
+    protocol: http
+    http:
+      host: ^_^host^_^
+      port: ^_^port^_^
+      ssl: ^_^ssl^_^
+      url: ^_^path^_^
+      method: POST
+      headers.Content-Type: application/json
+      headers.Accept: application/json
+      body: '{"type":"read","mbean":"kafka.controller:type=KafkaController,name=GlobalTopicCount","attribute":"Value"}'
+      parseType: jsonPath
+      parseScript: $
+      authorization.basicAuthUsername: ^_^username^_^
+      authorization.basicAuthPassword: ^_^password^_^
+  - name: kafka_controller_global_partition_count
+    i18n:
+      zh-CN: Kafka全局分区数量
+      en-US: Global Partition Count
+    priority: 2
+    fields:
+      - field: GlobalPartitionCount
+        type: 0
+    calculates:
+      - GlobalPartitionCount=$.value
+    protocol: http
+    http:
+      host: ^_^host^_^
+      port: ^_^port^_^
+      ssl: ^_^ssl^_^
+      url: ^_^path^_^
+      method: POST
+      headers.Content-Type: application/json
+      headers.Accept: application/json
+      body: '{"type":"read","mbean":"kafka.controller:type=KafkaController,name=GlobalPartitionCount","attribute":"Value"}'
+      parseType: jsonPath
+      parseScript: $
+      authorization.basicAuthUsername: ^_^username^_^
+      authorization.basicAuthPassword: ^_^password^_^
+
+alerts:
+  - key: 'kafka_unavailable'
+    name: 'Kafka实例不可用'
+    type: 'realtime_metric'
+    metric: 'kafka_server_up'
+    operator: '=='
+    threshold: 0
+    level: 'critical'
+    period: 60
+    times: 1
+    mode: 'core'
+    enabled: true
+    expr: 'kafka_server_up == 0'
+    template: '实例不可用'
+  - key: 'kafka_controller_missing'
+    name: 'Kafka无活跃控制器'
+    type: 'realtime_metric'
+    metric: 'ActiveControllerCount'
+    operator: '<'
+    threshold: 1
+    level: 'critical'
+    period: 60
+    times: 1
+    mode: 'core'
+    enabled: true
+    expr: 'ActiveControllerCount < 1'
+    template: '无活跃控制器'
+  - key: 'kafka_broker_drop'
+    name: 'Kafka活跃Broker数量偏少'
+    type: 'periodic_metric'
+    metric: 'ActiveBrokerCount'
+    operator: '<'
+    threshold: 3
+    level: 'warning'
+    period: 300
+    times: 2
+    mode: 'core'
+    enabled: true
+    expr: 'ActiveBrokerCount < 3'
+    template: '活跃Broker数量偏少'
+  - key: 'kafka_offline_partitions'
+    name: 'Kafka存在离线分区'
+    type: 'realtime_metric'
+    metric: 'OfflinePartitionsCount'
+    operator: '>'
+    threshold: 0
+    level: 'critical'
+    period: 60
+    times: 1
+    mode: 'core'
+    enabled: true
+    expr: 'OfflinePartitionsCount > 0'
+    template: '存在离线分区'
+  - key: 'kafka_replica_imbalance'
+    name: 'Kafka副本不平衡偏高'
+    type: 'periodic_metric'
+    metric: 'PreferredReplicaImbalanceCount'
+    operator: '>'
+    threshold: 10
+    level: 'warning'
+    period: 300
+    times: 2
+    mode: 'core'
+    enabled: true
+    expr: 'PreferredReplicaImbalanceCount > 10'
+    template: '副本不平衡偏高'
+  - key: 'kafka_fenced_brokers'
+    name: 'Kafka存在被隔离Broker'
+    type: 'realtime_metric'
+    metric: 'FencedBrokerCount'
+    operator: '>'
+    threshold: 0
+    level: 'critical'
+    period: 60
+    times: 1
+    mode: 'core'
+    enabled: true
+    expr: 'FencedBrokerCount > 0'
+    template: '存在被隔离Broker'
+  - key: 'kafka_delete_topics_pending'
+    name: 'Kafka待删除主题过多'
+    type: 'periodic_metric'
+    metric: 'TopicsToDeleteCount'
+    operator: '>'
+    threshold: 5
+    level: 'warning'
+    period: 600
+    times: 2
+    mode: 'extended'
+    enabled: false
+    expr: 'TopicsToDeleteCount > 5'
+    template: '待删除主题过多'
+  - key: 'kafka_delete_replicas_pending'
+    name: 'Kafka待删除副本过多'
+    type: 'periodic_metric'
+    metric: 'ReplicasToDeleteCount'
+    operator: '>'
+    threshold: 10
+    level: 'warning'
+    period: 600
+    times: 2
+    mode: 'extended'
+    enabled: false
+    expr: 'ReplicasToDeleteCount > 10'
+    template: '待删除副本过多'
+  - key: 'kafka_global_topics_high'
+    name: 'Kafka主题数量偏高'
+    type: 'periodic_metric'
+    metric: 'GlobalTopicCount'
+    operator: '>'
+    threshold: 1000
+    level: 'warning'
+    period: 1800
+    times: 1
+    mode: 'extended'
+    enabled: false
+    expr: 'GlobalTopicCount > 1000'
+    template: '主题数量偏高'
+  - key: 'kafka_global_partitions_high'
+    name: 'Kafka分区数量偏高'
+    type: 'periodic_metric'
+    metric: 'GlobalPartitionCount'
+    operator: '>'
+    threshold: 10000
+    level: 'warning'
+    period: 1800
+    times: 1
+    mode: 'extended'
+    enabled: false
+    expr: 'GlobalPartitionCount > 10000'
+    template: '分区数量偏高'
+  - key: 'kafka_jvm_restart'
+    name: 'Kafka JVM运行时长过短'
+    type: 'periodic_metric'
+    metric: 'Uptime'
+    operator: '<'
+    threshold: 3600000
+    level: 'warning'
+    period: 600
+    times: 1
+    mode: 'extended'
+    enabled: false
+    expr: 'Uptime < 3600000'
+    template: 'JVM运行时长过短'

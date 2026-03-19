@@ -279,3 +279,83 @@ metrics:
       url: /req-status
       # ssl
       ssl: ^_^ssl^_^
+
+alerts:
+  - key: 'nginx_unavailable'
+    name: 'Nginx服务器实例不可用'
+    type: 'realtime_metric'
+    metric: 'nginx_server_up'
+    operator: '=='
+    threshold: 0
+    level: 'critical'
+    period: 60
+    times: 1
+    mode: 'core'
+    enabled: true
+    expr: 'nginx_server_up == 0'
+    template: '实例不可用'
+  - key: 'nginx_latency_high'
+    name: 'Nginx响应时间偏高'
+    type: 'periodic_metric'
+    metric: 'responseTime'
+    operator: '>'
+    threshold: 500
+    level: 'warning'
+    period: 180
+    times: 2
+    mode: 'core'
+    enabled: true
+    expr: 'responseTime > 500'
+    template: '响应时间偏高'
+  - key: 'nginx_latency_critical'
+    name: 'Nginx响应时间过高'
+    type: 'periodic_metric'
+    metric: 'responseTime'
+    operator: '>'
+    threshold: 1500
+    level: 'critical'
+    period: 120
+    times: 1
+    mode: 'core'
+    enabled: true
+    expr: 'responseTime > 1500'
+    template: '响应时间过高'
+  - key: 'nginx_active_high'
+    name: 'Nginx活跃连接过高'
+    type: 'periodic_metric'
+    metric: 'active'
+    operator: '>'
+    threshold: 10000
+    level: 'warning'
+    period: 180
+    times: 2
+    mode: 'core'
+    enabled: true
+    expr: 'active > 10000'
+    template: '活跃连接过高'
+  - key: 'nginx_waiting_high'
+    name: 'Nginx等待连接积压'
+    type: 'periodic_metric'
+    metric: 'waiting'
+    operator: '>'
+    threshold: 3000
+    level: 'warning'
+    period: 180
+    times: 2
+    mode: 'core'
+    enabled: true
+    expr: 'waiting > 3000'
+    template: '等待连接积压'
+  - key: 'nginx_dropped_increase'
+    name: 'Nginx丢弃连接异常'
+    type: 'periodic_metric'
+    metric: 'dropped'
+    operator: '>'
+    threshold: 0
+    level: 'warning'
+    period: 180
+    times: 1
+    mode: 'extended'
+    enabled: false
+    expr: 'dropped > 0'
+    template: '丢弃连接异常'

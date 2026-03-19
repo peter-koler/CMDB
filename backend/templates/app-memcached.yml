@@ -1,0 +1,329 @@
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# The monitoring type category：service-application service monitoring db-database monitoring mid-middleware custom-custom monitoring os-operating system monitoring
+category: cache
+# The monitoring type eg: linux windows tomcat mysql aws...
+app: memcached
+# monitoring i18n name
+name:
+  zh-CN: Memcached
+  en-US: Memcached
+  ja-JP: Memcached
+# The description and help of this monitoring type
+help:
+  zh-CN: HertzBeat 支持 Memcached 服务监控，通过(stats、stats settings、stats sizes)命令对(服务器进程ID、服务器已运行秒数、版本、当前线程数、item的大小、item的数量、当前存储占用的字节数)等指标进行监测。
+  en-US: HertzBeat supports Memcached service monitoring by using commands such as stats, stats settings, and stats sizes to monitor indicators such as server process ID, server running seconds, version, current number of threads, item size, number of items, and current byte storage usage.
+  zh-TW: HertzBeat支持Memcached服務監控，通過（stats、stats settings、stats sizes）命令對（服務器行程ID、服務器已運行秒數、版本、當前線程數、item的大小、item的數量、當前存儲佔用的位元組數）等名額進行監測。
+  ja-JP: HertzBeat は Memcached サービスの一般的なメトリクスを監視します。
+# Input params define for monitoring(render web ui by the definition)
+params:
+  # field-param field key
+  - field: host
+    # name-param field display i18n name
+    name:
+      zh-CN: 目标Host
+      en-US: Target Host
+      ja-JP: 目標ホスト
+    # type-param field type(most mapping the html input type)
+    type: host
+    # required-true or false
+    required: true
+  # field-param field key
+  - field: port
+    # name-param field display i18n name
+    name:
+      zh-CN: 端口
+      en-US: Port
+      ja-JP: ポート
+    # type-param field type(most mapping the html input type)
+    type: number
+    # when type is number, range is required
+    range: '[0,65535]'
+    # required-true or false
+    required: true
+    # default value
+    defaultValue: 11211
+# collect metrics config list
+metrics:
+  # metrics - summary
+  - name: server_info
+    i18n:
+      zh-CN: 系统信息
+      en-US: Server Info
+      ja-JP: サーバー情報
+    # metrics scheduling priority(0->127)->(high->low), metrics with the same priority will be scheduled in parallel
+    # priority 0's metrics is availability metrics, it will be scheduled first, only availability metrics collect success will the scheduling continue
+    priority: 0
+    # field-metric name, type-metric type(0-number,1-string), unit-metric unit('%','ms','MB'), label-whether it is a metrics label field
+    fields:
+      - field: responseTime
+        type: 0
+        unit: ms
+        i18n:
+          zh-CN: 响应时间
+          en-US: Response Time
+          ja-JP: 応答時間
+      - field: pid
+        type: 1
+        i18n:
+          zh-CN: 服务器进程ID
+          en-US: PID
+          ja-JP: プロセスID
+      - field: uptime
+        type: 0
+        unit: s
+        i18n:
+          zh-CN: 已运行秒数
+          en-US: Uptime
+          ja-JP: アップタイム
+      - field: version
+        type: 1
+        i18n:
+          zh-CN: 版本
+          en-US: Version
+          ja-JP: バージョン
+      - field: curr_connections
+        type: 0
+        i18n:
+          zh-CN: 当前连接数量
+          en-US: Curr Connections
+          ja-JP: 現在接続数
+      - field: auth_errors
+        type: 0
+        i18n:
+          zh-CN: 认证失败数目
+          en-US: Auth Errors
+          ja-JP: 認証失敗回数
+      - field: threads
+        type: 0
+        i18n:
+          zh-CN: 当前线程数
+          en-US: Threads
+          ja-JP: 現在スレッド数
+      - field: item_size
+        type: 0
+        unit: byte
+        i18n:
+          zh-CN: Item 大小
+          en-US: Item Size
+          ja-JP: Itemサイズ
+      - field: item_count
+        type: 0
+        i18n:
+          zh-CN: Item 数量
+          en-US: Item Count
+          ja-JP: Item数量
+      - field: curr_items
+        type: 0
+        i18n:
+          zh-CN: 当前存储的数据总数
+          en-US: Curr Items
+          ja-JP: 現在のItem数
+      - field: total_items
+        type: 0
+        i18n:
+          zh-CN: 启动以来存储的数据总数
+          en-US: Total Items
+          ja-JP: Item総数
+      - field: bytes
+        type: 0
+        unit: byte
+        i18n:
+          zh-CN: 当前存储占用的字节数
+          en-US: Bytes
+          ja-JP: バイト
+      - field: cmd_get
+        type: 0
+        i18n:
+          zh-CN: Get命令请求次数
+          en-US: Cmd Get
+          ja-JP: Getコマンドの実行回数
+      - field: cmd_set
+        type: 0
+        i18n:
+          zh-CN: Set命令请求次数
+          en-US: Cmd Set
+          ja-JP: Setコマンドの実行回数
+      - field: cmd_flush
+        type: 0
+        i18n:
+          zh-CN: Flush命令请求次数
+          en-US: Cmd Flush
+          ja-JP: Flushコマンドの実行回数
+      - field: get_misses
+        type: 0
+        i18n:
+          zh-CN: Get命令未命中次数
+          en-US: Get Misses
+          ja-JP: Getコマンドのミス回数
+      - field: delete_misses
+        type: 0
+        i18n:
+          zh-CN: Delete命令未命中次数
+          en-US: Delete Misses
+          ja-JP: Deleteコマンドのミス回数
+    # the protocol used for monitoring, eg: sql, ssh, http, telnet, wmi, snmp, sdk
+    protocol: memcached
+    # Specific collection configuration when protocol is telnet protocol
+    memcached:
+      # telnet host
+      host: ^_^host^_^
+      port: ^_^port^_^
+
+alerts:
+  - key: 'memcached_unavailable'
+    name: 'Memcached实例不可用'
+    type: 'realtime_metric'
+    metric: 'memcached_server_up'
+    operator: '=='
+    threshold: 0
+    level: 'critical'
+    period: 60
+    times: 1
+    mode: 'core'
+    enabled: true
+    expr: 'memcached_server_up == 0'
+    template: '实例不可用'
+  - key: 'memcached_response_time_high'
+    name: 'Memcached响应时间偏高'
+    type: 'periodic_metric'
+    metric: 'responseTime'
+    operator: '>'
+    threshold: 150
+    level: 'warning'
+    period: 300
+    times: 2
+    mode: 'core'
+    enabled: true
+    expr: 'responseTime > 150'
+    template: '响应时间偏高'
+  - key: 'memcached_response_time_critical'
+    name: 'Memcached响应时间过高'
+    type: 'periodic_metric'
+    metric: 'responseTime'
+    operator: '>'
+    threshold: 500
+    level: 'critical'
+    period: 120
+    times: 1
+    mode: 'core'
+    enabled: true
+    expr: 'responseTime > 500'
+    template: '响应时间过高'
+  - key: 'memcached_connections_high'
+    name: 'Memcached连接数偏高'
+    type: 'periodic_metric'
+    metric: 'curr_connections'
+    operator: '>'
+    threshold: 2000
+    level: 'warning'
+    period: 300
+    times: 2
+    mode: 'core'
+    enabled: true
+    expr: 'curr_connections > 2000'
+    template: '连接数偏高'
+  - key: 'memcached_threads_high'
+    name: 'Memcached线程数异常偏高'
+    type: 'periodic_metric'
+    metric: 'threads'
+    operator: '>'
+    threshold: 256
+    level: 'warning'
+    period: 600
+    times: 2
+    mode: 'extended'
+    enabled: false
+    expr: 'threads > 256'
+    template: '线程数异常偏高'
+  - key: 'memcached_get_miss_ratio_high'
+    name: 'Memcached读请求未命中率偏高'
+    type: 'periodic_metric'
+    metric: 'get_misses'
+    operator: '>'
+    threshold: 0.2
+    level: 'warning'
+    period: 300
+    times: 2
+    mode: 'core'
+    enabled: true
+    expr: '(cmd_get > 100) && ((get_misses / cmd_get) > 0.2)'
+    template: '读请求未命中率偏高'
+  - key: 'memcached_get_miss_ratio_critical'
+    name: 'Memcached读请求未命中率过高'
+    type: 'periodic_metric'
+    metric: 'get_misses'
+    operator: '>'
+    threshold: 0.4
+    level: 'critical'
+    period: 300
+    times: 1
+    mode: 'core'
+    enabled: true
+    expr: '(cmd_get > 100) && ((get_misses / cmd_get) > 0.4)'
+    template: '读请求未命中率过高'
+  - key: 'memcached_delete_misses_high'
+    name: 'Memcached删除未命中次数偏高'
+    type: 'periodic_metric'
+    metric: 'delete_misses'
+    operator: '>'
+    threshold: 1000
+    level: 'warning'
+    period: 600
+    times: 2
+    mode: 'extended'
+    enabled: false
+    expr: 'delete_misses > 1000'
+    template: '删除未命中次数偏高'
+  - key: 'memcached_cmd_flush_detected'
+    name: 'Memcached检测到Flush操作'
+    type: 'realtime_metric'
+    metric: 'cmd_flush'
+    operator: '>'
+    threshold: 0
+    level: 'warning'
+    period: 60
+    times: 1
+    mode: 'core'
+    enabled: true
+    expr: 'cmd_flush > 0'
+    template: '检测到Flush操作'
+  - key: 'memcached_memory_usage_high'
+    name: 'Memcached内存占用偏高'
+    type: 'periodic_metric'
+    metric: 'bytes'
+    operator: '>'
+    threshold: 3221225472
+    level: 'warning'
+    period: 300
+    times: 2
+    mode: 'extended'
+    enabled: false
+    expr: 'bytes > 3221225472'
+    template: '内存占用偏高'
+  - key: 'memcached_uptime_short'
+    name: 'Memcached运行时长过短'
+    type: 'periodic_metric'
+    metric: 'uptime'
+    operator: '<'
+    threshold: 600
+    level: 'warning'
+    period: 600
+    times: 1
+    mode: 'extended'
+    enabled: false
+    expr: 'uptime < 600'
+    template: '运行时长过短'

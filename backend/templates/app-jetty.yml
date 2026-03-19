@@ -1,0 +1,384 @@
+category: webserver
+app: jetty
+name:
+  zh-CN: Jetty应用服务器
+  en-US: Jetty AppServer
+help:
+  zh-CN: 基于 Jolokia HTTP 接口采集 Jetty Server、线程池与 JVM 指标。请确保 Jetty 已启用 Jolokia Agent。
+  en-US: Monitor Jetty server, thread pool and JVM metrics through Jolokia HTTP endpoint.
+helpLink:
+  zh-CN: https://hertzbeat.apache.org/zh-cn/docs/help/jetty/
+  en-US: https://hertzbeat.apache.org/docs/help/jetty/
+params:
+  - field: host
+    name:
+      zh-CN: 目标 Host
+      en-US: Target Host
+    type: host
+    required: true
+  - field: port
+    name:
+      zh-CN: Jolokia 端口
+      en-US: Jolokia Port
+    type: number
+    range: '[0,65535]'
+    required: true
+    defaultValue: 8778
+  - field: path
+    name:
+      zh-CN: Jolokia 路径
+      en-US: Jolokia Path
+    type: text
+    required: true
+    defaultValue: /jolokia/
+  - field: ssl
+    name:
+      zh-CN: 启用 HTTPS
+      en-US: Enable HTTPS
+    type: boolean
+    required: false
+    defaultValue: false
+  - field: username
+    name:
+      zh-CN: 用户名
+      en-US: Username
+    type: text
+    required: false
+    hide: true
+  - field: password
+    name:
+      zh-CN: 密码
+      en-US: Password
+    type: password
+    required: false
+    hide: true
+metrics:
+  - name: jvm_basic
+    i18n:
+      zh-CN: JVM 基础信息
+      en-US: JVM Basic
+    priority: 0
+    fields:
+      - field: VmName
+        type: 1
+      - field: VmVendor
+        type: 1
+      - field: VmVersion
+        type: 1
+      - field: Uptime
+        type: 0
+        unit: ms
+    protocol: http
+    http:
+      host: ^_^host^_^
+      port: ^_^port^_^
+      ssl: ^_^ssl^_^
+      url: ^_^path^_^
+      method: POST
+      headers.Content-Type: application/json
+      headers.Accept: application/json
+      body: '{"type":"read","mbean":"java.lang:type=Runtime","attribute":["VmName","VmVendor","VmVersion","Uptime"]}'
+      parseType: jsonPath
+      parseScript: $.value
+      authorization.basicAuthUsername: ^_^username^_^
+      authorization.basicAuthPassword: ^_^password^_^
+  - name: jetty_server
+    i18n:
+      zh-CN: Jetty 服务
+      en-US: Jetty Server
+    priority: 1
+    fields:
+      - field: version
+        type: 1
+      - field: state
+        type: 1
+      - field: startupTime
+        type: 0
+    protocol: http
+    http:
+      host: ^_^host^_^
+      port: ^_^port^_^
+      ssl: ^_^ssl^_^
+      url: ^_^path^_^
+      method: POST
+      headers.Content-Type: application/json
+      headers.Accept: application/json
+      body: '{"type":"read","mbean":"org.eclipse.jetty.server:type=server,id=*","attribute":["version","state","startupTime"]}'
+      parseType: jsonPath
+      parseScript: $.value.*
+      authorization.basicAuthUsername: ^_^username^_^
+      authorization.basicAuthPassword: ^_^password^_^
+  - name: thread_pool
+    i18n:
+      zh-CN: Jetty 线程池
+      en-US: Jetty Thread Pool
+    priority: 1
+    fields:
+      - field: name
+        type: 1
+        label: true
+      - field: threads
+        type: 0
+      - field: idleThreads
+        type: 0
+      - field: busyThreads
+        type: 0
+      - field: queueSize
+        type: 0
+      - field: maxThreads
+        type: 0
+      - field: minThreads
+        type: 0
+    protocol: http
+    http:
+      host: ^_^host^_^
+      port: ^_^port^_^
+      ssl: ^_^ssl^_^
+      url: ^_^path^_^
+      method: POST
+      headers.Content-Type: application/json
+      headers.Accept: application/json
+      body: '{"type":"read","mbean":"org.eclipse.jetty.util.thread:type=queuedthreadpool,id=*","attribute":["name","threads","idleThreads","busyThreads","queueSize","maxThreads","minThreads"]}'
+      parseType: jsonPath
+      parseScript: $.value.*
+      authorization.basicAuthUsername: ^_^username^_^
+      authorization.basicAuthPassword: ^_^password^_^
+  - name: jvm_memory
+    i18n:
+      zh-CN: JVM 内存
+      en-US: JVM Memory
+    priority: 2
+    fields:
+      - field: heap_used
+        type: 0
+        unit: B
+      - field: heap_max
+        type: 0
+        unit: B
+      - field: nonheap_used
+        type: 0
+        unit: B
+      - field: nonheap_max
+        type: 0
+        unit: B
+      - field: ObjectPendingFinalizationCount
+        type: 0
+    calculates:
+      - heap_used=$.value.HeapMemoryUsage.used
+      - heap_max=$.value.HeapMemoryUsage.max
+      - nonheap_used=$.value.NonHeapMemoryUsage.used
+      - nonheap_max=$.value.NonHeapMemoryUsage.max
+      - ObjectPendingFinalizationCount=$.value.ObjectPendingFinalizationCount
+    protocol: http
+    http:
+      host: ^_^host^_^
+      port: ^_^port^_^
+      ssl: ^_^ssl^_^
+      url: ^_^path^_^
+      method: POST
+      headers.Content-Type: application/json
+      headers.Accept: application/json
+      body: '{"type":"read","mbean":"java.lang:type=Memory","attribute":["HeapMemoryUsage","NonHeapMemoryUsage","ObjectPendingFinalizationCount"]}'
+      parseType: jsonPath
+      parseScript: $
+      authorization.basicAuthUsername: ^_^username^_^
+      authorization.basicAuthPassword: ^_^password^_^
+  - name: jvm_gc
+    i18n:
+      zh-CN: JVM GC
+      en-US: JVM GC
+    priority: 3
+    fields:
+      - field: name
+        type: 1
+        label: true
+      - field: CollectionCount
+        type: 0
+      - field: CollectionTime
+        type: 0
+        unit: ms
+    protocol: http
+    http:
+      host: ^_^host^_^
+      port: ^_^port^_^
+      ssl: ^_^ssl^_^
+      url: ^_^path^_^
+      method: POST
+      headers.Content-Type: application/json
+      headers.Accept: application/json
+      body: '{"type":"read","mbean":"java.lang:type=GarbageCollector,name=*","attribute":["name","CollectionCount","CollectionTime"]}'
+      parseType: jsonPath
+      parseScript: $.value.*
+      authorization.basicAuthUsername: ^_^username^_^
+      authorization.basicAuthPassword: ^_^password^_^
+
+alerts:
+  - key: 'jetty_unavailable'
+    name: 'Jetty实例不可用'
+    type: 'realtime_metric'
+    metric: 'jetty_server_up'
+    operator: '=='
+    threshold: 0
+    level: 'critical'
+    period: 60
+    times: 1
+    mode: 'core'
+    enabled: true
+    expr: 'jetty_server_up == 0'
+    template: '实例不可用'
+  - key: 'jetty_server_state_abnormal'
+    name: 'Jetty服务状态异常'
+    type: 'realtime_metric'
+    metric: 'state'
+    operator: '=='
+    threshold: 0
+    level: 'critical'
+    period: 60
+    times: 1
+    mode: 'core'
+    enabled: true
+    expr: 'state != ''STARTED'' && state != ''RUNNING'''
+    template: '服务状态异常'
+  - key: 'jetty_thread_busy_high'
+    name: 'Jetty工作线程占用偏高'
+    type: 'periodic_metric'
+    metric: 'busyThreads'
+    operator: '>'
+    threshold: 80
+    level: 'warning'
+    period: 180
+    times: 2
+    mode: 'core'
+    enabled: true
+    expr: '(maxThreads > 0) && ((busyThreads / maxThreads) * 100 > 80)'
+    template: '工作线程占用偏高'
+  - key: 'jetty_thread_busy_critical'
+    name: 'Jetty工作线程占用过高'
+    type: 'periodic_metric'
+    metric: 'busyThreads'
+    operator: '>'
+    threshold: 90
+    level: 'critical'
+    period: 120
+    times: 1
+    mode: 'core'
+    enabled: true
+    expr: '(maxThreads > 0) && ((busyThreads / maxThreads) * 100 > 90)'
+    template: '工作线程占用过高'
+  - key: 'jetty_thread_queue_high'
+    name: 'Jetty线程池排队积压偏高'
+    type: 'periodic_metric'
+    metric: 'queueSize'
+    operator: '>'
+    threshold: 200
+    level: 'warning'
+    period: 180
+    times: 2
+    mode: 'core'
+    enabled: true
+    expr: 'queueSize > 200'
+    template: '线程池排队积压偏高'
+  - key: 'jetty_thread_saturation_high'
+    name: 'Jetty线程池饱和度偏高'
+    type: 'periodic_metric'
+    metric: 'busyThreads'
+    operator: '>'
+    threshold: 85
+    level: 'warning'
+    period: 240
+    times: 2
+    mode: 'core'
+    enabled: true
+    expr: '(threads > 0) && ((busyThreads / threads) * 100 > 85)'
+    template: '线程池饱和度偏高'
+  - key: 'jetty_queue_pressure_high'
+    name: 'Jetty线程池排队压力偏高'
+    type: 'periodic_metric'
+    metric: 'queueSize'
+    operator: '>'
+    threshold: 1
+    level: 'warning'
+    period: 240
+    times: 2
+    mode: 'core'
+    enabled: true
+    expr: '(maxThreads > 0) && (queueSize > maxThreads)'
+    template: '线程池排队压力偏高'
+  - key: 'jetty_idle_threads_low'
+    name: 'Jetty空闲线程过少'
+    type: 'periodic_metric'
+    metric: 'idleThreads'
+    operator: '<'
+    threshold: 2
+    level: 'warning'
+    period: 180
+    times: 2
+    mode: 'extended'
+    enabled: false
+    expr: 'idleThreads < 2'
+    template: '空闲线程过少'
+  - key: 'jetty_heap_usage_high'
+    name: 'Jetty堆内存使用率偏高'
+    type: 'periodic_metric'
+    metric: 'heap_used'
+    operator: '>'
+    threshold: 80
+    level: 'warning'
+    period: 300
+    times: 2
+    mode: 'core'
+    enabled: true
+    expr: '(heap_max > 0) && ((heap_used / heap_max) * 100 > 80)'
+    template: '堆内存使用率偏高'
+  - key: 'jetty_heap_usage_critical'
+    name: 'Jetty堆内存使用率过高'
+    type: 'periodic_metric'
+    metric: 'heap_used'
+    operator: '>'
+    threshold: 90
+    level: 'critical'
+    period: 300
+    times: 1
+    mode: 'core'
+    enabled: true
+    expr: '(heap_max > 0) && ((heap_used / heap_max) * 100 > 90)'
+    template: '堆内存使用率过高'
+  - key: 'jetty_gc_time_high'
+    name: 'Jetty GC累计耗时偏高'
+    type: 'periodic_metric'
+    metric: 'CollectionTime'
+    operator: '>'
+    threshold: 300000
+    level: 'warning'
+    period: 600
+    times: 2
+    mode: 'extended'
+    enabled: false
+    expr: 'CollectionTime > 300000'
+    template: 'GC累计耗时偏高'
+  - key: 'jetty_pending_finalization_high'
+    name: 'Jetty对象终结队列积压'
+    type: 'periodic_metric'
+    metric: 'ObjectPendingFinalizationCount'
+    operator: '>'
+    threshold: 100
+    level: 'warning'
+    period: 300
+    times: 2
+    mode: 'extended'
+    enabled: false
+    expr: 'ObjectPendingFinalizationCount > 100'
+    template: '对象终结队列积压'
+  - key: 'jetty_uptime_short'
+    name: 'Jetty运行时长过短'
+    type: 'periodic_metric'
+    metric: 'Uptime'
+    operator: '<'
+    threshold: 3600000
+    level: 'warning'
+    period: 600
+    times: 1
+    mode: 'extended'
+    enabled: false
+    expr: 'Uptime < 3600000'
+    template: '运行时长过短'

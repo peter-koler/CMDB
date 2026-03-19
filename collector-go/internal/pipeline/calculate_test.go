@@ -66,3 +66,24 @@ func TestApplyFieldWhitelist(t *testing.T) {
 		t.Fatalf("expected dropped debug, got: %+v", debug)
 	}
 }
+
+func TestApplyFieldWhitelist_KeepMultiRowPrefixedFields(t *testing.T) {
+	in := map[string]string{
+		"row1_state": "sending data",
+		"row1_num":   "3",
+		"row2_state": "sleep",
+		"row2_num":   "8",
+		"row1_extra": "drop-me",
+	}
+	specs := []model.FieldSpec{
+		{Field: "state"},
+		{Field: "num"},
+	}
+	got, _ := ApplyFieldWhitelist(in, specs, true)
+	if got["row1_state"] == "" || got["row1_num"] == "" || got["row2_state"] == "" || got["row2_num"] == "" {
+		t.Fatalf("expected row-prefixed whitelisted fields kept, got: %+v", got)
+	}
+	if _, ok := got["row1_extra"]; ok {
+		t.Fatalf("unexpected non-whitelisted row field: %+v", got)
+	}
+}

@@ -9,6 +9,10 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# Go 编译缓存（避免某些环境下默认缓存目录无权限）
+export GOCACHE="${GOCACHE:-/tmp/arco-manager-go-build-cache}"
+export GOMODCACHE="${GOMODCACHE:-/tmp/arco-manager-go-mod-cache}"
+
 # 默认配置文件路径
 CONFIG_PATH="${1:-config/manager.yaml}"
 
@@ -54,7 +58,7 @@ fi
 # 每次启动前重新编译
 BINARY="./manager"
 echo "[INFO] Building manager..."
-go build -o "$BINARY" ./cmd/manager/main.go
+go build -o "$BINARY" ./cmd/manager
 if [ ! -f "$BINARY" ]; then
     echo "[ERROR] Build failed"
     exit 1

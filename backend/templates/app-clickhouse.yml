@@ -21,13 +21,11 @@ app: clickhouse
 name:
   zh-CN: ClickHouse
   en-US: ClickHouse
-  ja-JP: ClickHouse
 # The description and help of this monitoring type
 help:
   zh-CN: Hertzbeat 对 ClickHouse 数据库监控通用指标进行测量监控。<br>您可以点击 “<i>新建 ClickHouse 数据库</i>” 并进行配置，或者选择“<i>更多操作</i>”，导入已有配置。
   en-US: Hertzbeat monitors the status codes which returned by the API. You could click the "<i>New ClickHouse Database</i>" button and proceed with the configuration or import an existing setup through the "<i>More Actions</i>" menu.
   zh-TW: Hertzbeat 對 ClickHouse 資料庫監控通用名額進行量測監控。<br>您可以點擊 “<i>新建ClickHouse資料庫</i>” 並進行配寘，或者選擇“<i>更多操作</i>”，導入已有配寘。
-  ja-JP: Hertzbeat は ClickHouse データベースの一般的なメトリクスを監視します。<br>「<i>新規 ClickHouse データベース</i>」をクリックしてパラメタを設定した後、新規することができます。
 helpLink:
   zh-CN: https://hertzbeat.apache.org/zh-cn/docs/help/clickhouse
   en-US: https://hertzbeat.apache.org/docs/help/clickhouse
@@ -39,7 +37,6 @@ params:
     name:
       zh-CN: 目标Host
       en-US: Target Host
-      ja-JP: 目標ホスト
     # type-param field type(most mapping the html input type)
     type: host
     # required-true or false
@@ -50,7 +47,6 @@ params:
     name:
       zh-CN: HTTP端口
       en-US: HTTP Port
-      ja-JP: HTTPポート
     # type-param field type(most mapping the html input type)
     type: number
     # when type is number, range is required
@@ -65,7 +61,6 @@ params:
     name:
       zh-CN: 查询超时时间(ms)
       en-US: Query Timeout(ms)
-      ja-JP: クエリタイムアウト（ｍｓ）
     # type-param field type(most mapping the html input type)
     type: number
     # required-true or false
@@ -80,7 +75,6 @@ params:
     name:
       zh-CN: 数据库名称
       en-US: Database Name
-      ja-JP: データベース名
     # type-param field type(most mapping the html input type)
     type: text
     # required-true or false
@@ -91,7 +85,6 @@ params:
     name:
       zh-CN: 用户名
       en-US: Username
-      ja-JP: ユーザー名
     # type-param field type(most mapping the html input type)
     type: text
     # when type is text, use limit to limit string length
@@ -104,7 +97,6 @@ params:
     name:
       zh-CN: 密码
       en-US: Password
-      ja-JP: パスワード
     # type-param field type(most mapping the html input type)
     type: password
     # required-true or false
@@ -116,7 +108,6 @@ metrics:
     i18n:
       zh-CN: ping的可用性
       en-US: ping_available
-      ja-JP: サービス利用可能
     # metrics scheduling priority(0->127)->(high->low), metrics with the same priority will be scheduled in parallel
     # priority 0's metrics is availability metrics, it will be scheduled first, only availability metrics collect success will the scheduling continue
     priority: 0
@@ -129,7 +120,6 @@ metrics:
         i18n:
           zh-CN: 响应时间
           en-US: Response Time
-          ja-JP: 応答時間
     # the protocol used for monitoring, eg: sql, ssh, http, telnet, wmi, snmp, sdk
     protocol: http
     # the config content when protocol is http
@@ -153,7 +143,6 @@ metrics:
     i18n:
       zh-CN: system.metrics表的数据
       en-US: Data in the system.metrics table
-      ja-JP: system.metricsデータ
     fields:
       - field: metric
         type: 1
@@ -161,19 +150,16 @@ metrics:
         i18n:
           zh-CN: 指标名称
           en-US: metric
-          ja-JP: メトリクス名
       - field: value
         type: 0
         i18n:
           zh-CN: 指标值
           en-US: value
-          ja-JP: メトリクス値
       - field: description
         type: 1
         i18n:
           zh-CN: 说明
           en-US: description
-          ja-JP: メトリクス説明
     protocol: jdbc
     jdbc:
       host: ^_^host^_^
@@ -190,7 +176,6 @@ metrics:
     i18n:
       zh-CN: system.events表的数据
       en-US: Data for the system.events table
-      ja-JP: system.eventsデータ
     fields:
       - field: event
         type: 1
@@ -198,19 +183,16 @@ metrics:
         i18n:
           zh-CN: 事件信息
           en-US: event
-          ja-JP: イベント名
       - field: value
         type: 0
         i18n:
           zh-CN: 值
           en-US: value
-          ja-JP: 発生したイベントの数
       - field: description
         type: 1
         i18n:
           zh-CN: 说明
           en-US: description
-          ja-JP: イベントの説明
     protocol: jdbc
     jdbc:
       host: ^_^host^_^
@@ -228,7 +210,6 @@ metrics:
     i18n:
       zh-CN: system.asynchronous_metrics表的数据
       en-US: Data from the system.asynchronous_metrics table
-      ja-JP: system.asynchronous_metricsデータ
     fields:
       - field: metric
         type: 1
@@ -236,19 +217,16 @@ metrics:
         i18n:
           zh-CN: 指标名称
           en-US: metric
-          ja-JP: メトリクス名
       - field: value
         type: 0
         i18n:
           zh-CN: 指标值
           en-US: value
-          ja-JP: メトリクス値
       - field: description
         type: 1
         i18n:
           zh-CN: 说明
           en-US: description
-          ja-JP: メトリクス説明
     protocol: jdbc
     jdbc:
       host: ^_^host^_^
@@ -260,3 +238,44 @@ metrics:
       timeout: ^_^timeout^_^
       queryType: multiRow
       sql: SELECT * FROM system.asynchronous_metrics where metric in ('AsynchronousMetricsCalculationTimeSpent','jemalloc.arenas.all.muzzy_purged','jemalloc.arenas.all.dirty_purged','BlockReadBytes_ram1','jemalloc.background_thread.run_intervals','BlockQueueTime_nbd13','jemalloc.background_thread.num_threads','jemalloc.resident','InterserverThreads','BlockWriteMerges_nbd7','MarkCacheBytes','MarkCacheFiles','MaxPartCountForPartition');
+
+alerts:
+  - key: 'clickhouse_unavailable'
+    name: 'ClickHouse实例不可用'
+    type: 'realtime_metric'
+    metric: 'clickhouse_server_up'
+    operator: '=='
+    threshold: 0
+    level: 'critical'
+    period: 60
+    times: 1
+    mode: 'core'
+    enabled: true
+    expr: 'clickhouse_server_up == 0'
+    template: '实例不可用'
+  - key: 'clickhouse_response_high'
+    name: 'ClickHouse响应时间偏高'
+    type: 'periodic_metric'
+    metric: 'responseTime'
+    operator: '>'
+    threshold: 1500
+    level: 'warning'
+    period: 300
+    times: 2
+    mode: 'core'
+    enabled: true
+    expr: 'responseTime > 1500'
+    template: '响应时间偏高'
+  - key: 'clickhouse_metric_value_missing'
+    name: 'ClickHouse指标值异常为空'
+    type: 'realtime_metric'
+    metric: 'value'
+    operator: '=='
+    threshold: 0
+    level: 'warning'
+    period: 600
+    times: 1
+    mode: 'extended'
+    enabled: false
+    expr: 'value == '''''
+    template: '指标值异常为空'

@@ -111,6 +111,26 @@ Manager(gRPC Stream)
 go run ./cmd/collector -config config/collector.json
 ```
 
+### 4.1 IPMI 采集二进制策略（商用默认）
+
+- 默认使用内置 `go-ipmi`（纯 Go）进行采集，不依赖系统 `ipmitool`。
+- 采集器支持可控回退：设置 `COLLECTOR_IPMI_FALLBACK_TOOL=true` 时，native 失败后回退到内置 `ipmitool`。
+- Collector 启动时优先使用内置路径：
+  - `tools/ipmitool/bin/ipmitool-<os>-<arch>`
+  - `tools/ipmitool/bin/ipmitool`
+- 可通过 `COLLECTOR_IPMITOOL_BIN` 指定企业自带二进制绝对路径。
+- 仅在显式开启 `COLLECTOR_ALLOW_SYSTEM_IPMITOOL=true` 时，才回退系统 `PATH`。
+
+建议部署规范：
+- 将平台签名后的 `ipmitool` 二进制随 collector 一起打包到 `tools/ipmitool/bin/`。
+- 对 Linux/macOS 确保执行权限（`chmod +x`）。
+- 将镜像/安装包交付链路纳入安全审计，避免运行节点依赖系统软件版本漂移。
+
+交付脚本：
+- 安装 bundle：`./tools/ipmitool/scripts/install.sh --source /path/to/ipmitool-artifacts`
+- 发布前校验：`./tools/ipmitool/scripts/verify.sh --require-current`
+- 详细规则：`tools/ipmitool/README.md`
+
 Manager 示例客户端：
 
 ```bash

@@ -76,13 +76,16 @@ def get_categories():
 @jwt_required()
 def create_category():
     data = request.get_json()
-    name = data.get("name")
-    code = data.get("code")
+    name = str(data.get("name") or "").strip()
+    code = str(data.get("code") or "").strip()
     icon = data.get("icon")
     parent_id = data.get("parent_id")
     
     if not all([name, code]):
         return jsonify({"code": 400, "message": "Missing required fields"}), 400
+
+    if template_service.get_category(code):
+        return jsonify({"code": 409, "message": "Category code already exists"}), 409
     
     category = template_service.save_category(name, code, icon, parent_id)
     return jsonify({"code": 200, "data": category})

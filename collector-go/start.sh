@@ -9,6 +9,23 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# Go 编译缓存（避免某些环境下默认缓存目录无权限）
+export GOCACHE="${GOCACHE:-/tmp/arco-collector-go-build-cache}"
+export GOMODCACHE="${GOMODCACHE:-/tmp/arco-collector-go-mod-cache}"
+
+# IPMI 内置工具路径（商用部署默认不依赖系统 PATH）
+if [ -z "${COLLECTOR_IPMITOOL_BIN:-}" ]; then
+    IPMI_DETECT_SCRIPT="$SCRIPT_DIR/tools/ipmitool/scripts/detect_ipmitool.sh"
+    if [ -x "$IPMI_DETECT_SCRIPT" ]; then
+        DETECTED_IPMI_BIN="$("$IPMI_DETECT_SCRIPT" "$SCRIPT_DIR" || true)"
+        if [ -n "$DETECTED_IPMI_BIN" ]; then
+            export COLLECTOR_IPMITOOL_BIN="$DETECTED_IPMI_BIN"
+        else
+            echo "[WARN] No bundled ipmitool detected under tools/ipmitool/bin"
+        fi
+    fi
+fi
+
 # 默认配置文件路径
 CONFIG_PATH="${1:-config/collector.json}"
 
@@ -54,7 +71,7 @@ fi
 # 每次启动前重新编译
 BINARY="./collector"
 echo "[INFO] Building collector..."
-go build -o "$BINARY" ./cmd/collector/main.go
+go build -o "$BINARY" ./cmd/collector
 if [ ! -f "$BINARY" ]; then
     echo "[ERROR] Build failed"
     exit 1

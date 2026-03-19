@@ -1,0 +1,285 @@
+category: os
+app: nvidia
+name:
+  zh-CN: NVIDIA GPU主机
+  en-US: NVIDIA GPU Host
+help:
+  zh-CN: 采集 NVIDIA GPU 主机基础指标，依赖主机安装 nvidia-smi。
+  en-US: Collect NVIDIA GPU host metrics, requires nvidia-smi installed.
+params:
+  - field: host
+    name:
+      zh-CN: 目标 Host
+      en-US: Target Host
+    type: host
+    required: true
+  - field: port
+    name:
+      zh-CN: SSH端口
+      en-US: SSH Port
+    type: number
+    range: '[0,65535]'
+    required: true
+    defaultValue: 22
+  - field: username
+    name:
+      zh-CN: 用户名
+      en-US: Username
+    type: text
+    required: true
+    defaultValue: root
+  - field: password
+    name:
+      zh-CN: 密码
+      en-US: Password
+    type: password
+    required: false
+  - field: privateKey
+    name:
+      zh-CN: 私钥
+      en-US: Private Key
+    type: text
+    required: false
+    hide: true
+  - field: privateKeyPassphrase
+    name:
+      zh-CN: 私钥口令
+      en-US: Private Key Passphrase
+    type: password
+    required: false
+    hide: true
+  - field: strictHostKeyChecking
+    name:
+      zh-CN: 严格主机校验
+      en-US: Strict Host Key Checking
+    type: boolean
+    required: false
+    defaultValue: false
+  - field: knownHostsPath
+    name:
+      zh-CN: known_hosts路径
+      en-US: known_hosts Path
+    type: text
+    required: false
+    hide: true
+    defaultValue: ~/.ssh/known_hosts
+  - field: reuseConnection
+    name:
+      zh-CN: 复用连接
+      en-US: Reuse Connection
+    type: boolean
+    required: false
+    defaultValue: true
+  - field: timeout
+    name:
+      zh-CN: 超时时间(ms)
+      en-US: Timeout(ms)
+    type: number
+    range: '[0,100000]'
+    required: false
+    defaultValue: 6000
+metrics:
+  - name: gpu_basic
+    i18n:
+      zh-CN: GPU 基础
+      en-US: GPU Basic
+    priority: 0
+    fields:
+      - field: hostname
+        type: 1
+      - field: gpu_name
+        type: 1
+      - field: gpu_utilization_pct
+        type: 0
+      - field: gpu_memory_used_mb
+        type: 0
+      - field: gpu_memory_total_mb
+        type: 0
+      - field: gpu_temperature_c
+        type: 0
+    protocol: ssh
+    ssh:
+      host: ^_^host^_^
+      port: ^_^port^_^
+      username: ^_^username^_^
+      password: ^_^password^_^
+      privateKey: ^_^privateKey^_^
+      privateKeyPassphrase: ^_^privateKeyPassphrase^_^
+      strictHostKeyChecking: ^_^strictHostKeyChecking^_^
+      knownHostsPath: ^_^knownHostsPath^_^
+      reuseConnection: ^_^reuseConnection^_^
+      timeout: ^_^timeout^_^
+      script: 'echo "hostname gpu_name gpu_utilization_pct gpu_memory_used_mb gpu_memory_total_mb gpu_temperature_c"; gpu_line=$(nvidia-smi --query-gpu=name,utilization.gpu,memory.used,memory.total,temperature.gpu --format=csv,noheader,nounits 2>/dev/null | head -n 1); if [ -z "$gpu_line" ]; then gpu_line="unknown,0,0,0,0"; fi; echo "$(hostname) $(echo $gpu_line | sed "s/,/ /g")"'
+      parseType: oneRow
+  - name: system_memory
+    i18n:
+      zh-CN: 主机内存
+      en-US: Host Memory
+    priority: 1
+    fields:
+      - field: memtotal_kb
+        type: 0
+      - field: memavailable_kb
+        type: 0
+      - field: mem_used_pct
+        type: 0
+        unit: '%'
+    protocol: ssh
+    ssh:
+      host: ^_^host^_^
+      port: ^_^port^_^
+      username: ^_^username^_^
+      password: ^_^password^_^
+      privateKey: ^_^privateKey^_^
+      privateKeyPassphrase: ^_^privateKeyPassphrase^_^
+      strictHostKeyChecking: ^_^strictHostKeyChecking^_^
+      knownHostsPath: ^_^knownHostsPath^_^
+      reuseConnection: ^_^reuseConnection^_^
+      timeout: ^_^timeout^_^
+      script: 'total_kb=$(awk "/MemTotal/ {print $2}" /proc/meminfo 2>/dev/null || echo 0); avail_kb=$(awk "/MemAvailable/ {print $2}" /proc/meminfo 2>/dev/null || echo 0); used_pct=$(awk -v t="$total_kb" -v a="$avail_kb" ''BEGIN{if(t>0) printf "%.2f", ((t-a)/t)*100; else print "0"}''); echo "memtotal_kb memavailable_kb mem_used_pct"; echo "$total_kb $avail_kb $used_pct"'
+      parseType: oneRow
+
+alerts:
+  - key: 'nvidia_unavailable'
+    name: 'NVIDIA GPU Host实例不可用'
+    type: 'realtime_metric'
+    metric: 'nvidia_server_up'
+    operator: '=='
+    threshold: 0
+    level: 'critical'
+    period: 60
+    times: 1
+    mode: 'core'
+    enabled: true
+    expr: 'nvidia_server_up == 0'
+    template: '实例不可用'
+  - key: 'nvidia_gpu_util_high'
+    name: 'NVIDIA GPU利用率偏高'
+    type: 'periodic_metric'
+    metric: 'gpu_utilization_pct'
+    operator: '>'
+    threshold: 90
+    level: 'warning'
+    period: 180
+    times: 2
+    mode: 'core'
+    enabled: true
+    expr: 'gpu_utilization_pct > 90'
+    template: 'GPU利用率偏高'
+  - key: 'nvidia_gpu_util_critical'
+    name: 'NVIDIA GPU利用率过高'
+    type: 'periodic_metric'
+    metric: 'gpu_utilization_pct'
+    operator: '>'
+    threshold: 98
+    level: 'critical'
+    period: 120
+    times: 1
+    mode: 'core'
+    enabled: true
+    expr: 'gpu_utilization_pct > 98'
+    template: 'GPU利用率过高'
+  - key: 'nvidia_gpu_temp_high'
+    name: 'NVIDIA GPU温度偏高'
+    type: 'periodic_metric'
+    metric: 'gpu_temperature_c'
+    operator: '>'
+    threshold: 80
+    level: 'warning'
+    period: 180
+    times: 2
+    mode: 'core'
+    enabled: true
+    expr: 'gpu_temperature_c > 80'
+    template: 'GPU温度偏高'
+  - key: 'nvidia_gpu_temp_critical'
+    name: 'NVIDIA GPU温度过高'
+    type: 'periodic_metric'
+    metric: 'gpu_temperature_c'
+    operator: '>'
+    threshold: 88
+    level: 'critical'
+    period: 120
+    times: 1
+    mode: 'core'
+    enabled: true
+    expr: 'gpu_temperature_c > 88'
+    template: 'GPU温度过高'
+  - key: 'nvidia_gpu_mem_usage_high'
+    name: 'NVIDIA GPU显存使用率偏高'
+    type: 'periodic_metric'
+    metric: 'gpu_memory_used_mb'
+    operator: '>'
+    threshold: 80
+    level: 'warning'
+    period: 300
+    times: 2
+    mode: 'core'
+    enabled: true
+    expr: '(gpu_memory_total_mb > 0) && ((gpu_memory_used_mb / gpu_memory_total_mb) * 100 > 80)'
+    template: 'GPU显存使用率偏高'
+  - key: 'nvidia_gpu_mem_usage_critical'
+    name: 'NVIDIA GPU显存使用率过高'
+    type: 'periodic_metric'
+    metric: 'gpu_memory_used_mb'
+    operator: '>'
+    threshold: 90
+    level: 'critical'
+    period: 300
+    times: 1
+    mode: 'core'
+    enabled: true
+    expr: '(gpu_memory_total_mb > 0) && ((gpu_memory_used_mb / gpu_memory_total_mb) * 100 > 90)'
+    template: 'GPU显存使用率过高'
+  - key: 'nvidia_mem_usage_high'
+    name: 'NVIDIA主机内存使用率偏高'
+    type: 'periodic_metric'
+    metric: 'mem_used_pct'
+    operator: '>'
+    threshold: 80
+    level: 'warning'
+    period: 300
+    times: 2
+    mode: 'core'
+    enabled: true
+    expr: 'mem_used_pct > 80'
+    template: '主机内存使用率偏高'
+  - key: 'nvidia_mem_usage_critical'
+    name: 'NVIDIA主机内存使用率过高'
+    type: 'periodic_metric'
+    metric: 'mem_used_pct'
+    operator: '>'
+    threshold: 90
+    level: 'critical'
+    period: 300
+    times: 1
+    mode: 'core'
+    enabled: true
+    expr: 'mem_used_pct > 90'
+    template: '主机内存使用率过高'
+  - key: 'nvidia_gpu_name_missing'
+    name: 'NVIDIA GPU名称采集缺失'
+    type: 'periodic_metric'
+    metric: 'gpu_name'
+    operator: '=='
+    threshold: 0
+    level: 'warning'
+    period: 3600
+    times: 1
+    mode: 'extended'
+    enabled: false
+    expr: 'gpu_name == '''''
+    template: 'GPU名称采集缺失'
+  - key: 'nvidia_gpu_mem_total_missing'
+    name: 'NVIDIA GPU总显存采集缺失'
+    type: 'periodic_metric'
+    metric: 'gpu_memory_total_mb'
+    operator: '<'
+    threshold: 1
+    level: 'warning'
+    period: 1800
+    times: 1
+    mode: 'extended'
+    enabled: false
+    expr: 'gpu_memory_total_mb < 1'
+    template: 'GPU总显存采集缺失'

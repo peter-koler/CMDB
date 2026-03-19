@@ -1,12 +1,9 @@
 from functools import wraps
-from collections import Counter
 from datetime import datetime, timedelta, timezone
 import json
-import re
 
 from flask import Blueprint, current_app, jsonify, make_response, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
-from sqlalchemy.exc import IntegrityError
 
 from app import db
 from app.models import (
@@ -18,13 +15,8 @@ from app.models import (
     SingleAlert,
     AlertHistory,
     AlertDefine,
-    AlertGroup,
-    AlertInhibit,
-    AlertSilence,
-    AlertIntegration,
     AlertNotification,
     AlertTimelineEvent,
-    NoticeReceiver,
     NoticeRule,
 )
 from app.notifications.websocket import socketio
@@ -53,7 +45,40 @@ from app.services.alert_action_service import (
     apply_close,
     apply_delete,
 )
+from app.services.default_alert_policies import (
+    bigdata_default_alert_rules,
+    cache_default_alert_rules,
+    database_default_alert_rules,
+    middleware_default_alert_rules,
+    os_default_alert_rules,
+    server_default_alert_rules,
+    service_default_alert_rules,
+    webserver_default_alert_rules,
+)
 from app.services.manager_api_service import ManagerError, manager_api_service
+from app.services.monitoring_target_helpers import (
+    _apply_recovery_config_to_labels,
+    _extract_notice_rule_ids,
+    _extract_yaml_list_section,
+    _hourly_alert_trend,
+    _json_dump,
+    _json_load,
+    _mysql_default_alert_rules,
+    _monitor_is_healthy,
+    _ms_to_rfc3339,
+    _normalize_escalation_config,
+    _normalize_items,
+    _now_ms,
+    _now_naive_utc,
+    _paginate_items,
+    _parse_rfc3339_to_ms,
+    _redis_default_alert_rules,
+    _safe_total,
+    _to_bool,
+    _to_float,
+    _to_int,
+    _top_alert_monitors,
+)
 
 
 monitoring_target_bp = Blueprint("monitoring_target", __name__, url_prefix="/api/v1/monitoring")
@@ -136,54 +161,6 @@ def _manager_call(method: str, path: str, payload=None, params=None, fallback=No
         return jsonify({"code": e.status, "message": e.message, "error_code": e.code}), e.status
 
 
-def _normalize_items(payload) -> list[dict]:
-    if isinstance(payload, list):
-        return [item for item in payload if isinstance(item, dict)]
-    if isinstance(payload, dict):
-        items = payload.get("items")
-        if isinstance(items, list):
-            return [item for item in items if isinstance(item, dict)]
-    return []
-
-
-def _safe_total(payload, items: list[dict]) -> int:
-    if isinstance(payload, dict):
-        total = payload.get("total")
-        if isinstance(total, int):
-            return total
-        if isinstance(total, str) and total.isdigit():
-            return int(total)
-    return len(items)
-
-
-def _parse_time(value: str | None) -> datetime | None:
-    if not value or not isinstance(value, str):
-        return None
-    try:
-        normalized = value.replace("Z", "+00:00")
-        dt = datetime.fromisoformat(normalized)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt.astimezone(timezone.utc)
-    except ValueError:
-        return None
-
-
-def _monitor_is_healthy(item: dict) -> bool:
-    raw = item.get("status")
-    if isinstance(raw, str):
-        normalized = raw.strip().lower()
-        if normalized in {"up", "online", "ok", "healthy", "normal", "running", "success"}:
-            return True
-        if normalized in {"down", "offline", "error", "critical", "abnormal", "failed"}:
-            return False
-    enabled = item.get("enabled")
-    if isinstance(enabled, bool):
-        return enabled
-    # 缺省按健康处理，避免旧接口无状态字段时把全部实例算作异常。
-    return True
-
-
 def _fetch_manager_payload(path: str, params=None):
     try:
         return manager_api_service.request(
@@ -207,33 +184,6 @@ def _fetch_manager_payload_any(candidates: list[tuple[str, dict | None]]):
     return {"items": [], "total": 0}
 
 
-def _hourly_alert_trend(history_alerts: list[dict]) -> list[dict]:
-    now = datetime.now(timezone.utc)
-    hour_floor = now.replace(minute=0, second=0, microsecond=0)
-    points = [hour_floor - timedelta(hours=23 - i) for i in range(24)]
-    counts = {point: 0 for point in points}
-
-    for alert in history_alerts:
-        ts = _parse_time(alert.get("triggered_at"))
-        if not ts:
-            continue
-        bucket = ts.replace(minute=0, second=0, microsecond=0)
-        if bucket in counts:
-            counts[bucket] += 1
-
-    return [{"time": point.strftime("%H:00"), "value": counts[point]} for point in points]
-
-
-def _top_alert_monitors(current_alerts: list[dict], limit: int = 10) -> list[dict]:
-    counter: Counter[str] = Counter()
-    for alert in current_alerts:
-        key = alert.get("monitor_name") or alert.get("instance") or alert.get("monitor_id")
-        if key is None:
-            continue
-        counter[str(key)] += 1
-    return [{"name": name, "value": value} for name, value in counter.most_common(limit)]
-
-
 def _page_args() -> tuple[int, int]:
     try:
         page = int(request.args.get("page", 1))
@@ -246,14 +196,6 @@ def _page_args() -> tuple[int, int]:
     page = max(page, 1)
     page_size = max(min(page_size, 200), 1)
     return page, page_size
-
-
-def _paginate_items(items: list[dict], page: int, page_size: int) -> tuple[list[dict], int]:
-    total = len(items)
-    start = (page - 1) * page_size
-    if start >= total:
-        return [], total
-    return items[start : start + page_size], total
 
 
 def _list_response(items: list[dict], total: int, page: int, page_size: int):
@@ -303,7 +245,26 @@ def _load_monitors_from_db_fallback() -> dict:
     page, page_size = _page_args()
     q = (request.args.get("q") or "").strip().lower()
     status = (request.args.get("status") or "").strip().lower()
-    rows = Monitor.query.order_by(Monitor.updated_at.desc(), Monitor.id.desc()).all()
+    query = Monitor.query
+    if status in {"enabled", "disabled"}:
+        query = query.filter(Monitor.status == (1 if status == "enabled" else 0))
+    if q:
+        query_term = f"%{q}%"
+        query = query.filter(
+            db.or_(
+                Monitor.name.ilike(query_term),
+                Monitor.app.ilike(query_term),
+                Monitor.instance.ilike(query_term),
+                Monitor.annotations_json.ilike(query_term),
+            )
+        )
+    total = query.count()
+    rows = (
+        query.order_by(Monitor.updated_at.desc(), Monitor.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
     monitor_ids = [row.id for row in rows]
     params_by_monitor: dict[int, dict[str, str]] = {}
     if monitor_ids:
@@ -312,29 +273,7 @@ def _load_monitors_from_db_fallback() -> dict:
             bucket = params_by_monitor.setdefault(int(item.monitor_id), {})
             bucket[str(item.field)] = str(item.param_value or "")
     items = [_monitor_item_from_row(row, params_by_monitor=params_by_monitor) for row in rows]
-
-    if status in {"enabled", "disabled"}:
-        want_enabled = status == "enabled"
-        items = [item for item in items if bool(item.get("enabled")) == want_enabled]
-
-    if q:
-        def _match(item: dict) -> bool:
-            hay = " ".join(
-                [
-                    str(item.get("name") or ""),
-                    str(item.get("app") or ""),
-                    str(item.get("target") or ""),
-                    str(item.get("ci_code") or ""),
-                    str(item.get("ci_name") or ""),
-                    str(item.get("job_id") or ""),
-                ]
-            ).lower()
-            return q in hay
-
-        items = [item for item in items if _match(item)]
-
-    page_items, total = _paginate_items(items, page, page_size)
-    return {"items": page_items, "total": total, "page": page, "page_size": page_size}
+    return {"items": items, "total": total, "page": page, "page_size": page_size}
 
 
 def _set_target_enabled_fallback(monitor_id: int, enabled: bool) -> dict:
@@ -353,19 +292,6 @@ def _get_target_from_db_fallback(monitor_id: int) -> dict:
     if not row:
         return {"id": monitor_id, "fallback_error": "not_found"}
     return _monitor_item_from_row(row)
-
-
-def _json_load(raw: str | None, default):
-    if not raw:
-        return default
-    try:
-        return json.loads(raw)
-    except (TypeError, ValueError):
-        return default
-
-
-def _json_dump(payload) -> str:
-    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
 def _coerce_label_value(value) -> str:
@@ -424,27 +350,6 @@ def _merge_ci_labels(payload: dict) -> dict:
             merged["ci.name"] = ci_name_text
     payload["labels"] = merged
     return payload
-
-
-def _parse_rfc3339_to_ms(raw: str | None) -> int | None:
-    dt = _parse_time(raw)
-    if not dt:
-        return None
-    return int(dt.timestamp() * 1000)
-
-
-def _ms_to_rfc3339(value: int | None) -> str | None:
-    if not value:
-        return None
-    return datetime.fromtimestamp(value / 1000, tz=timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def _now_ms() -> int:
-    return int(datetime.now(timezone.utc).timestamp() * 1000)
-
-
-def _now_naive_utc() -> datetime:
-    return datetime.utcnow()
 
 
 def _rule_from_model(row: AlertDefine) -> dict:
@@ -542,99 +447,6 @@ def _rule_match_monitor(row: AlertDefine, monitor: dict) -> bool:
     return True
 
 
-def _extract_notice_rule_ids(payload: dict) -> tuple[list[int] | None, str | None]:
-    if "notice_rule_ids" in payload:
-        raw = payload.get("notice_rule_ids")
-    elif "notice_rule_id" in payload:
-        raw = payload.get("notice_rule_id")
-    else:
-        return None, None
-    if raw is None or raw == "":
-        return [], None
-    if isinstance(raw, list):
-        candidates = raw
-    else:
-        candidates = [raw]
-    ids: list[int] = []
-    for item in candidates:
-        if item is None or str(item).strip() == "":
-            continue
-        try:
-            val = int(item)
-        except (TypeError, ValueError):
-            return None, "notice_rule_ids 必须是整数数组"
-        if val <= 0:
-            continue
-        if val not in ids:
-            ids.append(val)
-    return ids, None
-
-
-def _normalize_escalation_config(raw) -> tuple[str | None, str | None]:
-    if raw is None or raw == "":
-        return "", None
-
-    payload = raw
-    if isinstance(raw, str):
-        text = raw.strip()
-        if not text:
-            return "", None
-        try:
-            payload = json.loads(text)
-        except (TypeError, ValueError):
-            return None, "escalation_config 必须是合法 JSON"
-
-    enabled = True
-    levels_raw = payload
-    if isinstance(payload, dict):
-        enabled = bool(payload.get("enabled", True))
-        levels_raw = payload.get("levels", [])
-    if not isinstance(levels_raw, list):
-        return None, "escalation_config.levels 必须是数组"
-
-    levels: list[dict] = []
-    for idx, item in enumerate(levels_raw):
-        if not isinstance(item, dict):
-            return None, f"escalation_config.levels[{idx}] 必须是对象"
-        try:
-            delay_seconds = int(item.get("delay_seconds") or item.get("wait_seconds") or 0)
-        except (TypeError, ValueError):
-            return None, f"escalation_config.levels[{idx}].delay_seconds 必须是整数"
-        if delay_seconds <= 0:
-            return None, f"escalation_config.levels[{idx}].delay_seconds 必须大于0"
-        notice_rule_ids: list[int] = []
-        raw_ids = item.get("notice_rule_ids")
-        if raw_ids is None and "notice_rule_id" in item:
-            raw_ids = [item.get("notice_rule_id")]
-        if raw_ids is None:
-            raw_ids = []
-        if not isinstance(raw_ids, list):
-            raw_ids = [raw_ids]
-        for v in raw_ids:
-            if v in (None, ""):
-                continue
-            try:
-                notice_id = int(v)
-            except (TypeError, ValueError):
-                return None, f"escalation_config.levels[{idx}].notice_rule_ids 必须是整数数组"
-            if notice_id > 0 and notice_id not in notice_rule_ids:
-                notice_rule_ids.append(notice_id)
-        levels.append(
-            {
-                "level": max(int(item.get("level") or (idx + 1)), 1),
-                "delay_seconds": delay_seconds,
-                "notice_rule_ids": notice_rule_ids,
-                "title_template": str(item.get("title_template") or "").strip(),
-                "content_template": str(item.get("content_template") or item.get("template") or "").strip(),
-            }
-        )
-
-    if enabled and not levels:
-        return None, "escalation_config 启用时 levels 不能为空"
-    normalized = {"enabled": enabled, "levels": levels}
-    return _json_dump(normalized), None
-
-
 def _validate_notice_rule_ids(ids: list[int]) -> str | None:
     if not ids:
         return None
@@ -652,252 +464,6 @@ def _rule_scope(row: AlertDefine, monitor_id: int) -> str:
     if want_monitor_id == str(monitor_id):
         return "target"
     return "global"
-
-
-def _redis_default_alert_rules() -> list[dict]:
-    # Core-first defaults for commercial usability.
-    return [
-        {
-            "name": "Redis实例不可用",
-            "type": "realtime_metric",
-            "metric": "redis_server_up",
-            "operator": "==",
-            "threshold": 0,
-            "level": "critical",
-            "period": 60,
-            "times": 1,
-            "expr": "redis_server_up == 0",
-            "enabled": True,
-            "template": "实例不可用",
-        },
-        {
-            "name": "Redis内存使用率过高",
-            "type": "periodic_metric",
-            "metric": "used_memory",
-            "operator": ">",
-            "threshold": 85,
-            "level": "warning",
-            "period": 300,
-            "times": 1,
-            "expr": "(maxmemory > 0) && ((used_memory / maxmemory) * 100 > 85)",
-            "enabled": True,
-            "template": "内存使用率过高",
-        },
-        {
-            "name": "Redis内存碎片严重",
-            "type": "periodic_metric",
-            "metric": "mem_fragmentation_ratio",
-            "operator": ">",
-            "threshold": 2.0,
-            "level": "warning",
-            "period": 600,
-            "times": 1,
-            "expr": "mem_fragmentation_ratio > 2.0",
-            "enabled": True,
-            "template": "内存碎片严重",
-        },
-        {
-            "name": "Redis连接数饱和",
-            "type": "realtime_metric",
-            "metric": "connected_clients",
-            "operator": ">",
-            "threshold": 90,
-            "level": "critical",
-            "period": 300,
-            "times": 1,
-            "expr": "(maxclients > 0) && ((connected_clients / maxclients) * 100 > 90)",
-            "enabled": True,
-            "template": "连接数饱和",
-        },
-        {
-            "name": "Redis拒绝连接",
-            "type": "realtime_metric",
-            "metric": "rejected_connections",
-            "operator": ">",
-            "threshold": 0,
-            "level": "critical",
-            "period": 300,
-            "times": 1,
-            "expr": "rejected_connections > 0",
-            "enabled": True,
-            "template": "拒绝连接",
-        },
-        {
-            "name": "Redis主从延迟过高",
-            "type": "periodic_metric",
-            "metric": "master_last_io_seconds_ago",
-            "operator": ">",
-            "threshold": 5,
-            "level": "warning",
-            "period": 300,
-            "times": 1,
-            "expr": "master_last_io_seconds_ago > 5",
-            "enabled": True,
-            "template": "主从延迟",
-        },
-        {
-            "name": "RedisRDB失败",
-            "type": "realtime_metric",
-            "metric": "rdb_last_bgsave_status_ok",
-            "operator": "==",
-            "threshold": 0,
-            "level": "critical",
-            "period": 60,
-            "times": 1,
-            "expr": "rdb_last_bgsave_status_ok == 0",
-            "enabled": True,
-            "template": "RDB失败",
-        },
-        {
-            "name": "RedisAOF失败",
-            "type": "realtime_metric",
-            "metric": "aof_last_bgrewrite_status_ok",
-            "operator": "==",
-            "threshold": 0,
-            "level": "critical",
-            "period": 60,
-            "times": 1,
-            "expr": "aof_last_bgrewrite_status_ok == 0",
-            "enabled": True,
-            "template": "AOF失败",
-        },
-    ]
-
-
-def _parse_scalar(value: str):
-    raw = str(value or "").strip()
-    if raw == "":
-        return ""
-    if (raw.startswith("'") and raw.endswith("'")) or (raw.startswith('"') and raw.endswith('"')):
-        return raw[1:-1]
-    lowered = raw.lower()
-    if lowered in {"true", "yes", "on"}:
-        return True
-    if lowered in {"false", "no", "off"}:
-        return False
-    if lowered in {"null", "none", "~"}:
-        return None
-    try:
-        if "." in raw:
-            return float(raw)
-        return int(raw)
-    except (TypeError, ValueError):
-        return raw
-
-
-def _extract_yaml_list_section(content: str, section_name: str) -> list[dict]:
-    lines = (content or "").splitlines()
-    section_index = -1
-    section_indent = 0
-    section_pattern = re.compile(rf"^(\s*){re.escape(section_name)}\s*:\s*$")
-    for idx, line in enumerate(lines):
-        if line.strip().startswith("#"):
-            continue
-        matched = section_pattern.match(line)
-        if matched:
-            section_index = idx
-            section_indent = len(matched.group(1))
-            break
-    if section_index < 0:
-        return []
-
-    section_lines: list[str] = []
-    for line in lines[section_index + 1 :]:
-        stripped = line.strip()
-        if stripped == "" or stripped.startswith("#"):
-            section_lines.append(line)
-            continue
-        indent = len(line) - len(line.lstrip(" "))
-        if indent <= section_indent:
-            break
-        section_lines.append(line)
-
-    items: list[dict] = []
-    current: dict | None = None
-    current_indent = None
-    for line in section_lines:
-        stripped = line.strip()
-        if stripped == "" or stripped.startswith("#"):
-            continue
-        indent = len(line) - len(line.lstrip(" "))
-        if stripped.startswith("- "):
-            if current:
-                items.append(current)
-            current = {}
-            current_indent = indent
-            rest = stripped[2:].strip()
-            if rest and ":" in rest:
-                key, value = rest.split(":", 1)
-                current[key.strip()] = _parse_scalar(value)
-            continue
-        if current is None:
-            continue
-        if current_indent is not None and indent <= current_indent:
-            items.append(current)
-            current = None
-            current_indent = None
-            continue
-        if ":" not in stripped:
-            continue
-        key, value = stripped.split(":", 1)
-        current[key.strip()] = _parse_scalar(value)
-    if current:
-        items.append(current)
-    return items
-
-
-def _to_bool(value, default=False) -> bool:
-    if value is None:
-        return bool(default)
-    if isinstance(value, bool):
-        return value
-    text = str(value).strip().lower()
-    if text in {"1", "true", "yes", "on"}:
-        return True
-    if text in {"0", "false", "no", "off"}:
-        return False
-    return bool(default)
-
-
-def _to_float(value, default=0.0) -> float:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return float(default)
-
-
-def _to_int(value, default=0) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return int(default)
-
-
-def _apply_recovery_config_to_labels(labels: dict, payload: dict):
-    if not isinstance(labels, dict) or not isinstance(payload, dict):
-        return
-    payload_labels = payload.get("labels") if isinstance(payload.get("labels"), dict) else {}
-
-    if "auto_recover" in payload:
-        labels["auto_recover"] = _to_bool(payload.get("auto_recover"), True)
-    elif "auto_recover" in payload_labels:
-        labels["auto_recover"] = _to_bool(payload_labels.get("auto_recover"), True)
-    elif "auto_recover" not in labels:
-        labels["auto_recover"] = True
-
-    if "recover_times" in payload:
-        labels["recover_times"] = max(_to_int(payload.get("recover_times"), 2), 1)
-    elif "recover_times" in payload_labels:
-        labels["recover_times"] = max(_to_int(payload_labels.get("recover_times"), 2), 1)
-    elif "recover_times" not in labels:
-        labels["recover_times"] = 2
-
-    if "notify_on_recovered" in payload:
-        labels["notify_on_recovered"] = _to_bool(payload.get("notify_on_recovered"), True)
-    elif "notify_on_recovered" in payload_labels:
-        labels["notify_on_recovered"] = _to_bool(payload_labels.get("notify_on_recovered"), True)
-    elif "notify_on_recovered" not in labels:
-        labels["notify_on_recovered"] = True
 
 
 def _normalize_template_alert_rule(item: dict) -> dict | None:
@@ -993,7 +559,30 @@ def _load_monitor_default_alert_rules(monitor: dict) -> list[dict]:
     app = str(monitor.get("app") or "").strip().lower()
     if app == "redis":
         return _redis_default_alert_rules()
-    return []
+    if app == "mysql":
+        return _mysql_default_alert_rules()
+    rules = bigdata_default_alert_rules(app)
+    if rules:
+        return rules
+    rules = database_default_alert_rules(app)
+    if rules:
+        return rules
+    rules = cache_default_alert_rules(app)
+    if rules:
+        return rules
+    rules = middleware_default_alert_rules(app)
+    if rules:
+        return rules
+    rules = webserver_default_alert_rules(app)
+    if rules:
+        return rules
+    rules = server_default_alert_rules(app)
+    if rules:
+        return rules
+    rules = service_default_alert_rules(app)
+    if rules:
+        return rules
+    return os_default_alert_rules(app)
 
 
 def _apply_default_rules_for_monitor(monitor_id: int, monitor: dict | None = None) -> dict:
@@ -1006,7 +595,16 @@ def _apply_default_rules_for_monitor(monitor_id: int, monitor: dict | None = Non
     if not defaults:
         raise ValueError("当前模板未配置默认告警策略")
     monitor_target = str(monitor.get("target") or "")
-    existing_rows = AlertDefine.query.order_by(AlertDefine.id.asc()).all()
+    existing_rows = (
+        AlertDefine.query.filter(
+            db.or_(
+                AlertDefine.labels_json.ilike(f'%"monitor_id":{monitor_id}%'),
+                AlertDefine.labels_json.ilike(f'%"monitor_id":"{monitor_id}"%'),
+            )
+        )
+        .order_by(AlertDefine.id.asc())
+        .all()
+    )
     existing_map: dict[str, AlertDefine] = {}
     for row in existing_rows:
         labels = _json_load(row.labels_json, {})
@@ -1095,72 +693,6 @@ def _apply_default_rules_for_monitor(monitor_id: int, monitor: dict | None = Non
         "created": created,
         "updated": updated,
         "total": created + updated,
-    }
-
-
-_RECEIVER_TYPE_TO_CHANNEL = {
-    0: "sms",
-    1: "email",
-    2: "webhook",
-    4: "wecom",
-    5: "dingtalk",
-    6: "feishu",
-    10: "wechat",
-    15: "system",
-}
-_CHANNEL_TO_RECEIVER_TYPE = {v: k for k, v in _RECEIVER_TYPE_TO_CHANNEL.items()}
-
-
-def _receiver_channel_name(receiver_type: int) -> str:
-    return _RECEIVER_TYPE_TO_CHANNEL.get(receiver_type, "webhook")
-
-
-def _resolve_receiver_type(channel: str | None) -> int:
-    if not channel:
-        return 2
-    return _CHANNEL_TO_RECEIVER_TYPE.get(channel.strip().lower(), 2)
-
-
-def _receiver_from_model(row: NoticeReceiver) -> dict:
-    channel_type = _receiver_channel_name(row.type)
-    endpoint = row.hook_url or row.email or row.phone or row.wechat_id or ""
-    return {
-        "id": row.id,
-        "name": row.name,
-        "type": channel_type,
-        "endpoint": endpoint,
-        "status": "enabled",
-    }
-
-
-def _notice_rule_from_model(row: NoticeRule) -> dict:
-    """将通知规则模型转换为字典"""
-    # 获取关联的渠道信息
-    receiver = row.receiver
-    receiver_type = row.receiver_type or (receiver.type if receiver else None)
-    receiver_name = row.receiver_name or (receiver.name if receiver else None)
-    
-    return {
-        "id": row.id,
-        "name": row.name,
-        "receiver_channel_id": row.receiver_channel_id,
-        "receiver_id": row.receiver_channel_id,  # 兼容前端字段名
-        "receiver_type": receiver_type,
-        "receiver_name": receiver_name,
-        "notify_times": row.notify_times,
-        "notify_scale": row.notify_scale,
-        "template_id": row.template_id,
-        "template_name": row.template_name,
-        "filter_all": row.filter_all,
-        "labels": row.labels,
-        "days": row.days,
-        "period_start": row.period_start,
-        "period_end": row.period_end,
-        "recipient_type": row.recipient_type,
-        "recipient_ids": row.recipient_ids,
-        "include_sub_departments": bool(row.include_sub_departments),
-        "status": "enabled" if row.enable else "disabled",
-        "enable": bool(row.enable),
     }
 
 
@@ -1852,7 +1384,22 @@ def list_current_alerts():
         query = query.filter_by(status="resolved")
     elif status in {"", "open"}:
         query = query.filter_by(status="firing")
-    rows = query.order_by(SingleAlert.updated_at.desc(), SingleAlert.id.desc()).all()
+    page, page_size = _page_args()
+    has_advanced_filters = any(
+        key not in {"page", "page_size", "status"} and str(value).strip()
+        for key, value in request.args.items()
+    )
+    if not has_advanced_filters:
+        total = query.count()
+        rows = (
+            query.order_by(SingleAlert.updated_at.desc(), SingleAlert.id.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+    else:
+        rows = query.order_by(SingleAlert.updated_at.desc(), SingleAlert.id.desc()).all()
+        total = None
     items = [
         extract_alert_item(
             row_id=row.id,
@@ -1874,8 +1421,10 @@ def list_current_alerts():
         query_args=request.args,
         parse_rfc3339_to_ms=_parse_rfc3339_to_ms,
     )
-    page, page_size = _page_args()
-    page_items, total = _paginate_items(items, page, page_size)
+    if total is None:
+        page_items, total = _paginate_items(items, page, page_size)
+    else:
+        page_items = items
     return _list_response(page_items, total, page, page_size)
 
 
@@ -1883,7 +1432,23 @@ def list_current_alerts():
 @jwt_required()
 @require_any_permission("monitoring:alert:history", "monitoring:alert:center")
 def list_history_alerts():
-    rows = AlertHistory.query.order_by(AlertHistory.created_at.desc(), AlertHistory.id.desc()).all()
+    page, page_size = _page_args()
+    has_advanced_filters = any(
+        key not in {"page", "page_size"} and str(value).strip()
+        for key, value in request.args.items()
+    )
+    query = AlertHistory.query
+    if not has_advanced_filters:
+        total = query.count()
+        rows = (
+            query.order_by(AlertHistory.created_at.desc(), AlertHistory.id.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+    else:
+        rows = query.order_by(AlertHistory.created_at.desc(), AlertHistory.id.desc()).all()
+        total = None
     items = [
         extract_alert_item(
             row_id=row.id,
@@ -1905,8 +1470,10 @@ def list_history_alerts():
         query_args=request.args,
         parse_rfc3339_to_ms=_parse_rfc3339_to_ms,
     )
-    page, page_size = _page_args()
-    page_items, total = _paginate_items(items, page, page_size)
+    if total is None:
+        page_items, total = _paginate_items(items, page, page_size)
+    else:
+        page_items = items
     return _list_response(page_items, total, page, page_size)
 
 
@@ -2547,1017 +2114,6 @@ def disable_alert_rule(rule_id: int):
     row.updated_at = _now_naive_utc()
     db.session.commit()
     return jsonify({"code": 200, "data": _rule_from_model(row)})
-
-
-def _generate_webhook_token() -> str:
-    """生成唯一的 Webhook Token"""
-    import secrets
-    return secrets.token_urlsafe(32)
-
-
-def _integration_from_model(row: AlertIntegration) -> dict:
-    return {
-        "id": row.id,
-        "name": row.name,
-        "source": row.source,
-        "description": row.description,
-        "webhook_url": row.webhook_url,
-        "severity_mapping": row.severity_mapping,
-        "default_labels": row.default_labels,
-        "label_mapping": row.label_mapping,
-        "source_config": row.source_config,
-        "auth_type": row.auth_type,
-        "status": row.status,
-        "created_at": row.created_at.isoformat() if row.created_at else None,
-        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
-    }
-
-
-@monitoring_target_bp.route("/alert-integrations", methods=["GET"])
-@jwt_required()
-@require_any_permission("monitoring:alert:integration", "monitoring:alert:integration:view")
-def list_alert_integrations():
-    """列出外部告警集成配置"""
-    q = (request.args.get("q") or "").strip()
-    source_filter = (request.args.get("source") or "").strip().lower()
-    status_filter = (request.args.get("status") or "").strip().lower()
-    query = AlertIntegration.query
-    if q:
-        query = query.filter(AlertIntegration.name.ilike(f"%{q}%"))
-    if source_filter:
-        query = query.filter(AlertIntegration.source == source_filter)
-    if status_filter:
-        query = query.filter(AlertIntegration.status == status_filter)
-    page, page_size = _page_args()
-    total = query.count()
-    rows = (
-        query.order_by(AlertIntegration.updated_at.desc(), AlertIntegration.id.desc())
-        .offset((page - 1) * page_size)
-        .limit(page_size)
-        .all()
-    )
-    return _list_response([_integration_from_model(row) for row in rows], total, page, page_size)
-
-
-@monitoring_target_bp.route("/alert-integrations", methods=["POST"])
-@jwt_required()
-@require_any_permission("monitoring:alert:integration", "monitoring:alert:integration:create")
-def create_alert_integration():
-    """创建外部告警集成配置"""
-    payload = request.get_json() or {}
-    name = str(payload.get("name") or "").strip()
-    source = str(payload.get("source") or "custom").strip().lower()
-    if not name:
-        return jsonify({"code": 400, "message": "名称不能为空"}), 400
-    if source not in ("prometheus", "zabbix", "skywalking", "nagios", "custom"):
-        return jsonify({"code": 400, "message": "不支持的源系统类型"}), 400
-
-    row = AlertIntegration(
-        name=name,
-        source=source,
-        description=str(payload.get("description") or "").strip() or None,
-        webhook_token=_generate_webhook_token(),
-        severity_mapping=str(payload.get("severity_mapping") or "").strip() or None,
-        default_labels=str(payload.get("default_labels") or "").strip() or None,
-        label_mapping=str(payload.get("label_mapping") or "").strip() or None,
-        source_config=str(payload.get("source_config") or "").strip() or None,
-        auth_type=str(payload.get("auth_type") or "none").strip().lower(),
-        auth_token=str(payload.get("auth_token") or "").strip() or None,
-        auth_username=str(payload.get("auth_username") or "").strip() or None,
-        auth_password=str(payload.get("auth_password") or "").strip() or None,
-        status=str(payload.get("status") or "enabled").strip().lower(),
-        creator="python-web",
-        modifier="python-web",
-    )
-    db.session.add(row)
-    db.session.commit()
-    return jsonify({"code": 200, "data": _integration_from_model(row)})
-
-
-@monitoring_target_bp.route("/alert-integrations/<integration_id>", methods=["PUT"])
-@jwt_required()
-@require_any_permission("monitoring:alert:integration", "monitoring:alert:integration:edit")
-def update_alert_integration(integration_id: str):
-    """更新外部告警集成配置"""
-    row = AlertIntegration.query.get(integration_id)
-    if not row:
-        return jsonify({"code": 404, "message": "集成不存在"}), 404
-    payload = request.get_json() or {}
-    if "name" in payload:
-        row.name = str(payload.get("name") or "").strip() or row.name
-    if "source" in payload:
-        source = str(payload.get("source") or "").strip().lower()
-        if source in ("prometheus", "zabbix", "skywalking", "nagios", "custom"):
-            row.source = source
-    if "description" in payload:
-        row.description = str(payload.get("description") or "").strip() or None
-    if "severity_mapping" in payload:
-        row.severity_mapping = str(payload.get("severity_mapping") or "").strip() or None
-    if "default_labels" in payload:
-        row.default_labels = str(payload.get("default_labels") or "").strip() or None
-    if "label_mapping" in payload:
-        row.label_mapping = str(payload.get("label_mapping") or "").strip() or None
-    if "source_config" in payload:
-        row.source_config = str(payload.get("source_config") or "").strip() or None
-    if "auth_type" in payload:
-        row.auth_type = str(payload.get("auth_type") or "none").strip().lower()
-    if "auth_token" in payload:
-        row.auth_token = str(payload.get("auth_token") or "").strip() or None
-    if "auth_username" in payload:
-        row.auth_username = str(payload.get("auth_username") or "").strip() or None
-    if "auth_password" in payload:
-        row.auth_password = str(payload.get("auth_password") or "").strip() or None
-    if "status" in payload:
-        row.status = str(payload.get("status") or "enabled").strip().lower()
-    row.modifier = "python-web"
-    row.updated_at = _now_naive_utc()
-    db.session.commit()
-    return jsonify({"code": 200, "data": _integration_from_model(row)})
-
-
-@monitoring_target_bp.route("/alert-integrations/<integration_id>", methods=["DELETE"])
-@jwt_required()
-@require_any_permission("monitoring:alert:integration", "monitoring:alert:integration:delete")
-def delete_alert_integration(integration_id: str):
-    """删除外部告警集成配置"""
-    row = AlertIntegration.query.get(integration_id)
-    if not row:
-        return jsonify({"code": 404, "message": "集成不存在"}), 404
-    db.session.delete(row)
-    db.session.commit()
-    return jsonify({"code": 200, "data": {"deleted": True}})
-
-
-@monitoring_target_bp.route("/alert-integrations/<integration_id>/toggle", methods=["PATCH"])
-@jwt_required()
-@require_any_permission("monitoring:alert:integration", "monitoring:alert:integration:edit")
-def toggle_alert_integration(integration_id: str):
-    """启用/禁用外部告警集成"""
-    row = AlertIntegration.query.get(integration_id)
-    if not row:
-        return jsonify({"code": 404, "message": "集成不存在"}), 404
-    payload = request.get_json() or {}
-    enabled = payload.get("enabled")
-    if enabled is True:
-        row.status = "enabled"
-    elif enabled is False:
-        row.status = "disabled"
-    row.modifier = "python-web"
-    row.updated_at = _now_naive_utc()
-    db.session.commit()
-    return jsonify({"code": 200, "data": _integration_from_model(row)})
-
-
-@monitoring_target_bp.route("/alert-integrations/<integration_id>/test", methods=["POST"])
-@jwt_required()
-@require_any_permission("monitoring:alert:integration", "monitoring:alert:integration:test")
-def test_alert_integration(integration_id: str):
-    """测试外部告警集成"""
-    row = AlertIntegration.query.get(integration_id)
-    if not row:
-        return jsonify({"code": 404, "message": "集成不存在"}), 404
-    # payload = request.get_json() or {}
-    # TODO: 实现测试告警处理逻辑
-    # 将测试内容解析并进入告警收敛流程
-    return jsonify({"code": 200, "data": {"tested": True, "id": row.id, "message": "测试告警已接收"}})
-
-
-@monitoring_target_bp.route("/alert-groups", methods=["GET"])
-@jwt_required()
-@require_any_permission("monitoring:alert:group", "monitoring:alert:group:view")
-def list_alert_groups():
-    q = (request.args.get("q") or "").strip()
-    query = AlertGroup.query
-    if q:
-        query = query.filter(AlertGroup.name.ilike(f"%{q}%"))
-    page, page_size = _page_args()
-    total = query.count()
-    rows = (
-        query.order_by(AlertGroup.updated_at.desc(), AlertGroup.id.desc())
-        .offset((page - 1) * page_size)
-        .limit(page_size)
-        .all()
-    )
-    items = []
-    for row in rows:
-        group_labels = _json_load(row.labels_json, [])
-        if not isinstance(group_labels, list):
-            group_labels = []
-        items.append(
-            {
-                "id": row.id,
-                "name": row.name,
-                "group_key": row.group_key,
-                "match_type": row.match_type or 0,
-                "group_labels": group_labels,
-                "group_wait": row.group_wait or 30,
-                "group_interval": row.group_interval or 300,
-                "repeat_interval": row.repeat_interval or 14400,
-                "enabled": bool(row.enabled),
-            }
-        )
-    return _list_response(items, total, page, page_size)
-
-
-@monitoring_target_bp.route("/alert-groups", methods=["POST"])
-@jwt_required()
-@require_any_permission("monitoring:alert:group", "monitoring:alert:group:create")
-def create_alert_group():
-    payload = request.get_json() or {}
-    name = str(payload.get("name") or "").strip()
-    if not name:
-        return jsonify({"code": 400, "message": "名称不能为空"}), 400
-    group_key = str(payload.get("group_key") or "").strip() or name
-    group_labels = payload.get("group_labels") if isinstance(payload.get("group_labels"), list) else []
-    row = AlertGroup(
-        name=name,
-        group_key=group_key,
-        match_type=int(payload.get("match_type") or 0),
-        labels_json=_json_dump(group_labels),
-        group_wait=payload.get("group_wait", 30),
-        group_interval=payload.get("group_interval", 300),
-        repeat_interval=payload.get("repeat_interval", 14400),
-        enabled=bool(payload.get("enabled", True)),
-        creator=(payload.get("creator") or "python-web"),
-        modifier=(payload.get("modifier") or "python-web"),
-    )
-    db.session.add(row)
-    try:
-        db.session.commit()
-    except IntegrityError:
-        db.session.rollback()
-        return jsonify({"code": 409, "message": "group_key 已存在"}), 409
-    return jsonify({"code": 200, "data": {
-        "id": row.id,
-        "name": row.name,
-        "group_key": row.group_key,
-        "match_type": row.match_type,
-        "group_labels": group_labels,
-        "group_wait": row.group_wait,
-        "group_interval": row.group_interval,
-        "repeat_interval": row.repeat_interval,
-        "enabled": bool(row.enabled)
-    }})
-
-
-@monitoring_target_bp.route("/alert-groups/<group_id>", methods=["PUT"])
-@jwt_required()
-@require_any_permission("monitoring:alert:group", "monitoring:alert:group:edit")
-def update_alert_group(group_id: str):
-    row = AlertGroup.query.get(group_id)
-    if not row:
-        return jsonify({"code": 404, "message": "分组不存在"}), 404
-    payload = request.get_json() or {}
-    if "name" in payload:
-        row.name = str(payload.get("name") or "").strip() or row.name
-    if "group_key" in payload:
-        row.group_key = str(payload.get("group_key") or "").strip() or row.group_key
-    if "match_type" in payload:
-        row.match_type = int(payload.get("match_type") or 0)
-    if "group_labels" in payload and isinstance(payload.get("group_labels"), list):
-        row.labels_json = _json_dump(payload.get("group_labels"))
-    if "group_wait" in payload:
-        row.group_wait = payload.get("group_wait")
-    if "group_interval" in payload:
-        row.group_interval = payload.get("group_interval")
-    if "repeat_interval" in payload:
-        row.repeat_interval = payload.get("repeat_interval")
-    if "enabled" in payload:
-        row.enabled = bool(payload.get("enabled"))
-    row.updated_at = _now_naive_utc()
-    try:
-        db.session.commit()
-    except IntegrityError:
-        db.session.rollback()
-        return jsonify({"code": 409, "message": "group_key 已存在"}), 409
-    group_labels = _json_load(row.labels_json, [])
-    return jsonify({"code": 200, "data": {
-        "id": row.id,
-        "name": row.name,
-        "group_key": row.group_key,
-        "match_type": row.match_type,
-        "group_labels": group_labels if isinstance(group_labels, list) else [],
-        "group_wait": row.group_wait,
-        "group_interval": row.group_interval,
-        "repeat_interval": row.repeat_interval,
-        "enabled": bool(row.enabled)
-    }})
-
-
-@monitoring_target_bp.route("/alert-groups/<group_id>", methods=["DELETE"])
-@jwt_required()
-@require_any_permission("monitoring:alert:group", "monitoring:alert:group:delete")
-def delete_alert_group(group_id: str):
-    row = AlertGroup.query.get(group_id)
-    if not row:
-        return jsonify({"code": 404, "message": "分组不存在"}), 404
-    db.session.delete(row)
-    db.session.commit()
-    return jsonify({"code": 200, "data": {"deleted": True}})
-
-
-@monitoring_target_bp.route("/alert-groups/<group_id>/enabled", methods=["PATCH"])
-@jwt_required()
-@require_any_permission("monitoring:alert:group", "monitoring:alert:group:edit")
-def update_alert_group_enabled(group_id: str):
-    row = AlertGroup.query.get(group_id)
-    if not row:
-        return jsonify({"code": 404, "message": "分组不存在"}), 404
-    payload = request.get_json() or {}
-    row.enabled = bool(payload.get("enabled"))
-    row.updated_at = _now_naive_utc()
-    db.session.commit()
-    return jsonify({"code": 200, "data": {"id": row.id, "enabled": bool(row.enabled)}})
-
-
-@monitoring_target_bp.route("/alert-inhibits", methods=["GET"])
-@jwt_required()
-@require_any_permission("monitoring:alert:inhibit", "monitoring:alert:inhibit:view")
-def list_alert_inhibits():
-    q = (request.args.get("q") or "").strip()
-    query = AlertInhibit.query
-    if q:
-        query = query.filter(AlertInhibit.name.ilike(f"%{q}%"))
-    page, page_size = _page_args()
-    total = query.count()
-    rows = (
-        query.order_by(AlertInhibit.updated_at.desc(), AlertInhibit.id.desc())
-        .offset((page - 1) * page_size)
-        .limit(page_size)
-        .all()
-    )
-    items = []
-    for row in rows:
-        source = _json_load(row.source_labels_json, {})
-        target = _json_load(row.target_labels_json, {})
-        equal_labels = _json_load(row.equal_labels_json, [])
-        items.append(
-            {
-                "id": row.id,
-                "name": row.name,
-                "source_labels": source if isinstance(source, dict) else {},
-                "target_labels": target if isinstance(target, dict) else {},
-                "equal_labels": equal_labels if isinstance(equal_labels, list) else [],
-                "enabled": bool(row.enabled),
-            }
-        )
-    return _list_response(items, total, page, page_size)
-
-
-@monitoring_target_bp.route("/alert-inhibits", methods=["POST"])
-@jwt_required()
-@require_any_permission("monitoring:alert:inhibit", "monitoring:alert:inhibit:create")
-def create_alert_inhibit():
-    payload = request.get_json() or {}
-    name = str(payload.get("name") or "").strip()
-    if not name:
-        return jsonify({"code": 400, "message": "名称不能为空"}), 400
-    source_labels = payload.get("source_labels") if isinstance(payload.get("source_labels"), dict) else {}
-    target_labels = payload.get("target_labels") if isinstance(payload.get("target_labels"), dict) else {}
-    equal_labels = payload.get("equal_labels") if isinstance(payload.get("equal_labels"), list) else []
-    row = AlertInhibit(
-        name=name,
-        source_labels_json=_json_dump(source_labels),
-        target_labels_json=_json_dump(target_labels),
-        equal_labels_json=_json_dump(equal_labels),
-        enabled=bool(payload.get("enabled", True)),
-        creator=(payload.get("creator") or "python-web"),
-        modifier=(payload.get("modifier") or "python-web"),
-    )
-    db.session.add(row)
-    db.session.commit()
-    return jsonify({"code": 200, "data": {
-        "id": row.id,
-        "name": row.name,
-        "source_labels": source_labels,
-        "target_labels": target_labels,
-        "equal_labels": equal_labels,
-        "enabled": bool(row.enabled)
-    }})
-
-
-@monitoring_target_bp.route("/alert-inhibits/<inhibit_id>", methods=["PUT"])
-@jwt_required()
-@require_any_permission("monitoring:alert:inhibit", "monitoring:alert:inhibit:edit")
-def update_alert_inhibit(inhibit_id: str):
-    row = AlertInhibit.query.get(inhibit_id)
-    if not row:
-        return jsonify({"code": 404, "message": "抑制规则不存在"}), 404
-    payload = request.get_json() or {}
-    if "name" in payload:
-        row.name = str(payload.get("name") or "").strip() or row.name
-    if "source_labels" in payload and isinstance(payload.get("source_labels"), dict):
-        row.source_labels_json = _json_dump(payload.get("source_labels"))
-    if "target_labels" in payload and isinstance(payload.get("target_labels"), dict):
-        row.target_labels_json = _json_dump(payload.get("target_labels"))
-    if "equal_labels" in payload and isinstance(payload.get("equal_labels"), list):
-        row.equal_labels_json = _json_dump(payload.get("equal_labels"))
-    if "enabled" in payload:
-        row.enabled = bool(payload.get("enabled"))
-    row.updated_at = _now_naive_utc()
-    db.session.commit()
-    return jsonify({"code": 200, "data": {
-        "id": row.id,
-        "name": row.name,
-        "source_labels": _json_load(row.source_labels_json, {}),
-        "target_labels": _json_load(row.target_labels_json, {}),
-        "equal_labels": _json_load(row.equal_labels_json, []),
-        "enabled": bool(row.enabled)
-    }})
-
-
-@monitoring_target_bp.route("/alert-inhibits/<inhibit_id>", methods=["DELETE"])
-@jwt_required()
-@require_any_permission("monitoring:alert:inhibit", "monitoring:alert:inhibit:delete")
-def delete_alert_inhibit(inhibit_id: str):
-    row = AlertInhibit.query.get(inhibit_id)
-    if not row:
-        return jsonify({"code": 404, "message": "抑制规则不存在"}), 404
-    db.session.delete(row)
-    db.session.commit()
-    return jsonify({"code": 200, "data": {"deleted": True}})
-
-
-@monitoring_target_bp.route("/alert-inhibits/<inhibit_id>/enabled", methods=["PATCH"])
-@jwt_required()
-@require_any_permission("monitoring:alert:inhibit", "monitoring:alert:inhibit:edit")
-def update_alert_inhibit_enabled(inhibit_id: str):
-    row = AlertInhibit.query.get(inhibit_id)
-    if not row:
-        return jsonify({"code": 404, "message": "抑制规则不存在"}), 404
-    payload = request.get_json() or {}
-    row.enabled = bool(payload.get("enabled"))
-    row.updated_at = _now_naive_utc()
-    db.session.commit()
-    return jsonify({"code": 200, "data": {"id": row.id, "enabled": bool(row.enabled)}})
-
-
-@monitoring_target_bp.route("/alert-silences", methods=["GET"])
-@jwt_required()
-@require_any_permission("monitoring:alert:silence", "monitoring:alert:silence:view")
-def list_alert_silences():
-    q = (request.args.get("q") or "").strip()
-    query = AlertSilence.query
-    if q:
-        query = query.filter(AlertSilence.name.ilike(f"%{q}%"))
-    page, page_size = _page_args()
-    total = query.count()
-    rows = (
-        query.order_by(AlertSilence.updated_at.desc(), AlertSilence.id.desc())
-        .offset((page - 1) * page_size)
-        .limit(page_size)
-        .all()
-    )
-    items = []
-    for row in rows:
-        labels = _json_load(row.labels_json, {})
-        days = _json_load(row.days_json, [])
-        items.append(
-            {
-                "id": row.id,
-                "name": row.name,
-                "type": row.type or 0,
-                "match_type": row.match_type or 0,
-                "labels": labels if isinstance(labels, dict) else {},
-                "reason": labels.get("reason") if isinstance(labels, dict) else None,
-                "days": days if isinstance(days, list) else [],
-                "start_time": row.start_time,
-                "end_time": row.end_time,
-                "enabled": bool(row.enabled),
-            }
-        )
-    return _list_response(items, total, page, page_size)
-
-
-@monitoring_target_bp.route("/alert-silences", methods=["POST"])
-@jwt_required()
-@require_any_permission("monitoring:alert:silence", "monitoring:alert:silence:create")
-def create_alert_silence():
-    payload = request.get_json() or {}
-    name = str(payload.get("name") or "").strip()
-    if not name:
-        return jsonify({"code": 400, "message": "名称不能为空"}), 400
-
-    silence_type = int(payload.get("type") or 0)
-    start_time = payload.get("start_time")
-    end_time = payload.get("end_time")
-
-    if not start_time or not end_time:
-        return jsonify({"code": 400, "message": "开始时间和结束时间不能为空"}), 400
-    if end_time <= start_time:
-        return jsonify({"code": 400, "message": "结束时间必须晚于开始时间"}), 400
-
-    labels = payload.get("labels") if isinstance(payload.get("labels"), dict) else {}
-    if payload.get("reason"):
-        labels["reason"] = str(payload.get("reason"))
-
-    days = payload.get("days") if isinstance(payload.get("days"), list) else []
-
-    row = AlertSilence(
-        name=name,
-        type=silence_type,
-        match_type=int(payload.get("match_type") or 0),
-        labels_json=_json_dump(labels),
-        days_json=_json_dump(days) if silence_type == 1 else _json_dump([]),
-        times=payload.get("times"),
-        start_time=start_time,
-        end_time=end_time,
-        enabled=bool(payload.get("enabled", True)),
-        creator=(payload.get("creator") or "python-web"),
-        modifier=(payload.get("modifier") or "python-web"),
-    )
-    db.session.add(row)
-    db.session.commit()
-    return jsonify({"code": 200, "data": {
-        "id": row.id,
-        "name": row.name,
-        "type": row.type,
-        "match_type": row.match_type,
-        "labels": labels,
-        "reason": labels.get("reason"),
-        "days": days if silence_type == 1 else [],
-        "start_time": row.start_time,
-        "end_time": row.end_time,
-        "enabled": bool(row.enabled)
-    }})
-
-
-@monitoring_target_bp.route("/alert-silences/<silence_id>", methods=["PUT"])
-@jwt_required()
-@require_any_permission("monitoring:alert:silence", "monitoring:alert:silence:edit")
-def update_alert_silence(silence_id: str):
-    row = AlertSilence.query.get(silence_id)
-    if not row:
-        return jsonify({"code": 404, "message": "静默规则不存在"}), 404
-    payload = request.get_json() or {}
-    if "name" in payload:
-        row.name = str(payload.get("name") or "").strip() or row.name
-    if "type" in payload:
-        row.type = int(payload.get("type") or 0)
-    if "match_type" in payload:
-        row.match_type = int(payload.get("match_type") or 0)
-
-    labels = _json_load(row.labels_json, {})
-    if "labels" in payload and isinstance(payload.get("labels"), dict):
-        labels = payload.get("labels")
-    if "reason" in payload:
-        labels["reason"] = str(payload.get("reason") or "").strip()
-    row.labels_json = _json_dump(labels)
-
-    if "days" in payload and isinstance(payload.get("days"), list):
-        row.days_json = _json_dump(payload.get("days"))
-
-    if "start_time" in payload:
-        row.start_time = payload.get("start_time")
-    if "end_time" in payload:
-        row.end_time = payload.get("end_time")
-
-    if row.start_time and row.end_time and row.end_time <= row.start_time:
-        return jsonify({"code": 400, "message": "静默时间范围不合法"}), 400
-
-    if "enabled" in payload:
-        row.enabled = bool(payload.get("enabled"))
-    row.updated_at = _now_naive_utc()
-    db.session.commit()
-
-    days = _json_load(row.days_json, [])
-    return jsonify({"code": 200, "data": {
-        "id": row.id,
-        "name": row.name,
-        "type": row.type,
-        "match_type": row.match_type,
-        "labels": labels,
-        "reason": labels.get("reason"),
-        "days": days if isinstance(days, list) else [],
-        "start_time": row.start_time,
-        "end_time": row.end_time,
-        "enabled": bool(row.enabled)
-    }})
-
-
-@monitoring_target_bp.route("/alert-silences/<silence_id>", methods=["DELETE"])
-@jwt_required()
-@require_any_permission("monitoring:alert:silence", "monitoring:alert:silence:delete")
-def delete_alert_silence(silence_id: str):
-    row = AlertSilence.query.get(silence_id)
-    if not row:
-        return jsonify({"code": 404, "message": "静默规则不存在"}), 404
-    db.session.delete(row)
-    db.session.commit()
-    return jsonify({"code": 200, "data": {"deleted": True}})
-
-
-@monitoring_target_bp.route("/alert-silences/<silence_id>/enabled", methods=["PATCH"])
-@jwt_required()
-@require_any_permission("monitoring:alert:silence", "monitoring:alert:silence:edit")
-def update_alert_silence_enabled(silence_id: str):
-    row = AlertSilence.query.get(silence_id)
-    if not row:
-        return jsonify({"code": 404, "message": "静默规则不存在"}), 404
-    payload = request.get_json() or {}
-    row.enabled = bool(payload.get("enabled"))
-    row.updated_at = _now_naive_utc()
-    db.session.commit()
-    return jsonify({"code": 200, "data": {"id": row.id, "enabled": bool(row.enabled)}})
-
-
-@monitoring_target_bp.route("/alert-notices", methods=["GET"])
-@jwt_required()
-@require_any_permission("monitoring:alert:notice", "monitoring:alert:notice:view")
-def list_alert_notices():
-    """获取通知规则列表"""
-    q = (request.args.get("q") or "").strip()
-    receiver_id = request.args.get("receiver_id")
-    query = NoticeRule.query
-    if q:
-        query = query.filter(NoticeRule.name.ilike(f"%{q}%"))
-    if receiver_id:
-        try:
-            query = query.filter(NoticeRule.receiver_channel_id == int(receiver_id))
-        except (TypeError, ValueError):
-            pass
-    page, page_size = _page_args()
-    total = query.count()
-    rows = (
-        query.order_by(NoticeRule.updated_at.desc(), NoticeRule.id.desc())
-        .offset((page - 1) * page_size)
-        .limit(page_size)
-        .all()
-    )
-    return _list_response([_notice_rule_from_model(row) for row in rows], total, page, page_size)
-
-
-@monitoring_target_bp.route("/alert-notices", methods=["POST"])
-@jwt_required()
-@require_any_permission("monitoring:alert:notice", "monitoring:alert:notice:create")
-def create_alert_notice():
-    """创建通知规则"""
-    payload = request.get_json() or {}
-    name = str(payload.get("name") or "").strip()
-    if not name:
-        return jsonify({"code": 400, "message": "名称不能为空"}), 400
-    
-    # 获取通知渠道ID
-    receiver_channel_id = payload.get("receiver_id") or payload.get("receiver_channel_id")
-    if receiver_channel_id is None:
-        return jsonify({"code": 400, "message": "请选择通知渠道"}), 400
-    try:
-        receiver_channel_id = int(receiver_channel_id)
-    except (TypeError, ValueError):
-        return jsonify({"code": 400, "message": "receiver_id 必须是整数"}), 400
-    
-    # 验证通知渠道是否存在
-    receiver = NoticeReceiver.query.get(receiver_channel_id)
-    if not receiver:
-        return jsonify({"code": 400, "message": "指定的通知渠道不存在"}), 400
-    
-    notify_scale = str(payload.get("notify_scale") or "single").strip().lower()
-    if notify_scale not in {"single", "batch"}:
-        return jsonify({"code": 400, "message": "notify_scale 只能是 single/batch"}), 400
-    
-    # 处理标签过滤
-    labels = payload.get("labels") if isinstance(payload.get("labels"), dict) else {}
-    days = payload.get("days") if isinstance(payload.get("days"), list) else [1, 2, 3, 4, 5, 6, 7]
-    recipient_type = str(payload.get("recipient_type") or "user").strip().lower()
-    if recipient_type not in {"user", "department"}:
-        return jsonify({"code": 400, "message": "recipient_type 只能是 user/department"}), 400
-    recipient_ids = payload.get("recipient_ids") if isinstance(payload.get("recipient_ids"), list) else []
-    include_sub_departments = bool(payload.get("include_sub_departments", True))
-    
-    row = NoticeRule(
-        name=name,
-        receiver_channel_id=receiver_channel_id,
-        receiver_name=receiver.name,
-        receiver_type=receiver.type,
-        notify_times=max(int(payload.get("notify_times") or 1), 1),
-        notify_scale=notify_scale,
-        template_id=payload.get("template_id"),
-        template_name=str(payload.get("template_name") or "").strip() or None,
-        filter_all=bool(payload.get("filter_all", True)),
-        labels_json=_json_dump(labels),
-        days_json=_json_dump(days),
-        period_start=str(payload.get("period_start") or "").strip() or None,
-        period_end=str(payload.get("period_end") or "").strip() or None,
-        recipient_type=recipient_type,
-        recipient_ids_json=_json_dump(recipient_ids),
-        include_sub_departments=include_sub_departments,
-        enable=bool(payload.get("enable", True)),
-        creator=get_jwt_identity(),
-        modifier=get_jwt_identity(),
-    )
-    db.session.add(row)
-    db.session.commit()
-    return jsonify({"code": 200, "data": _notice_rule_from_model(row)})
-
-
-@monitoring_target_bp.route("/alert-notices/<notice_id>", methods=["PUT"])
-@jwt_required()
-@require_any_permission("monitoring:alert:notice", "monitoring:alert:notice:edit")
-def update_alert_notice(notice_id: str):
-    """更新通知规则"""
-    row = NoticeRule.query.get(notice_id)
-    if not row:
-        return jsonify({"code": 404, "message": "通知配置不存在"}), 404
-    payload = request.get_json() or {}
-    if "name" in payload:
-        row.name = str(payload.get("name") or "").strip() or row.name
-    if "receiver_id" in payload or "receiver_channel_id" in payload:
-        receiver_channel_id = payload.get("receiver_id") or payload.get("receiver_channel_id")
-        if receiver_channel_id is not None:
-            try:
-                receiver_channel_id = int(receiver_channel_id)
-                receiver = NoticeReceiver.query.get(receiver_channel_id)
-                if receiver:
-                    row.receiver_channel_id = receiver_channel_id
-                    row.receiver_name = receiver.name
-                    row.receiver_type = receiver.type
-            except (TypeError, ValueError):
-                return jsonify({"code": 400, "message": "receiver_id 必须是整数"}), 400
-    if "notify_times" in payload:
-        try:
-            row.notify_times = max(int(payload.get("notify_times")), 1)
-        except (TypeError, ValueError):
-            return jsonify({"code": 400, "message": "notify_times 必须是整数"}), 400
-    if "notify_scale" in payload:
-        scale = str(payload.get("notify_scale") or "").strip().lower()
-        if scale not in {"single", "batch"}:
-            return jsonify({"code": 400, "message": "notify_scale 只能是 single/batch"}), 400
-        row.notify_scale = scale
-    if "template_id" in payload:
-        row.template_id = payload.get("template_id")
-    if "template_name" in payload:
-        row.template_name = str(payload.get("template_name") or "").strip() or None
-    if "filter_all" in payload:
-        row.filter_all = bool(payload.get("filter_all"))
-    if "labels" in payload and isinstance(payload.get("labels"), dict):
-        row.labels_json = _json_dump(payload.get("labels"))
-    if "days" in payload and isinstance(payload.get("days"), list):
-        row.days_json = _json_dump(payload.get("days"))
-    if "period_start" in payload:
-        row.period_start = str(payload.get("period_start") or "").strip() or None
-    if "period_end" in payload:
-        row.period_end = str(payload.get("period_end") or "").strip() or None
-    if "recipient_type" in payload:
-        recipient_type = str(payload.get("recipient_type") or "user").strip().lower()
-        if recipient_type not in {"user", "department"}:
-            return jsonify({"code": 400, "message": "recipient_type 只能是 user/department"}), 400
-        row.recipient_type = recipient_type
-    if "recipient_ids" in payload and isinstance(payload.get("recipient_ids"), list):
-        row.recipient_ids_json = _json_dump(payload.get("recipient_ids"))
-    if "include_sub_departments" in payload:
-        row.include_sub_departments = bool(payload.get("include_sub_departments"))
-    if "enable" in payload:
-        row.enable = bool(payload.get("enable"))
-    row.modifier = get_jwt_identity()
-    row.updated_at = _now_naive_utc()
-    db.session.commit()
-    return jsonify({"code": 200, "data": _notice_rule_from_model(row)})
-
-
-@monitoring_target_bp.route("/alert-notices/<notice_id>", methods=["DELETE"])
-@jwt_required()
-@require_any_permission("monitoring:alert:notice", "monitoring:alert:notice:delete")
-def delete_alert_notice(notice_id: str):
-    row = NoticeRule.query.get(notice_id)
-    if not row:
-        return jsonify({"code": 404, "message": "通知配置不存在"}), 404
-    db.session.delete(row)
-    db.session.commit()
-    return jsonify({"code": 200, "data": {"deleted": True}})
-
-
-@monitoring_target_bp.route("/alert-notices/<notice_id>/test", methods=["POST"])
-@jwt_required()
-@require_any_permission("monitoring:alert:notice", "monitoring:alert:notice:test")
-def test_alert_notice(notice_id: str):
-    row = NoticeRule.query.get(notice_id)
-    if not row:
-        return jsonify({"code": 404, "message": "通知配置不存在"}), 404
-    return jsonify({"code": 200, "data": {"tested": True, "id": row.id}})
-
-
-# ==================== 通知渠道配置 API ====================
-
-@monitoring_target_bp.route("/notice-receivers", methods=["GET"])
-@jwt_required()
-@require_any_permission("monitoring:alert:notice", "monitoring:alert:notice:view")
-def list_notice_receivers():
-    """获取通知渠道列表"""
-    q = (request.args.get("q") or "").strip()
-    type_filter = request.args.get("type")
-    enable_filter = request.args.get("enable")
-    
-    query = NoticeReceiver.query
-    if q:
-        query = query.filter(NoticeReceiver.name.ilike(f"%{q}%"))
-    if type_filter is not None:
-        try:
-            query = query.filter(NoticeReceiver.type == int(type_filter))
-        except (TypeError, ValueError):
-            pass
-    if enable_filter is not None:
-        query = query.filter(NoticeReceiver.enable == (enable_filter.lower() == "true"))
-    
-    page, page_size = _page_args()
-    total = query.count()
-    rows = (
-        query.order_by(NoticeReceiver.updated_at.desc(), NoticeReceiver.id.desc())
-        .offset((page - 1) * page_size)
-        .limit(page_size)
-        .all()
-    )
-    return _list_response([row.to_dict() for row in rows], total, page, page_size)
-
-
-@monitoring_target_bp.route("/notice-receivers/all", methods=["GET"])
-@jwt_required()
-@require_any_permission("monitoring:alert:notice", "monitoring:alert:notice:view")
-def list_all_notice_receivers():
-    """获取所有启用的通知渠道（用于下拉选择）"""
-    rows = NoticeReceiver.query.filter_by(enable=True).order_by(NoticeReceiver.name).all()
-    return jsonify({
-        "code": 200,
-        "data": [{"id": r.id, "name": r.name, "type": r.type, "type_name": r.type_name} for r in rows]
-    })
-
-
-@monitoring_target_bp.route("/notice-receivers/<receiver_id>", methods=["GET"])
-@jwt_required()
-@require_any_permission("monitoring:alert:notice", "monitoring:alert:notice:view")
-def get_notice_receiver(receiver_id: str):
-    """获取单个通知渠道详情"""
-    row = NoticeReceiver.query.get(receiver_id)
-    if not row:
-        return jsonify({"code": 404, "message": "通知渠道不存在"}), 404
-    return jsonify({"code": 200, "data": row.to_dict()})
-
-
-@monitoring_target_bp.route("/notice-receivers", methods=["POST"])
-@jwt_required()
-@require_any_permission("monitoring:alert:notice", "monitoring:alert:notice:create")
-def create_notice_receiver():
-    """创建通知渠道"""
-    payload = request.get_json() or {}
-    name = str(payload.get("name") or "").strip()
-    if not name:
-        return jsonify({"code": 400, "message": "名称不能为空"}), 400
-    
-    try:
-        type_val = int(payload.get("type", NoticeReceiver.TYPE_EMAIL))
-    except (TypeError, ValueError):
-        type_val = NoticeReceiver.TYPE_EMAIL
-    
-    row = NoticeReceiver(
-        name=name,
-        type=type_val,
-        enable=bool(payload.get("enable", True)),
-        description=str(payload.get("description") or "").strip() or None,
-        creator=get_jwt_identity(),
-        modifier=get_jwt_identity(),
-    )
-    
-    # 根据类型设置配置
-    config = payload.get("config") or {}
-    _apply_receiver_config(row, config)
-    
-    db.session.add(row)
-    db.session.commit()
-    return jsonify({"code": 200, "data": row.to_dict()})
-
-
-@monitoring_target_bp.route("/notice-receivers/<receiver_id>", methods=["PUT"])
-@jwt_required()
-@require_any_permission("monitoring:alert:notice", "monitoring:alert:notice:edit")
-def update_notice_receiver(receiver_id: str):
-    """更新通知渠道"""
-    row = NoticeReceiver.query.get(receiver_id)
-    if not row:
-        return jsonify({"code": 404, "message": "通知渠道不存在"}), 404
-    
-    payload = request.get_json() or {}
-    if "name" in payload:
-        row.name = str(payload.get("name") or "").strip() or row.name
-    if "type" in payload:
-        try:
-            row.type = int(payload.get("type"))
-        except (TypeError, ValueError):
-            pass
-    if "enable" in payload:
-        row.enable = bool(payload.get("enable"))
-    if "description" in payload:
-        row.description = str(payload.get("description") or "").strip() or None
-    
-    # 更新配置
-    if "config" in payload:
-        _apply_receiver_config(row, payload.get("config") or {})
-    
-    row.modifier = get_jwt_identity()
-    row.updated_at = _now_naive_utc()
-    db.session.commit()
-    return jsonify({"code": 200, "data": row.to_dict()})
-
-
-@monitoring_target_bp.route("/notice-receivers/<receiver_id>", methods=["DELETE"])
-@jwt_required()
-@require_any_permission("monitoring:alert:notice", "monitoring:alert:notice:delete")
-def delete_notice_receiver(receiver_id: str):
-    """删除通知渠道"""
-    row = NoticeReceiver.query.get(receiver_id)
-    if not row:
-        return jsonify({"code": 404, "message": "通知渠道不存在"}), 404
-    db.session.delete(row)
-    db.session.commit()
-    return jsonify({"code": 200, "data": {"deleted": True}})
-
-
-@monitoring_target_bp.route("/notice-receivers/<receiver_id>/test", methods=["POST"])
-@jwt_required()
-@require_any_permission("monitoring:alert:notice", "monitoring:alert:notice:test")
-def test_notice_receiver(receiver_id: str):
-    """测试通知渠道"""
-    row = NoticeReceiver.query.get(receiver_id)
-    if not row:
-        return jsonify({"code": 404, "message": "通知渠道不存在"}), 404
-    
-    # TODO: 实现实际的发送测试逻辑
-    return jsonify({"code": 200, "data": {"tested": True, "id": row.id, "type": row.type}})
-
-
-def _apply_receiver_config(row: NoticeReceiver, config: dict):
-    """应用通知渠道配置"""
-    # 邮件配置
-    row.smtp_host = config.get("smtp_host") or row.smtp_host
-    row.smtp_port = config.get("smtp_port") or row.smtp_port
-    row.smtp_username = config.get("smtp_username") or row.smtp_username
-    row.smtp_password = config.get("smtp_password") or row.smtp_password
-    row.smtp_use_tls = config.get("smtp_use_tls", row.smtp_use_tls)
-    row.email_from = config.get("email_from") or row.email_from
-    row.email_to = config.get("email_to") or row.email_to
-    
-    # Webhook配置
-    row.hook_url = config.get("hook_url") or row.hook_url
-    row.hook_auth_type = config.get("hook_auth_type") or row.hook_auth_type
-    row.hook_auth_token = config.get("hook_auth_token") or row.hook_auth_token
-    row.hook_method = config.get("hook_method") or row.hook_method
-    row.hook_content_type = config.get("hook_content_type") or row.hook_content_type
-    
-    # 企业微信机器人
-    row.wecom_key = config.get("wecom_key") or row.wecom_key
-    row.wecom_mentioned_mobiles = config.get("wecom_mentioned_mobiles") or row.wecom_mentioned_mobiles
-    
-    # 企业微信应用
-    row.wecom_corp_id = config.get("wecom_corp_id") or row.wecom_corp_id
-    row.wecom_agent_id = config.get("wecom_agent_id") or row.wecom_agent_id
-    row.wecom_app_secret = config.get("wecom_app_secret") or row.wecom_app_secret
-    row.wecom_to_user = config.get("wecom_to_user") or row.wecom_to_user
-    row.wecom_to_party = config.get("wecom_to_party") or row.wecom_to_party
-    row.wecom_to_tag = config.get("wecom_to_tag") or row.wecom_to_tag
-    
-    # 钉钉
-    row.dingtalk_access_token = config.get("dingtalk_access_token") or row.dingtalk_access_token
-    row.dingtalk_secret = config.get("dingtalk_secret") or row.dingtalk_secret
-    row.dingtalk_at_mobiles = config.get("dingtalk_at_mobiles") or row.dingtalk_at_mobiles
-    row.dingtalk_is_at_all = config.get("dingtalk_is_at_all", row.dingtalk_is_at_all)
-    
-    # 飞书机器人
-    row.feishu_webhook_token = config.get("feishu_webhook_token") or row.feishu_webhook_token
-    row.feishu_secret = config.get("feishu_secret") or row.feishu_secret
-    
-    # 飞书应用
-    row.feishu_app_id = config.get("feishu_app_id") or row.feishu_app_id
-    row.feishu_app_secret = config.get("feishu_app_secret") or row.feishu_app_secret
-    row.feishu_receive_type = config.get("feishu_receive_type", row.feishu_receive_type)
-    row.feishu_user_id = config.get("feishu_user_id") or row.feishu_user_id
-    row.feishu_chat_id = config.get("feishu_chat_id") or row.feishu_chat_id
-    
-    # Slack
-    row.slack_webhook_url = config.get("slack_webhook_url") or row.slack_webhook_url
-    
-    # Discord
-    row.discord_webhook_url = config.get("discord_webhook_url") or row.discord_webhook_url
-    
-    # 短信
-    row.sms_provider = config.get("sms_provider") or row.sms_provider
-    row.sms_access_key = config.get("sms_access_key") or row.sms_access_key
-    row.sms_secret_key = config.get("sms_secret_key") or row.sms_secret_key
-    row.sms_sign_name = config.get("sms_sign_name") or row.sms_sign_name
-    row.sms_template_code = config.get("sms_template_code") or row.sms_template_code
-    row.sms_phone_numbers = config.get("sms_phone_numbers") or row.sms_phone_numbers
-    
-    # 华为云SMN
-    row.smn_ak = config.get("smn_ak") or row.smn_ak
-    row.smn_sk = config.get("smn_sk") or row.smn_sk
-    row.smn_project_id = config.get("smn_project_id") or row.smn_project_id
-    row.smn_region = config.get("smn_region") or row.smn_region
-    row.smn_topic_urn = config.get("smn_topic_urn") or row.smn_topic_urn
-    
-    # Server酱
-    row.serverchan_send_key = config.get("serverchan_send_key") or row.serverchan_send_key
-    
-    # Gotify
-    row.gotify_url = config.get("gotify_url") or row.gotify_url
-    row.gotify_token = config.get("gotify_token") or row.gotify_token
-    row.gotify_priority = config.get("gotify_priority", row.gotify_priority)
 
 
 @monitoring_target_bp.route("/alerts/realtime/publish", methods=["POST"])

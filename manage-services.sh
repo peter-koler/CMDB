@@ -17,6 +17,10 @@ PROJECT_ROOT="/Users/peter/Documents/arco"
 MANAGER_DIR="$PROJECT_ROOT/manager-go"
 COLLECTOR_DIR="$PROJECT_ROOT/collector-go"
 
+# Go 编译缓存（避免某些环境下默认缓存目录无权限）
+export GOCACHE="${GOCACHE:-/tmp/arco-go-build-cache}"
+export GOMODCACHE="${GOMODCACHE:-/tmp/arco-go-mod-cache}"
+
 # PID 文件
 MANAGER_PID_FILE="/tmp/manager-go.pid"
 COLLECTOR_PID_FILE="/tmp/collector-go.pid"
@@ -81,17 +85,16 @@ start_manager() {
     
     cd "$MANAGER_DIR"
     
-    # 检查可执行文件
-    if [ -f "./manager-go" ]; then
-        nohup ./manager-go > "$MANAGER_LOG" 2>&1 &
-    elif [ -f "./cmd/manager/main.go" ]; then
-        echo -e "${YELLOW}未找到编译后的二进制文件，尝试编译...${NC}"
-        go build -o manager-go ./cmd/manager/main.go
-        nohup ./manager-go > "$MANAGER_LOG" 2>&1 &
+    # 强制重新编译
+    echo -e "${YELLOW}正在编译 manager-go...${NC}"
+    if [ -f "./cmd/manager/main.go" ]; then
+        go build -o manager-go ./cmd/manager
     else
-        echo -e "${RED}错误: 未找到 manager-go 可执行文件或源代码${NC}"
+        echo -e "${RED}错误: 未找到 manager-go 源代码${NC}"
         return 1
     fi
+    
+    nohup ./manager-go > "$MANAGER_LOG" 2>&1 &
     
     local new_pid=$!
     echo $new_pid > "$MANAGER_PID_FILE"
@@ -119,18 +122,31 @@ start_collector() {
     fi
     
     cd "$COLLECTOR_DIR"
+
+    # IPMI 内置工具路径（默认不依赖系统 PATH）
+    if [ -z "${COLLECTOR_IPMITOOL_BIN:-}" ]; then
+        local detect_script="$COLLECTOR_DIR/tools/ipmitool/scripts/detect_ipmitool.sh"
+        if [ -x "$detect_script" ]; then
+            local detected_ipmi_bin
+            detected_ipmi_bin="$("$detect_script" "$COLLECTOR_DIR" || true)"
+            if [ -n "$detected_ipmi_bin" ]; then
+                export COLLECTOR_IPMITOOL_BIN="$detected_ipmi_bin"
+            else
+                echo -e "${YELLOW}警告: 未发现内置 ipmitool，可在需要时设置 COLLECTOR_IPMITOOL_BIN${NC}"
+            fi
+        fi
+    fi
     
-    # 检查可执行文件
-    if [ -f "./collector-go" ]; then
-        nohup ./collector-go > "$COLLECTOR_LOG" 2>&1 &
-    elif [ -f "./cmd/collector/main.go" ]; then
-        echo -e "${YELLOW}未找到编译后的二进制文件，尝试编译...${NC}"
-        go build -o collector-go ./cmd/collector/main.go
-        nohup ./collector-go > "$COLLECTOR_LOG" 2>&1 &
+    # 强制重新编译
+    echo -e "${YELLOW}正在编译 collector-go...${NC}"
+    if [ -f "./cmd/collector/main.go" ]; then
+        go build -o collector-go ./cmd/collector
     else
-        echo -e "${RED}错误: 未找到 collector-go 可执行文件或源代码${NC}"
+        echo -e "${RED}错误: 未找到 collector-go 源代码${NC}"
         return 1
     fi
+    
+    nohup ./collector-go > "$COLLECTOR_LOG" 2>&1 &
     
     local new_pid=$!
     echo $new_pid > "$COLLECTOR_PID_FILE"
@@ -211,34 +227,129 @@ stop_collector() {
     rm -f "$COLLECTOR_PID_FILE"
 }
 
+# 检查端口是否被占用
+check_port() {
+    local port=$1
+    local service=$2
+    # 检查 lsof 命令是否存在
+    if ! command -v lsof >/dev/null 2>&1; then
+        echo -e "${YELLOW}警告: lsof 命令不存在，无法检查端口占用${NC}"
+        return 2
+    fi
+    
+    if lsof -i :$port >/dev/null 2>&1; then
+        local pid=$(lsof -ti:$port 2>/dev/null || echo "未知")
+        echo -e "${YELLOW}$service 端口 $port 被占用 (PID: $pid)${NC}"
+        return 0
+    else
+        echo -e "${GREEN}$service 端口 $port 可用${NC}"
+        return 1
+    fi
+}
+
+# 检查进程详细信息
+check_process_details() {
+    local pid=$1
+    local service=$2
+    if [ -n "$pid" ] && is_running "$pid"; then
+        # 获取进程详细信息
+        local cmdline=$(ps -p "$pid" -o command= 2>/dev/null || echo "未知")
+        local cpu=$(ps -p "$pid" -o %cpu= 2>/dev/null || echo "未知")
+        local mem=$(ps -p "$pid" -o %mem= 2>/dev/null || echo "未知")
+        local start_time=$(ps -p "$pid" -o lstart= 2>/dev/null || echo "未知")
+        
+        echo -e "${GREEN}$service 进程详情:${NC}"
+        echo -e "  PID: $pid"
+        echo -e "  启动时间: $start_time"
+        echo -e "  CPU使用率: $cpu%"
+        echo -e "  内存使用率: $mem%"
+        echo -e "  命令行: $cmdline"
+        
+        # 检查端口占用情况
+        case "$service" in
+            "manager-go")
+                check_port 8080 "manager-go"
+                ;;
+            "collector-go")
+                check_port 8081 "collector-go"
+                ;;
+        esac
+        return 0
+    else
+        echo -e "${RED}$service 进程不存在${NC}"
+        return 1
+    fi
+}
+
+# 检查单个服务状态
+check_service_status() {
+    local service_name=$1
+    local pid_file=$2
+    local log_file=$3
+    local port=$4
+    
+    local pid=$(get_pid "$pid_file")
+    
+    echo -e "${BLUE}$service_name 状态:${NC}"
+    
+    if is_running "$pid"; then
+        echo -e "  ${GREEN}运行中${NC} (PID: $pid)"
+        echo -e "  日志文件: $log_file"
+        
+        # 获取进程详细信息
+        local cmdline=$(ps -p "$pid" -o command= 2>/dev/null || echo "未知")
+        local cpu=$(ps -p "$pid" -o %cpu= 2>/dev/null || echo "未知")
+        local mem=$(ps -p "$pid" -o %mem= 2>/dev/null || echo "未知")
+        local start_time=$(ps -p "$pid" -o lstart= 2>/dev/null || echo "未知")
+        
+        echo -e "  启动时间: $start_time"
+        echo -e "  CPU使用率: $cpu%"
+        echo -e "  内存使用率: $mem%"
+        echo -e "  命令行: $cmdline"
+        
+        # 检查端口
+        if command -v lsof >/dev/null 2>&1; then
+            if lsof -i :$port >/dev/null 2>&1; then
+                local port_pid=$(lsof -ti:$port 2>/dev/null || echo "未知")
+                echo -e "  ${GREEN}端口 $port 被占用 (PID: $port_pid)${NC}"
+            else
+                echo -e "  ${YELLOW}端口 $port 可用${NC}"
+            fi
+        else
+            echo -e "  ${YELLOW}警告: 无法检查端口占用 (lsof 命令不存在)${NC}"
+        fi
+    else
+        echo -e "  ${RED}未运行${NC}"
+        echo -e "  日志文件: $log_file"
+        
+        # 检查端口是否被其他进程占用
+        if command -v lsof >/dev/null 2>&1; then
+            if lsof -i :$port >/dev/null 2>&1; then
+                local port_pid=$(lsof -ti:$port 2>/dev/null || echo "未知")
+                echo -e "  ${YELLOW}端口 $port 被其他进程占用 (PID: $port_pid)${NC}"
+            else
+                echo -e "  ${GREEN}端口 $port 可用${NC}"
+            fi
+        else
+            echo -e "  ${YELLOW}警告: 无法检查端口占用 (lsof 命令不存在)${NC}"
+        fi
+        
+        [ -n "$pid" ] && rm -f "$pid_file"
+    fi
+    echo ""
+}
+
 # 查看状态
 show_status() {
     echo -e "${BLUE}================ 服务状态 ================${NC}"
     echo ""
     
     # Manager 状态
-    local manager_pid=$(get_pid "$MANAGER_PID_FILE")
-    if is_running "$manager_pid"; then
-        echo -e "manager-go: ${GREEN}运行中${NC} (PID: $manager_pid)"
-        echo -e "  日志: $MANAGER_LOG"
-    else
-        echo -e "manager-go: ${RED}未运行${NC}"
-        [ -n "$manager_pid" ] && rm -f "$MANAGER_PID_FILE"
-    fi
-    
-    echo ""
+    check_service_status "manager-go" "$MANAGER_PID_FILE" "$MANAGER_LOG" 8080
     
     # Collector 状态
-    local collector_pid=$(get_pid "$COLLECTOR_PID_FILE")
-    if is_running "$collector_pid"; then
-        echo -e "collector-go: ${GREEN}运行中${NC} (PID: $collector_pid)"
-        echo -e "  日志: $COLLECTOR_LOG"
-    else
-        echo -e "collector-go: ${RED}未运行${NC}"
-        [ -n "$collector_pid" ] && rm -f "$COLLECTOR_PID_FILE"
-    fi
+    check_service_status "collector-go" "$COLLECTOR_PID_FILE" "$COLLECTOR_LOG" 8081
     
-    echo ""
     echo -e "${BLUE}==========================================${NC}"
 }
 

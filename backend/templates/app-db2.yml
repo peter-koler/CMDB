@@ -379,3 +379,148 @@ metrics:
       queryType: multiRow
       sql: "select total_act_time/num_exec_with_metrics as AVG_EXE_TIME, substr(stmt_text,1,4000) as SQL_TEXT from table(mon_get_pkg_cache_stmt(null, null, null, -2)) as T where num_exec_with_metrics>=1 order by 1 desc fetch first 100 rows only"
       url: ^_^url^_^
+
+alerts:
+  - key: 'db2_unavailable'
+    name: 'DB2实例不可用'
+    type: 'realtime_metric'
+    metric: 'db2_server_up'
+    operator: '=='
+    threshold: 0
+    level: 'critical'
+    period: 60
+    times: 1
+    mode: 'core'
+    enabled: true
+    expr: 'db2_server_up == 0'
+    template: '实例不可用'
+  - key: 'db2_tablespace_used_high'
+    name: 'DB2表空间使用率偏高'
+    type: 'periodic_metric'
+    metric: 'used_percentage'
+    operator: '>'
+    threshold: 80
+    level: 'warning'
+    period: 300
+    times: 2
+    mode: 'core'
+    enabled: true
+    expr: 'used_percentage > 80'
+    template: '表空间使用率偏高'
+  - key: 'db2_tablespace_used_critical'
+    name: 'DB2表空间使用率过高'
+    type: 'periodic_metric'
+    metric: 'used_percentage'
+    operator: '>'
+    threshold: 90
+    level: 'critical'
+    period: 300
+    times: 1
+    mode: 'core'
+    enabled: true
+    expr: 'used_percentage > 90'
+    template: '表空间使用率过高'
+  - key: 'db2_tablespace_free_low'
+    name: 'DB2表空间剩余容量不足'
+    type: 'periodic_metric'
+    metric: 'free'
+    operator: '<'
+    threshold: 10
+    level: 'warning'
+    period: 600
+    times: 2
+    mode: 'extended'
+    enabled: false
+    expr: '(total > 0) && ((free / total) * 100 < 10)'
+    template: '表空间剩余容量不足'
+  - key: 'db2_waiting_locks_detected'
+    name: 'DB2出现锁等待'
+    type: 'periodic_metric'
+    metric: 'waiting_locks'
+    operator: '>'
+    threshold: 0
+    level: 'warning'
+    period: 300
+    times: 1
+    mode: 'core'
+    enabled: true
+    expr: 'waiting_locks > 0'
+    template: '出现锁等待'
+  - key: 'db2_waiting_locks_critical'
+    name: 'DB2锁等待过多'
+    type: 'periodic_metric'
+    metric: 'waiting_locks'
+    operator: '>'
+    threshold: 10
+    level: 'critical'
+    period: 300
+    times: 1
+    mode: 'core'
+    enabled: true
+    expr: 'waiting_locks > 10'
+    template: '锁等待过多'
+  - key: 'db2_process_count_high'
+    name: 'DB2进程数偏高'
+    type: 'periodic_metric'
+    metric: 'process_count'
+    operator: '>'
+    threshold: 200
+    level: 'warning'
+    period: 300
+    times: 2
+    mode: 'core'
+    enabled: true
+    expr: 'process_count > 200'
+    template: '进程数偏高'
+  - key: 'db2_process_count_critical'
+    name: 'DB2进程数过高'
+    type: 'periodic_metric'
+    metric: 'process_count'
+    operator: '>'
+    threshold: 400
+    level: 'critical'
+    period: 300
+    times: 1
+    mode: 'extended'
+    enabled: false
+    expr: 'process_count > 400'
+    template: '进程数过高'
+  - key: 'db2_avg_exec_time_high'
+    name: 'DB2平均执行耗时偏高'
+    type: 'periodic_metric'
+    metric: 'avg_exe_time'
+    operator: '>'
+    threshold: 300
+    level: 'warning'
+    period: 600
+    times: 2
+    mode: 'extended'
+    enabled: false
+    expr: 'avg_exe_time > 300'
+    template: '平均执行耗时偏高'
+  - key: 'db2_avg_exec_time_critical'
+    name: 'DB2平均执行耗时过高'
+    type: 'periodic_metric'
+    metric: 'avg_exe_time'
+    operator: '>'
+    threshold: 800
+    level: 'critical'
+    period: 600
+    times: 2
+    mode: 'extended'
+    enabled: false
+    expr: 'avg_exe_time > 800'
+    template: '平均执行耗时过高'
+  - key: 'db2_status_count_high'
+    name: 'DB2异常状态计数偏高'
+    type: 'periodic_metric'
+    metric: 'count'
+    operator: '>'
+    threshold: 1000
+    level: 'warning'
+    period: 300
+    times: 2
+    mode: 'extended'
+    enabled: false
+    expr: 'count > 1000'
+    template: '异常状态计数偏高'

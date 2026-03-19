@@ -334,3 +334,57 @@ metrics:
         bearerTokenToken: ^_^token^_^
       parseType: jsonPath
       parseScript: '$'
+
+alerts:
+  - key: 'api_code_unavailable'
+    name: 'HTTP API状态码实例不可用'
+    type: 'realtime_metric'
+    metric: 'api_code_server_up'
+    operator: '=='
+    threshold: 0
+    level: 'critical'
+    period: 60
+    times: 1
+    mode: 'core'
+    enabled: true
+    expr: 'api_code_server_up == 0'
+    template: '实例不可用'
+  - key: 'api_code_latency_high'
+    name: 'HTTP API状态码响应时间偏高'
+    type: 'periodic_metric'
+    metric: 'responseTime'
+    operator: '>'
+    threshold: 800
+    level: 'warning'
+    period: 180
+    times: 2
+    mode: 'core'
+    enabled: true
+    expr: 'responseTime > 800'
+    template: '响应时间偏高'
+  - key: 'api_code_latency_critical'
+    name: 'HTTP API状态码响应时间过高'
+    type: 'periodic_metric'
+    metric: 'responseTime'
+    operator: '>'
+    threshold: 2000
+    level: 'critical'
+    period: 120
+    times: 1
+    mode: 'core'
+    enabled: true
+    expr: 'responseTime > 2000'
+    template: '响应时间过高'
+  - key: 'api_code_code_abnormal'
+    name: 'HTTP API状态码异常'
+    type: 'periodic_metric'
+    metric: 'code'
+    operator: '>='
+    threshold: 400
+    level: 'critical'
+    period: 120
+    times: 1
+    mode: 'core'
+    enabled: true
+    expr: 'code >= 400'
+    template: '状态码异常'

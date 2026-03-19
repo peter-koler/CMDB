@@ -6,11 +6,14 @@ import (
 	"go/parser"
 	"go/token"
 	"math"
+	"regexp"
 	"strconv"
 	"strings"
 
 	"collector-go/internal/model"
 )
+
+var rowFieldPattern = regexp.MustCompile(`^row\d+_(.+)$`)
 
 func ApplyCalculates(fields map[string]string, calculates []model.CalculateSpec) (map[string]string, map[string]string) {
 	if len(calculates) == 0 {
@@ -22,6 +25,11 @@ func ApplyCalculates(fields map[string]string, calculates []model.CalculateSpec)
 		field := strings.TrimSpace(calc.Field)
 		expr := strings.TrimSpace(calc.Expression)
 		if field == "" || expr == "" {
+			continue
+		}
+		// JSONPath-style expressions are resolved by protocol parsers (e.g. httpcollector),
+		// so the generic arithmetic evaluator should skip them.
+		if strings.HasPrefix(expr, "$.") || expr == "$" {
 			continue
 		}
 		value, err := evalExpression(expr, out)
@@ -61,6 +69,12 @@ func ApplyFieldWhitelist(fields map[string]string, specs []model.FieldSpec, capt
 		if _, ok := allowed[k]; ok {
 			out[k] = v
 			continue
+		}
+		if groups := rowFieldPattern.FindStringSubmatch(k); len(groups) == 2 {
+			if _, ok := allowed[strings.TrimSpace(groups[1])]; ok {
+				out[k] = v
+				continue
+			}
 		}
 		if captureDropped {
 			debug["dropped."+k] = "field not in field_specs"

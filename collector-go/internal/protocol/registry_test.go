@@ -21,6 +21,12 @@ func TestBuiltinCollectorsRegistered(t *testing.T) {
 	if _, ok := s["jdbc"]; !ok {
 		t.Fatal("jdbc collector is not registered")
 	}
+	if _, ok := s["jmx"]; !ok {
+		t.Fatal("jmx collector is not registered")
+	}
+	if _, ok := s["ipmi"]; !ok {
+		t.Fatal("ipmi collector is not registered")
+	}
 	if _, ok := s["linux"]; !ok {
 		t.Fatal("linux collector is not registered")
 	}

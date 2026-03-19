@@ -1,0 +1,234 @@
+category: webserver
+app: tomcat
+name:
+  zh-CN: Tomcat应用服务器
+  en-US: Tomcat WebServer
+help:
+  zh-CN: 基于 Jolokia HTTP 接口采集 Tomcat 连接器线程池、全局请求与 JVM 指标。请确保 Tomcat 已启用 Jolokia Agent。
+  en-US: Monitor Tomcat thread pool, request processor and JVM metrics through Jolokia HTTP endpoint.
+helpLink:
+  zh-CN: https://hertzbeat.apache.org/zh-cn/docs/help/tomcat
+  en-US: https://hertzbeat.apache.org/docs/help/tomcat
+params:
+  - field: host
+    name:
+      zh-CN: 目标 Host
+      en-US: Target Host
+    type: host
+    required: true
+  - field: port
+    name:
+      zh-CN: Jolokia 端口
+      en-US: Jolokia Port
+    type: number
+    range: '[0,65535]'
+    required: true
+    defaultValue: 8778
+  - field: path
+    name:
+      zh-CN: Jolokia 路径
+      en-US: Jolokia Path
+    type: text
+    required: true
+    defaultValue: /jolokia/
+  - field: ssl
+    name:
+      zh-CN: 启用 HTTPS
+      en-US: Enable HTTPS
+    type: boolean
+    required: false
+    defaultValue: false
+  - field: username
+    name:
+      zh-CN: 用户名
+      en-US: Username
+    type: text
+    required: false
+    hide: true
+  - field: password
+    name:
+      zh-CN: 密码
+      en-US: Password
+    type: password
+    required: false
+    hide: true
+metrics:
+  - name: jvm_basic
+    i18n:
+      zh-CN: JVM 基础信息
+      en-US: JVM Basic
+    priority: 0
+    fields:
+      - field: VmName
+        type: 1
+      - field: VmVendor
+        type: 1
+      - field: VmVersion
+        type: 1
+      - field: Uptime
+        type: 0
+        unit: ms
+    protocol: http
+    http:
+      host: ^_^host^_^
+      port: ^_^port^_^
+      ssl: ^_^ssl^_^
+      url: ^_^path^_^
+      method: POST
+      headers.Content-Type: application/json
+      headers.Accept: application/json
+      body: '{"type":"read","mbean":"java.lang:type=Runtime","attribute":["VmName","VmVendor","VmVersion","Uptime"]}'
+      parseType: jsonPath
+      parseScript: $.value
+      authorization.basicAuthUsername: ^_^username^_^
+      authorization.basicAuthPassword: ^_^password^_^
+  - name: connector_thread_pool
+    i18n:
+      zh-CN: Connector 线程池
+      en-US: Connector Thread Pool
+    priority: 1
+    fields:
+      - field: name
+        type: 1
+        label: true
+      - field: currentThreadCount
+        type: 0
+      - field: currentThreadsBusy
+        type: 0
+      - field: maxThreads
+        type: 0
+      - field: connectionCount
+        type: 0
+      - field: keepAliveCount
+        type: 0
+      - field: acceptCount
+        type: 0
+      - field: errorCount
+        type: 0
+      - field: requestCount
+        type: 0
+      - field: processingTime
+        type: 0
+      - field: bytesReceived
+        type: 0
+      - field: bytesSent
+        type: 0
+    protocol: http
+    http:
+      host: ^_^host^_^
+      port: ^_^port^_^
+      ssl: ^_^ssl^_^
+      url: ^_^path^_^
+      method: POST
+      headers.Content-Type: application/json
+      headers.Accept: application/json
+      body: '{"type":"read","mbean":"Catalina:type=ThreadPool,name=*","attribute":["name","currentThreadCount","currentThreadsBusy","maxThreads","connectionCount","keepAliveCount","acceptCount","errorCount","requestCount","processingTime","bytesReceived","bytesSent"]}'
+      parseType: jsonPath
+      parseScript: $.value.*
+      authorization.basicAuthUsername: ^_^username^_^
+      authorization.basicAuthPassword: ^_^password^_^
+  - name: global_request_processor
+    i18n:
+      zh-CN: 全局请求处理器
+      en-US: Global Request Processor
+    priority: 2
+    fields:
+      - field: name
+        type: 1
+        label: true
+      - field: requestCount
+        type: 0
+      - field: errorCount
+        type: 0
+      - field: maxTime
+        type: 0
+        unit: ms
+      - field: processingTime
+        type: 0
+        unit: ms
+      - field: bytesReceived
+        type: 0
+      - field: bytesSent
+        type: 0
+    protocol: http
+    http:
+      host: ^_^host^_^
+      port: ^_^port^_^
+      ssl: ^_^ssl^_^
+      url: ^_^path^_^
+      method: POST
+      headers.Content-Type: application/json
+      headers.Accept: application/json
+      body: '{"type":"read","mbean":"Catalina:type=GlobalRequestProcessor,name=*","attribute":["name","requestCount","errorCount","maxTime","processingTime","bytesReceived","bytesSent"]}'
+      parseType: jsonPath
+      parseScript: $.value.*
+      authorization.basicAuthUsername: ^_^username^_^
+      authorization.basicAuthPassword: ^_^password^_^
+  - name: jvm_memory
+    i18n:
+      zh-CN: JVM 内存
+      en-US: JVM Memory
+    priority: 2
+    fields:
+      - field: heap_used
+        type: 0
+        unit: B
+      - field: heap_max
+        type: 0
+        unit: B
+      - field: nonheap_used
+        type: 0
+        unit: B
+      - field: nonheap_max
+        type: 0
+        unit: B
+      - field: ObjectPendingFinalizationCount
+        type: 0
+    calculates:
+      - heap_used=$.value.HeapMemoryUsage.used
+      - heap_max=$.value.HeapMemoryUsage.max
+      - nonheap_used=$.value.NonHeapMemoryUsage.used
+      - nonheap_max=$.value.NonHeapMemoryUsage.max
+      - ObjectPendingFinalizationCount=$.value.ObjectPendingFinalizationCount
+    protocol: http
+    http:
+      host: ^_^host^_^
+      port: ^_^port^_^
+      ssl: ^_^ssl^_^
+      url: ^_^path^_^
+      method: POST
+      headers.Content-Type: application/json
+      headers.Accept: application/json
+      body: '{"type":"read","mbean":"java.lang:type=Memory","attribute":["HeapMemoryUsage","NonHeapMemoryUsage","ObjectPendingFinalizationCount"]}'
+      parseType: jsonPath
+      parseScript: $
+      authorization.basicAuthUsername: ^_^username^_^
+      authorization.basicAuthPassword: ^_^password^_^
+  - name: jvm_gc
+    i18n:
+      zh-CN: JVM GC
+      en-US: JVM GC
+    priority: 3
+    fields:
+      - field: name
+        type: 1
+        label: true
+      - field: CollectionCount
+        type: 0
+      - field: CollectionTime
+        type: 0
+        unit: ms
+    protocol: http
+    http:
+      host: ^_^host^_^
+      port: ^_^port^_^
+      ssl: ^_^ssl^_^
+      url: ^_^path^_^
+      method: POST
+      headers.Content-Type: application/json
+      headers.Accept: application/json
+      body: '{"type":"read","mbean":"java.lang:type=GarbageCollector,name=*","attribute":["name","CollectionCount","CollectionTime"]}'
+      parseType: jsonPath
+      parseScript: $.value.*
+      authorization.basicAuthUsername: ^_^username^_^
+      authorization.basicAuthPassword: ^_^password^_^

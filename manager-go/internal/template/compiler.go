@@ -127,6 +127,11 @@ func compileOneMetricTask(metric map[string]any, effective map[string]string, me
 	if err != nil {
 		return nil, err
 	}
+	aliasFields := compileAliasFields(asSlice(metric["aliasFields"]))
+	if len(aliasFields) > 0 {
+		params["alias_fields"] = strings.Join(aliasFields, ",")
+	}
+	unitTransforms := compileUnitTransforms(asSlice(metric["units"]))
 	priority := int32(readIntAny(metric["priority"], 0))
 
 	return &pb.MetricsTask{
@@ -136,6 +141,7 @@ func compileOneMetricTask(metric map[string]any, effective map[string]string, me
 		Priority:       priority,
 		Params:         params,
 		ExecKind:       "pull",
+		Transform:      unitTransforms,
 		FieldSpecs:     fieldSpecs,
 		CalculateSpecs: calcSpecs,
 	}, nil

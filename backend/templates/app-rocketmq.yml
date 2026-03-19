@@ -1,0 +1,321 @@
+category: mid
+app: rocketmq
+name:
+  zh-CN: RocketMQ消息系统
+  en-US: RocketMQ
+  ja-JP: RocketMQメッセージシステム
+help:
+  zh-CN: Hertzbeat 对 RocketMQ 消息系统进行基础拓扑与主题路由监控。<br>当前版本基于 Go 公共 Admin API，稳定支持 NameServer 可达性、主题规模、重试/死信主题分布、Broker 覆盖和主题路由面监控。
+  en-US: Hertzbeat monitors RocketMQ topology and topic routing through the public Go Admin API. This integration supports NameServer reachability, topic inventory, retry/DLQ distribution, broker coverage and topic route visibility.
+  zh-TW: Hertzbeat 對 RocketMQ 消息系統進行基礎拓撲與主題路由監控。<br>當前版本基於 Go 公共 Admin API，穩定支持 NameServer 可達性、主題規模、重試/死信主題分佈、Broker 覆蓋和主題路由面監控。
+  ja-JP: Hertzbeat は Go 公開 Admin API を使って RocketMQ のトポロジーとトピックルーティングを監視します。NameServer 到達性、トピック数、リトライ/DLQ 分布、Broker カバレッジ、ルート可視性を安定サポートします。
+helpLink:
+  zh-CN: https://hertzbeat.apache.org/zh-cn/docs/help/rocketmq
+  en-US: https://hertzbeat.apache.org/docs/help/rocketmq
+params:
+  - field: host
+    name:
+      zh-CN: 注册中心Host
+      en-US: Namesrv Host
+      ja-JP: ネームサーバーホスト
+    type: host
+    required: true
+  - field: port
+    name:
+      zh-CN: 端口
+      en-US: Port
+      ja-JP: ポート
+    type: number
+    range: '[0,65535]'
+    required: true
+    defaultValue: 9876
+  - field: accessKey
+    name:
+      zh-CN: accessKey
+      en-US: accessKey
+      ja-JP: アクセスキー
+    type: text
+  - field: secretKey
+    name:
+      zh-CN: secretKey
+      en-US: secretKey
+      ja-JP: 秘密鍵
+    type: text
+metrics:
+  - name: cluster
+    i18n:
+      zh-CN: 集群概览
+      en-US: Cluster Overview
+      ja-JP: クラスター概要
+    priority: 0
+    fields:
+      - field: NamesrvAddress
+        i18n:
+          zh-CN: NameServer地址
+          en-US: Namesrv Address
+          ja-JP: ネームサーバーアドレス
+        type: 1
+        label: true
+      - field: TopicCount
+        i18n:
+          zh-CN: 主题总数
+          en-US: Topic Count
+          ja-JP: トピック総数
+        type: 0
+      - field: NormalTopicCount
+        i18n:
+          zh-CN: 业务主题数
+          en-US: Normal Topic Count
+          ja-JP: 通常トピック数
+        type: 0
+      - field: RetryTopicCount
+        i18n:
+          zh-CN: 重试主题数
+          en-US: Retry Topic Count
+          ja-JP: リトライトピック数
+        type: 0
+      - field: DeadLetterTopicCount
+        i18n:
+          zh-CN: 死信主题数
+          en-US: Dead Letter Topic Count
+          ja-JP: デッドレタートピック数
+        type: 0
+      - field: SystemTopicCount
+        i18n:
+          zh-CN: 系统主题数
+          en-US: System Topic Count
+          ja-JP: システムトピック数
+        type: 0
+      - field: BrokerCount
+        i18n:
+          zh-CN: Broker覆盖数
+          en-US: Broker Count
+          ja-JP: Broker数
+        type: 0
+      - field: QueueCount
+        i18n:
+          zh-CN: 队列总数
+          en-US: Queue Count
+          ja-JP: キュー総数
+        type: 0
+      - field: AvgQueueCountPerTopic
+        i18n:
+          zh-CN: 平均每主题队列数
+          en-US: Average Queue Count Per Topic
+          ja-JP: トピック平均キュー数
+        type: 0
+      - field: MaxQueueCountPerTopic
+        i18n:
+          zh-CN: 单主题最大队列数
+          en-US: Max Queue Count Per Topic
+          ja-JP: トピック最大キュー数
+        type: 0
+      - field: TopicRouteErrorCount
+        i18n:
+          zh-CN: 主题路由异常数
+          en-US: Topic Route Error Count
+          ja-JP: ルート異常トピック数
+        type: 0
+    protocol: rocketmq
+    rocketmq:
+      namesrvHost: ^_^host^_^
+      namesrvPort: ^_^port^_^
+      accessKey: ^_^accessKey^_^
+      secretKey: ^_^secretKey^_^
+      command: overview
+  - name: topic
+    i18n:
+      zh-CN: 主题路由
+      en-US: Topic Routes
+      ja-JP: トピックルート
+    priority: 1
+    fields:
+      - field: TopicName
+        i18n:
+          zh-CN: 主题名
+          en-US: Topic Name
+          ja-JP: トピック名
+        type: 1
+        label: true
+      - field: TopicType
+        i18n:
+          zh-CN: 主题类型
+          en-US: Topic Type
+          ja-JP: トピック種別
+        type: 1
+      - field: QueueCount
+        i18n:
+          zh-CN: 队列数
+          en-US: Queue Count
+          ja-JP: キュー数
+        type: 0
+      - field: BrokerCount
+        i18n:
+          zh-CN: Broker数
+          en-US: Broker Count
+          ja-JP: Broker数
+        type: 0
+      - field: BrokerNames
+        i18n:
+          zh-CN: Broker列表
+          en-US: Broker Names
+          ja-JP: Broker一覧
+        type: 1
+      - field: RouteStatus
+        i18n:
+          zh-CN: 路由状态
+          en-US: Route Status
+          ja-JP: ルート状態
+        type: 1
+    protocol: rocketmq
+    rocketmq:
+      namesrvHost: ^_^host^_^
+      namesrvPort: ^_^port^_^
+      accessKey: ^_^accessKey^_^
+      secretKey: ^_^secretKey^_^
+      command: topic-list
+
+alerts:
+  - key: 'rocketmq_unavailable'
+    name: 'RocketMQ实例不可用'
+    type: 'realtime_metric'
+    metric: 'rocketmq_server_up'
+    operator: '=='
+    threshold: 0
+    level: 'critical'
+    period: 60
+    times: 1
+    mode: 'core'
+    enabled: true
+    expr: 'rocketmq_server_up == 0'
+    template: '实例不可用'
+  - key: 'rocketmq_route_error_exists'
+    name: 'RocketMQ存在主题路由异常'
+    type: 'realtime_metric'
+    metric: 'TopicRouteErrorCount'
+    operator: '>'
+    threshold: 0
+    level: 'critical'
+    period: 120
+    times: 1
+    mode: 'core'
+    enabled: true
+    expr: 'TopicRouteErrorCount > 0'
+    template: '存在主题路由异常'
+  - key: 'rocketmq_broker_coverage_low'
+    name: 'RocketMQ Broker覆盖数偏少'
+    type: 'periodic_metric'
+    metric: 'BrokerCount'
+    operator: '<'
+    threshold: 2
+    level: 'warning'
+    period: 300
+    times: 2
+    mode: 'core'
+    enabled: true
+    expr: 'BrokerCount < 2'
+    template: 'Broker覆盖数偏少'
+  - key: 'rocketmq_normal_topics_missing'
+    name: 'RocketMQ业务主题数异常偏少'
+    type: 'periodic_metric'
+    metric: 'NormalTopicCount'
+    operator: '<'
+    threshold: 1
+    level: 'critical'
+    period: 600
+    times: 1
+    mode: 'core'
+    enabled: true
+    expr: 'NormalTopicCount < 1'
+    template: '业务主题数异常偏少'
+  - key: 'rocketmq_retry_topics_high'
+    name: 'RocketMQ重试主题数量偏多'
+    type: 'periodic_metric'
+    metric: 'RetryTopicCount'
+    operator: '>'
+    threshold: 100
+    level: 'warning'
+    period: 900
+    times: 2
+    mode: 'extended'
+    enabled: false
+    expr: 'RetryTopicCount > 100'
+    template: '重试主题数量偏多'
+  - key: 'rocketmq_dead_letter_topics_high'
+    name: 'RocketMQ死信主题数量偏多'
+    type: 'periodic_metric'
+    metric: 'DeadLetterTopicCount'
+    operator: '>'
+    threshold: 20
+    level: 'warning'
+    period: 900
+    times: 2
+    mode: 'extended'
+    enabled: false
+    expr: 'DeadLetterTopicCount > 20'
+    template: '死信主题数量偏多'
+  - key: 'rocketmq_queue_count_low'
+    name: 'RocketMQ队列总数偏少'
+    type: 'periodic_metric'
+    metric: 'QueueCount'
+    operator: '<'
+    threshold: 4
+    level: 'warning'
+    period: 1800
+    times: 1
+    mode: 'extended'
+    enabled: false
+    expr: 'QueueCount < 4'
+    template: '队列总数偏少'
+  - key: 'rocketmq_avg_queue_small'
+    name: 'RocketMQ平均每主题队列数偏小'
+    type: 'periodic_metric'
+    metric: 'AvgQueueCountPerTopic'
+    operator: '<'
+    threshold: 2
+    level: 'warning'
+    period: 1800
+    times: 1
+    mode: 'extended'
+    enabled: false
+    expr: 'AvgQueueCountPerTopic < 2'
+    template: '平均每主题队列数偏小'
+  - key: 'rocketmq_max_queue_large'
+    name: 'RocketMQ单主题队列数过大'
+    type: 'periodic_metric'
+    metric: 'MaxQueueCountPerTopic'
+    operator: '>'
+    threshold: 64
+    level: 'warning'
+    period: 1800
+    times: 1
+    mode: 'extended'
+    enabled: false
+    expr: 'MaxQueueCountPerTopic > 64'
+    template: '单主题队列数过大'
+  - key: 'rocketmq_topic_count_high'
+    name: 'RocketMQ主题总数偏高'
+    type: 'periodic_metric'
+    metric: 'TopicCount'
+    operator: '>'
+    threshold: 2000
+    level: 'warning'
+    period: 1800
+    times: 1
+    mode: 'core'
+    enabled: true
+    expr: 'TopicCount > 2000'
+    template: '主题总数偏高'
+  - key: 'rocketmq_route_status_abnormal'
+    name: 'RocketMQ主题路由状态异常'
+    type: 'realtime_metric'
+    metric: 'RouteStatus'
+    operator: '=='
+    threshold: 0
+    level: 'warning'
+    period: 300
+    times: 1
+    mode: 'extended'
+    enabled: false
+    expr: 'RouteStatus != ''ok'''
+    template: '主题路由状态异常'

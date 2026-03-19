@@ -526,3 +526,70 @@ metrics:
       queryClass: ^_^queryClass^_^
       # Record Type
       recordType: ^_^recordType^_^
+
+alerts:
+  - key: 'dns_unavailable'
+    name: 'DNS服务器监控实例不可用'
+    type: 'realtime_metric'
+    metric: 'dns_server_up'
+    operator: '=='
+    threshold: 0
+    level: 'critical'
+    period: 60
+    times: 1
+    mode: 'core'
+    enabled: true
+    expr: 'dns_server_up == 0'
+    template: '实例不可用'
+  - key: 'dns_latency_high'
+    name: 'DNS响应时间偏高'
+    type: 'periodic_metric'
+    metric: 'responseTime'
+    operator: '>'
+    threshold: 500
+    level: 'warning'
+    period: 180
+    times: 2
+    mode: 'core'
+    enabled: true
+    expr: 'responseTime > 500'
+    template: '响应时间偏高'
+  - key: 'dns_latency_critical'
+    name: 'DNS响应时间过高'
+    type: 'periodic_metric'
+    metric: 'responseTime'
+    operator: '>'
+    threshold: 1500
+    level: 'critical'
+    period: 120
+    times: 1
+    mode: 'core'
+    enabled: true
+    expr: 'responseTime > 1500'
+    template: '响应时间过高'
+  - key: 'dns_status_abnormal'
+    name: 'DNS响应状态异常'
+    type: 'periodic_metric'
+    metric: 'status'
+    operator: '=='
+    threshold: 0
+    level: 'critical'
+    period: 120
+    times: 1
+    mode: 'core'
+    enabled: true
+    expr: 'status != ''NOERROR'''
+    template: '响应状态异常'
+  - key: 'dns_no_answer'
+    name: 'DNS无应答记录'
+    type: 'periodic_metric'
+    metric: 'answerRowCount'
+    operator: '=='
+    threshold: 0
+    level: 'warning'
+    period: 300
+    times: 2
+    mode: 'extended'
+    enabled: false
+    expr: 'answerRowCount == 0'
+    template: '无应答记录'

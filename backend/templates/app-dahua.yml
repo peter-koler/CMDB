@@ -273,3 +273,135 @@ metrics:
       - ntp_address=table.NTP.Address
       - ntp_port=table.NTP.Port
       - ntp_update_period=table.NTP.UpdatePeriod
+
+alerts:
+  - key: 'dahua_unavailable'
+    name: '大华设备设备不可用'
+    type: 'realtime_metric'
+    metric: 'dahua_server_up'
+    operator: '=='
+    threshold: 0
+    level: 'critical'
+    period: 60
+    times: 1
+    mode: 'core'
+    enabled: true
+    expr: 'dahua_server_up == 0'
+    template: '设备不可用'
+  - key: 'dahua_network_missing'
+    name: '大华网络配置缺失'
+    type: 'realtime_metric'
+    metric: 'eth0_ip_address'
+    operator: '=='
+    threshold: 0
+    level: 'critical'
+    period: 120
+    times: 1
+    mode: 'core'
+    enabled: true
+    expr: 'eth0_ip_address == '''''
+    template: '网络配置缺失'
+  - key: 'dahua_gateway_missing'
+    name: '大华默认网关缺失'
+    type: 'realtime_metric'
+    metric: 'eth0_gateway'
+    operator: '=='
+    threshold: 0
+    level: 'warning'
+    period: 300
+    times: 1
+    mode: 'core'
+    enabled: true
+    expr: 'eth0_gateway == '''''
+    template: '默认网关缺失'
+  - key: 'dahua_dns_missing'
+    name: '大华DNS未配置'
+    type: 'realtime_metric'
+    metric: 'eth0_dns1'
+    operator: '=='
+    threshold: 0
+    level: 'warning'
+    period: 600
+    times: 1
+    mode: 'core'
+    enabled: true
+    expr: 'eth0_dns1 == '''''
+    template: 'DNS未配置'
+  - key: 'dahua_mtu_abnormal'
+    name: '大华MTU配置异常'
+    type: 'periodic_metric'
+    metric: 'eth0_mtu'
+    operator: '<'
+    threshold: 1200
+    level: 'warning'
+    period: 600
+    times: 2
+    mode: 'extended'
+    enabled: false
+    expr: 'eth0_mtu < 1200'
+    template: 'MTU配置异常'
+  - key: 'dahua_ntp_missing'
+    name: '大华NTP地址缺失'
+    type: 'realtime_metric'
+    metric: 'ntp_address'
+    operator: '=='
+    threshold: 0
+    level: 'warning'
+    period: 600
+    times: 1
+    mode: 'core'
+    enabled: true
+    expr: 'ntp_address == '''''
+    template: 'NTP地址缺失'
+  - key: 'dahua_ntp_port_abnormal'
+    name: '大华NTP端口异常'
+    type: 'periodic_metric'
+    metric: 'ntp_port'
+    operator: '!='
+    threshold: 123
+    level: 'warning'
+    period: 600
+    times: 2
+    mode: 'extended'
+    enabled: false
+    expr: 'ntp_port != 123'
+    template: 'NTP端口异常'
+  - key: 'dahua_ntp_period_too_long'
+    name: '大华NTP同步周期过长'
+    type: 'periodic_metric'
+    metric: 'ntp_update_period'
+    operator: '>'
+    threshold: 86400
+    level: 'warning'
+    period: 1800
+    times: 1
+    mode: 'extended'
+    enabled: false
+    expr: 'ntp_update_period > 86400'
+    template: 'NTP同步周期过长'
+  - key: 'dahua_active_user_exists'
+    name: '大华存在活跃用户登录'
+    type: 'realtime_metric'
+    metric: 'Name'
+    operator: '=='
+    threshold: 0
+    level: 'warning'
+    period: 300
+    times: 1
+    mode: 'extended'
+    enabled: false
+    expr: 'Name != '''''
+    template: '存在活跃用户登录'
+  - key: 'dahua_domain_missing'
+    name: '大华域名未配置'
+    type: 'realtime_metric'
+    metric: 'domain_name'
+    operator: '=='
+    threshold: 0
+    level: 'warning'
+    period: 3600
+    times: 1
+    mode: 'extended'
+    enabled: false
+    expr: 'domain_name == '''''
+    template: '域名未配置'
