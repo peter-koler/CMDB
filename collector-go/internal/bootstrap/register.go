@@ -8,6 +8,7 @@ import (
 	_ "collector-go/internal/protocol/kclientcollector"
 	_ "collector-go/internal/protocol/linuxcollector"
 	_ "collector-go/internal/protocol/memcachedcollector"
+	_ "collector-go/internal/protocol/mongodbcollector"
 	_ "collector-go/internal/protocol/pingcollector"
 	_ "collector-go/internal/protocol/redfishcollector"
 	_ "collector-go/internal/protocol/rediscollector"

@@ -1,7 +1,22 @@
 #!/bin/bash
 
+set -e
+
 echo "=== IT运维平台启动脚本 ==="
 echo ""
+
+PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
+cd "$PROJECT_ROOT"
+
+# 读取 .env（如果存在）
+if [ -f ".env" ]; then
+    set -a
+    source .env
+    set +a
+fi
+
+# 默认走 PostgreSQL（可被 .env 中 DATABASE_URL 覆盖）
+export DATABASE_URL="${DATABASE_URL:-postgresql+psycopg2://arco_user:arco_password@127.0.0.1:5432/arco_db}"
 
 # 检查 Python
 echo "检查 Python 版本..."
@@ -29,6 +44,7 @@ pip install -q -r requirements.txt
 # 启动后端
 echo ""
 echo "启动后端服务 (端口: 5000)..."
+echo "数据库: ${DATABASE_URL}"
 echo "初始用户: admin / admin"
 echo ""
 python run.py &

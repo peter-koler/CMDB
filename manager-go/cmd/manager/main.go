@@ -14,13 +14,16 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
 	"manager-go/internal/alert"
 	"manager-go/internal/collector"
+	"manager-go/internal/dbutil"
 	"manager-go/internal/dispatch"
 	"manager-go/internal/httpapi"
+	"manager-go/internal/license"
 	"manager-go/internal/metrics"
 	"manager-go/internal/model"
 	"manager-go/internal/notify"
@@ -28,20 +31,90 @@ import (
 	"manager-go/internal/scheduler"
 	"manager-go/internal/store"
 	templ "manager-go/internal/template"
+	"gopkg.in/yaml.v3"
 )
 
+type runtimeConfig struct {
+	ManagerAddr                     string `yaml:"manager_addr"`
+	PythonWebDB                     string `yaml:"python_web_db"`
+	ManagerDatabaseURL              string `yaml:"manager_database_url"`
+	MonitorDSN                      string `yaml:"monitor_dsn"`
+	CollectorDSN                    string `yaml:"collector_dsn"`
+	AlertRuntimeDSN                 string `yaml:"alert_runtime_dsn"`
+	TemplateDSN                     string `yaml:"template_dsn"`
+	LicenseDSN                      string `yaml:"license_dsn"`
+	RedisAddr                       string `yaml:"redis_addr"`
+	VictoriaMetricsURL              string `yaml:"victoria_metrics_url"`
+	CollectorHeartbeatTimeoutSecond int    `yaml:"collector_heartbeat_timeout_seconds"`
+}
+
 func main() {
-	pythonWebDB := getenv("PYTHON_WEB_DB", "../backend/instance/it_ops.db")
-	st, stErr := store.NewMonitorStoreWithPath(pythonWebDB)
+	cfg, cfgPath, err := loadRuntimeConfigFromArgs()
+	if err != nil {
+		log.Fatalf("load config failed: %v", err)
+	}
+
+	pythonWebDB := firstNonEmpty(cfg.PythonWebDB, getenv("PYTHON_WEB_DB", ""), "../backend/instance/it_ops.db")
+	baseDSN := firstNonEmpty(cfg.ManagerDatabaseURL, getenv("MANAGER_DATABASE_URL", ""))
+	if strings.TrimSpace(baseDSN) == "" {
+		baseDSN = getenv("DATABASE_URL", "")
+	}
+	if strings.TrimSpace(baseDSN) == "" {
+		baseDSN = pythonWebDB
+	}
+
+	monitorDSN := firstNonEmpty(cfg.MonitorDSN, getenv("MANAGER_MONITOR_DSN", ""))
+	collectorDSN := firstNonEmpty(cfg.CollectorDSN, getenv("MANAGER_COLLECTOR_DSN", ""))
+	alertRuntimeDSN := firstNonEmpty(cfg.AlertRuntimeDSN, getenv("MANAGER_ALERT_RUNTIME_DSN", ""))
+	templateDSN := firstNonEmpty(cfg.TemplateDSN, getenv("MANAGER_TEMPLATE_DSN", ""))
+	licenseDSN := firstNonEmpty(cfg.LicenseDSN, getenv("MANAGER_LICENSE_DSN", ""))
+	if strings.TrimSpace(monitorDSN) == "" {
+		monitorDSN = baseDSN
+	}
+	if strings.TrimSpace(collectorDSN) == "" {
+		collectorDSN = baseDSN
+	}
+	if strings.TrimSpace(alertRuntimeDSN) == "" {
+		alertRuntimeDSN = baseDSN
+	}
+	if strings.TrimSpace(templateDSN) == "" {
+		templateDSN = baseDSN
+	}
+	if strings.TrimSpace(licenseDSN) == "" {
+		licenseDSN = baseDSN
+	}
+	log.Printf("[OBS] event=config_loaded config_path=%s manager_addr=%s monitor_dsn=%s collector_dsn=%s template_dsn=%s alert_runtime_dsn=%s license_dsn=%s redis_addr=%s vm_url=%s",
+		firstNonEmpty(cfgPath, "<none>"),
+		firstNonEmpty(cfg.ManagerAddr, os.Getenv("MANAGER_ADDR"), ":8080"),
+		maskDSNForLog(monitorDSN),
+		maskDSNForLog(collectorDSN),
+		maskDSNForLog(templateDSN),
+		maskDSNForLog(alertRuntimeDSN),
+		maskDSNForLog(licenseDSN),
+		firstNonEmpty(cfg.RedisAddr, getenv("REDIS_ADDR", "127.0.0.1:6379")),
+		firstNonEmpty(cfg.VictoriaMetricsURL, getenv("VICTORIA_METRICS_URL", "http://127.0.0.1:8428")),
+	)
+	st, stErr := store.NewMonitorStoreWithPath(monitorDSN)
 	if stErr != nil {
 		log.Printf("[Manager] Failed to create persistent monitor store: %v, fallback to memory store", stErr)
 		st = store.NewMonitorStore()
 	} else {
-		log.Printf("[Manager] Persistent monitor store enabled: %s", pythonWebDB)
+		log.Printf("[Manager] Monitor store connected: %s", maskDSNForLog(monitorDSN))
 	}
 	registry := collector.NewRegistry()
 	alertStore := alert.NewAlertStore()
 	deadLetters := alert.NewDeadLetterStore()
+	licenseManager, licErr := license.NewManager(licenseDSN, st)
+	if licErr != nil {
+		log.Printf("[Manager] Failed to initialize license manager (dsn=%s): %v", maskDSNForLog(licenseDSN), licErr)
+		licenseManager = nil
+	} else {
+		log.Printf("[Manager] License store connected: %s", maskDSNForLog(licenseDSN))
+		log.Printf("[Manager] Machine code: %s", licenseManager.MachineCode())
+		if err := licenseManager.CheckClockRollback(time.Now()); err != nil {
+			log.Printf("[Manager] License clock check warning: %v", err)
+		}
+	}
 
 	dispatchCh := make(chan int64, 1024)
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -50,12 +123,16 @@ func main() {
 	sched := scheduler.NewDispatchScheduler(st, 500*time.Millisecond, dispatchCh)
 	go sched.Start(ctx)
 
-	collectorTimeout := envDurationSeconds("COLLECTOR_HEARTBEAT_TIMEOUT_SECONDS", 30)
+	collectorTimeoutSeconds := cfg.CollectorHeartbeatTimeoutSecond
+	if collectorTimeoutSeconds <= 0 {
+		collectorTimeoutSeconds = int(envDurationSeconds("COLLECTOR_HEARTBEAT_TIMEOUT_SECONDS", 30) / time.Second)
+	}
+	collectorTimeout := time.Duration(collectorTimeoutSeconds) * time.Second
 	go reapCollectors(ctx, registry, collectorTimeout)
 
 	// 初始化 Collector Store 和 Manager
 	// 使用与 Python Web 相同的数据库
-	collectorStore, err := store.NewCollectorStoreWithPath(pythonWebDB)
+	collectorStore, err := store.NewCollectorStoreWithPath(collectorDSN)
 	if err != nil {
 		log.Printf("[Manager] Failed to create collector store: %v, using memory registry only", err)
 		collectorStore = nil
@@ -64,15 +141,16 @@ func main() {
 		if err := collectorStore.InitTable(); err != nil {
 			log.Printf("[Manager] Failed to init collector table: %v", err)
 		}
-		log.Printf("[Manager] Connected to Python Web database: %s", pythonWebDB)
+		log.Printf("[Manager] Collector store connected: %s", maskDSNForLog(collectorDSN))
 	}
 
 	// 初始化模板运行时（monitor_templates -> in-memory registry）
 	var templateReg *templ.Registry
-	templateStore, tplErr := templ.NewStoreWithPath(pythonWebDB)
+	templateStore, tplErr := templ.NewStoreWithPath(templateDSN)
 	if tplErr != nil {
 		log.Printf("[Manager] Failed to create template store: %v", tplErr)
 	} else {
+		log.Printf("[Manager] Template store connected: %s", maskDSNForLog(templateDSN))
 		templateReg = templ.NewRegistry()
 		if err := templateReg.ReloadFromStore(templateStore); err != nil {
 			log.Printf("[Manager] Failed to initial template reload: %v", err)
@@ -96,9 +174,9 @@ func main() {
 		log.Printf("[Manager] Collector manager created with database storage")
 	}
 
-	redisAddr := getenv("REDIS_ADDR", "127.0.0.1:6379")
+	redisAddr := firstNonEmpty(cfg.RedisAddr, getenv("REDIS_ADDR", "127.0.0.1:6379"))
 	escalationQueue := newRedisEscalationQueue(redisAddr, 1200*time.Millisecond)
-	vmURL := getenv("VICTORIA_METRICS_URL", "http://127.0.0.1:8428")
+	vmURL := firstNonEmpty(cfg.VictoriaMetricsURL, getenv("VICTORIA_METRICS_URL", "http://127.0.0.1:8428"))
 	dispatcher := dispatch.NewDispatcher(
 		[]dispatch.Sink{
 			dispatch.NewRedisSink(redisAddr, "monitor:metrics", 800*time.Millisecond),
@@ -114,10 +192,12 @@ func main() {
 	pipeline.Start(ctx)
 
 	alertEngine := alert.NewEngine()
-	alertRuntimeStore, arsErr := store.NewAlertRuntimeStoreWithPath(pythonWebDB)
+	alertRuntimeStore, arsErr := store.NewAlertRuntimeStoreWithPath(alertRuntimeDSN)
 	if arsErr != nil {
 		log.Printf("[Manager] Failed to create alert runtime store: %v", arsErr)
 		alertRuntimeStore = nil
+	} else {
+		log.Printf("[Manager] Alert runtime store connected: %s", maskDSNForLog(alertRuntimeDSN))
 	}
 	var (
 		alertRulesMu       sync.RWMutex
@@ -207,7 +287,8 @@ func main() {
 		}
 	}()
 
-	ciAttrDB, ciDBErr := sql.Open("sqlite3", pythonWebDB)
+	ciDriver, ciDSN := dbutil.ResolveDriverAndDSN(monitorDSN, pythonWebDB)
+	ciAttrDB, ciDBErr := sql.Open(ciDriver, ciDSN)
 	if ciDBErr != nil {
 		log.Printf("[Manager] open ci attr db failed: %v", ciDBErr)
 		ciAttrDB = nil
@@ -255,7 +336,11 @@ func main() {
 			name    sql.NullString
 			attrRaw sql.NullString
 		)
-		row := ciAttrDB.QueryRow(`SELECT code, name, attribute_values FROM ci_instances WHERE id = ? LIMIT 1`, m.CIID)
+		query := `SELECT code, name, attribute_values FROM ci_instances WHERE id = ? LIMIT 1`
+		if ciDriver == "postgres" {
+			query = `SELECT code, name, attribute_values FROM ci_instances WHERE id = $1 LIMIT 1`
+		}
+		row := ciAttrDB.QueryRow(query, m.CIID)
 		if err := row.Scan(&code, &name, &attrRaw); err != nil {
 			return cloneLabels(base)
 		}
@@ -662,6 +747,9 @@ func main() {
 
 	if collectorManager != nil {
 		collectorManager.SetReportHandler(func(collectorID string, rep *pb.CollectRep) {
+			if licenseManager != nil && !licenseManager.AllowCollection(time.Now()) {
+				return
+			}
 			updateStringSnapshot(rep)
 			points := collectorReportToPoints(st, collectorID, rep, resolveCIAttrLabels)
 			for _, point := range points {
@@ -692,9 +780,27 @@ func main() {
 		httpapi.WithAlertStore(alertStore),
 		httpapi.WithDeadLetterStore(deadLetters, retryDeadLetter),
 		httpapi.WithCollectorManager(collectorManager),
+		httpapi.WithLicenseManager(licenseManager),
 		httpapi.WithVMQueryClient(vmQueryClient),
 		httpapi.WithStringLatestProvider(loadStringSnapshot),
 	)
+
+	if licenseManager != nil {
+		go func() {
+			ticker := time.NewTicker(time.Minute)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case now := <-ticker.C:
+					if err := licenseManager.CheckClockRollback(now); err != nil {
+						log.Printf("[Manager] License clock rollback detected: %v", err)
+					}
+				}
+			}
+		}()
+	}
 
 	go func() {
 		for {
@@ -702,6 +808,9 @@ func main() {
 			case <-ctx.Done():
 				return
 			case id := <-dispatchCh:
+				if licenseManager != nil && !licenseManager.AllowCollection(time.Now()) {
+					continue
+				}
 				m, err := st.Get(id)
 				if err != nil {
 					log.Printf("dispatch skip monitor id=%d err=%v", id, err)
@@ -738,6 +847,9 @@ func main() {
 			case <-ctx.Done():
 				return
 			case now := <-ticker.C:
+				if licenseManager != nil && !licenseManager.AllowCollection(now) {
+					continue
+				}
 				alertRulesMu.RLock()
 				periodicSnapshot := make([]store.RuntimeAlertRule, len(periodicRuleDefs))
 				copy(periodicSnapshot, periodicRuleDefs)
@@ -843,15 +955,17 @@ func main() {
 	}()
 
 	addr := ":8080"
-	if v := os.Getenv("MANAGER_ADDR"); v != "" {
+	if v := firstNonEmpty(cfg.ManagerAddr, os.Getenv("MANAGER_ADDR")); v != "" {
 		addr = v
 	}
+	obsHandler := withHTTPAccessLog(api.Handler())
 	server := &http.Server{
 		Addr:         addr,
-		Handler:      api.Handler(),
+		Handler:      obsHandler,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 	}
+	go logRuntimeSnapshot(ctx, st, registry, collectorManager, dispatchCh, &alertRulesMu, &alertRules, &periodicRuleDefs)
 	log.Printf("manager-go start on %s", addr)
 	go func() {
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -863,6 +977,148 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = server.Shutdown(shutdownCtx)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func loadRuntimeConfigFromArgs() (runtimeConfig, string, error) {
+	var cfg runtimeConfig
+	var path string
+	for i := 1; i < len(os.Args); i++ {
+		arg := strings.TrimSpace(os.Args[i])
+		if arg == "-config" || arg == "--config" {
+			if i+1 < len(os.Args) {
+				path = strings.TrimSpace(os.Args[i+1])
+				i++
+			}
+			continue
+		}
+	}
+	if path == "" {
+		return cfg, "", nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return cfg, path, err
+	}
+	if err := yaml.Unmarshal(raw, &cfg); err != nil {
+		return cfg, path, err
+	}
+	return cfg, path, nil
+}
+
+type responseRecorder struct {
+	http.ResponseWriter
+	status int
+	bytes  int
+}
+
+func (r *responseRecorder) WriteHeader(status int) {
+	r.status = status
+	r.ResponseWriter.WriteHeader(status)
+}
+
+func (r *responseRecorder) Write(p []byte) (int, error) {
+	if r.status == 0 {
+		r.status = http.StatusOK
+	}
+	n, err := r.ResponseWriter.Write(p)
+	r.bytes += n
+	return n, err
+}
+
+var httpRequestSeq uint64
+
+func withHTTPAccessLog(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		start := time.Now()
+		reqID := atomic.AddUint64(&httpRequestSeq, 1)
+		rec := &responseRecorder{ResponseWriter: w}
+		next.ServeHTTP(rec, req)
+		if rec.status == 0 {
+			rec.status = http.StatusOK
+		}
+		duration := time.Since(start).Milliseconds()
+		debugf("[OBS] event=http_access request_id=%d method=%s path=%s query=%s status=%d duration_ms=%d bytes=%d remote=%s ua=%q",
+			reqID,
+			req.Method,
+			req.URL.Path,
+			req.URL.RawQuery,
+			rec.status,
+			duration,
+			rec.bytes,
+			req.RemoteAddr,
+			req.UserAgent(),
+		)
+	})
+}
+
+func debugf(format string, args ...any) {
+	level := strings.ToLower(strings.TrimSpace(firstNonEmpty(os.Getenv("MANAGER_LOG_LEVEL"), os.Getenv("LOG_LEVEL"), "info")))
+	if level != "debug" {
+		return
+	}
+	log.Printf("[DEBUG] "+format, args...)
+}
+
+func logRuntimeSnapshot(
+	ctx context.Context,
+	st *store.MonitorStore,
+	registry *collector.Registry,
+	collectorManager *collector.Manager,
+	dispatchCh chan int64,
+	alertRulesMu *sync.RWMutex,
+	alertRules *[]alert.Rule,
+	periodicRuleDefs *[]store.RuntimeAlertRule,
+) {
+	ticker := time.NewTicker(60 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			monitors := st.List()
+			enabled := 0
+			for _, m := range monitors {
+				if m.Enabled {
+					enabled++
+				}
+			}
+			connected := 0
+			if collectorManager != nil {
+				connected = len(collectorManager.GetConnectedClients())
+			}
+			registered := len(registry.List())
+			alertRulesMu.RLock()
+			realtimeCount := len(*alertRules)
+			periodicCount := len(*periodicRuleDefs)
+			alertRulesMu.RUnlock()
+			log.Printf("[OBS] event=runtime_snapshot monitors_total=%d monitors_enabled=%d collectors_registered=%d collectors_connected=%d dispatch_queue_len=%d alert_rules_realtime=%d alert_rules_periodic=%d",
+				len(monitors), enabled, registered, connected, len(dispatchCh), realtimeCount, periodicCount)
+		}
+	}
+}
+
+func maskDSNForLog(raw string) string {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return "<empty>"
+	}
+	if strings.HasPrefix(value, "postgres://") || strings.HasPrefix(value, "postgresql://") || strings.HasPrefix(value, "postgresql+psycopg2://") {
+		if idx := strings.Index(value, "@"); idx > 0 {
+			return value[:idx] + "@***"
+		}
+		return "postgres://***"
+	}
+	return value
 }
 
 func reapCollectors(ctx context.Context, registry *collector.Registry, timeout time.Duration) {

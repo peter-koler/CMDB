@@ -32,8 +32,12 @@ class ManagerAPIService:
     def _base_url(self) -> str:
         return str(self._cfg("GO_MANAGER_URL", "http://127.0.0.1:8080")).rstrip("/")
 
-    def _before_request(self) -> None:
+    def _before_request(self, path: str = "") -> None:
         if self._state != "open":
+            return
+        # License 上传/状态查询属于解阻接口，熔断打开时也允许尝试直连上游。
+        if path.startswith("/api/v1/license/"):
+            self._state = "half_open"
             return
         recovery = int(self._cfg("GO_MANAGER_CB_RECOVERY_SECONDS", 30))
         if time.time() - self._opened_at >= recovery:
@@ -84,7 +88,7 @@ class ManagerAPIService:
         params: Optional[dict] = None,
         auth_header: Optional[str] = None,
     ) -> Any:
-        self._before_request()
+        self._before_request(path)
 
         url = self._base_url() + path
         if params:
@@ -123,7 +127,23 @@ class ManagerAPIService:
                 if not retriable or attempt == max_retries:
                     break
                 time.sleep(0.05 * (attempt + 1))
-            except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as e:
+            except urllib.error.HTTPError as e:
+                raw = e.read() if e.fp else b""
+                data = self._decode(raw)
+                code = "UPSTREAM_ERROR"
+                message = str(e)
+                if isinstance(data, dict):
+                    err = data.get("error", {})
+                    if isinstance(err, dict):
+                        code = err.get("code", code)
+                        message = err.get("message", message)
+                last_error = ManagerError(status=e.code, code=code, message=message)
+                # 4xx 直接透传，不计入上游不可用；5xx 允许重试
+                if e.code < 500 or attempt == max_retries:
+                    break
+                self._on_failure()
+                time.sleep(0.05 * (attempt + 1))
+            except (urllib.error.URLError, TimeoutError) as e:
                 self._on_failure()
                 last_error = ManagerError(status=503, code="UPSTREAM_UNAVAILABLE", message=str(e))
                 if attempt == max_retries:
@@ -144,7 +164,7 @@ class ManagerAPIService:
         params: Optional[dict] = None,
         auth_header: Optional[str] = None,
     ) -> tuple[int, Dict[str, str], bytes]:
-        self._before_request()
+        self._before_request(path)
 
         url = self._base_url() + path
         if params:

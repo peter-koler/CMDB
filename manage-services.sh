@@ -16,6 +16,7 @@ NC='\033[0m' # No Color
 PROJECT_ROOT="/Users/peter/Documents/arco"
 MANAGER_DIR="$PROJECT_ROOT/manager-go"
 COLLECTOR_DIR="$PROJECT_ROOT/collector-go"
+MANAGER_CONFIG="${MANAGER_CONFIG:-$MANAGER_DIR/config/manager.yaml}"
 
 # Go 编译缓存（避免某些环境下默认缓存目录无权限）
 export GOCACHE="${GOCACHE:-/tmp/arco-go-build-cache}"
@@ -84,6 +85,11 @@ start_manager() {
     fi
     
     cd "$MANAGER_DIR"
+
+    if [ ! -f "$MANAGER_CONFIG" ]; then
+        echo -e "${RED}错误: manager 配置文件不存在: $MANAGER_CONFIG${NC}"
+        return 1
+    fi
     
     # 强制重新编译
     echo -e "${YELLOW}正在编译 manager-go...${NC}"
@@ -94,7 +100,8 @@ start_manager() {
         return 1
     fi
     
-    nohup ./manager-go > "$MANAGER_LOG" 2>&1 &
+    echo -e "${BLUE}使用配置文件: $MANAGER_CONFIG${NC}"
+    nohup ./manager-go -config "$MANAGER_CONFIG" > "$MANAGER_LOG" 2>&1 &
     
     local new_pid=$!
     echo $new_pid > "$MANAGER_PID_FILE"
@@ -140,7 +147,30 @@ start_collector() {
     # 强制重新编译
     echo -e "${YELLOW}正在编译 collector-go...${NC}"
     if [ -f "./cmd/collector/main.go" ]; then
-        go build -o collector-go ./cmd/collector
+        local build_tags="${COLLECTOR_GO_BUILD_TAGS:-}"
+        local build_args=()
+        if [ -n "$build_tags" ]; then
+            build_args=(-tags "$build_tags")
+            echo -e "${BLUE}collector-go build tags: $build_tags${NC}"
+        fi
+        if [[ ",$build_tags," == *",db2,"* ]] || [[ " $build_tags " == *" db2 "* ]]; then
+            if [ -z "${IBM_DB_HOME:-}" ]; then
+                echo -e "${RED}错误: 已启用 db2 tag，但未设置 IBM_DB_HOME${NC}"
+                echo -e "${YELLOW}请先安装 IBM clidriver 并设置: IBM_DB_HOME, CGO_CFLAGS, CGO_LDFLAGS, LD_LIBRARY_PATH/DYLD_LIBRARY_PATH${NC}"
+                return 1
+            fi
+            if [ ! -f "${IBM_DB_HOME}/include/sqlcli1.h" ]; then
+                echo -e "${RED}错误: 未找到 ${IBM_DB_HOME}/include/sqlcli1.h${NC}"
+                echo -e "${YELLOW}请确认 IBM_DB_HOME 指向包含 include/sqlcli1.h 的 clidriver 目录${NC}"
+                return 1
+            fi
+            if [ ! -f "${IBM_DB_HOME}/lib/libdb2.dylib" ] && [ ! -f "${IBM_DB_HOME}/lib/libdb2.so" ]; then
+                echo -e "${RED}错误: 未找到 ${IBM_DB_HOME}/lib/libdb2.dylib 或 libdb2.so${NC}"
+                echo -e "${YELLOW}请确认 clidriver lib 目录完整，并配置库搜索路径${NC}"
+                return 1
+            fi
+        fi
+        go build "${build_args[@]}" -o collector-go ./cmd/collector
     else
         echo -e "${RED}错误: 未找到 collector-go 源代码${NC}"
         return 1

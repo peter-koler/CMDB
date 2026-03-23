@@ -1,7 +1,7 @@
 """add notice rule recipients and system channel
 
 Revision ID: e8c1b2a3c4d5
-Revises:
+Revises: e6f7g8h9i0j1
 Create Date: 2026-03-13 10:15:00.000000
 
 """
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 
 revision = "e8c1b2a3c4d5"
-down_revision = None
+down_revision = "e6f7g8h9i0j1"
 branch_labels = None
 depends_on = None
 

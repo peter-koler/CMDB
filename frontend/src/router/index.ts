@@ -9,6 +9,12 @@ const routes = [
     meta: { requiresAuth: false }
   },
   {
+    path: '/license',
+    name: 'License',
+    component: () => import('@/views/license/index.vue'),
+    meta: { requiresAuth: false }
+  },
+  {
     path: '/',
     component: () => import('@/layouts/BasicLayout.vue'),
     meta: { requiresAuth: true },

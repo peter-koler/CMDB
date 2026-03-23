@@ -1,7 +1,7 @@
 """add trigger tables
 
 Revision ID: d4e5f6g7h8i9
-Revises: b3bf7a0c3253
+Revises: c0d94d03bf29
 Create Date: 2026-02-20 17:45:00.000000
 
 """
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 
 revision = "d4e5f6g7h8i9"
-down_revision = "b3bf7a0c3253"
+down_revision = "c0d94d03bf29"
 branch_labels = None
 depends_on = None
 

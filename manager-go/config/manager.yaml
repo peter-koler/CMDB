@@ -1,0 +1,21 @@
+# Manager-Go runtime configuration
+# 配置文件优先于环境变量；未配置项再回退环境变量或内置默认值。
+
+manager_addr: ":8080"
+
+# 推荐：统一一个 DSN（Python Web / Manager-Go 共用 PG）
+manager_database_url: "postgresql://arco_user:arco_password@127.0.0.1:5432/arco_db?sslmode=disable"
+
+# 如果你需要按模块拆分存储，再单独配置以下字段（通常不需要）
+# monitor_dsn: ""
+# collector_dsn: ""
+# alert_runtime_dsn: ""
+# template_dsn: ""
+# license_dsn: ""
+
+redis_addr: "127.0.0.1:6379"
+victoria_metrics_url: "http://127.0.0.1:8428"
+collector_heartbeat_timeout_seconds: 30
+
+# 仅在完全使用 SQLite 时配置（迁移后一般不需要）
+# python_web_db: "../backend/instance/it_ops.db"

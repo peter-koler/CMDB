@@ -13,8 +13,10 @@ import (
 	"sync"
 	"time"
 
+	"manager-go/internal/dbutil"
 	"manager-go/internal/model"
 
+	_ "github.com/lib/pq"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -30,6 +32,7 @@ type MonitorStore struct {
 	records      map[int64]model.Monitor
 	metricsViews map[int64]MonitorMetricsViewPref
 	db           *sql.DB
+	driver       string
 }
 
 type MonitorCompileLog struct {
@@ -57,14 +60,17 @@ func NewMonitorStore() *MonitorStore {
 	}
 }
 
-func NewMonitorStoreWithPath(dbPath string) (*MonitorStore, error) {
-	dir := filepath.Dir(dbPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return nil, fmt.Errorf("create monitor store directory failed: %w", err)
+func NewMonitorStoreWithPath(dsn string) (*MonitorStore, error) {
+	driver, resolved := dbutil.ResolveDriverAndDSN(dsn, "../backend/instance/it_ops.db")
+	if driver == "sqlite3" {
+		dir := filepath.Dir(resolved)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return nil, fmt.Errorf("create monitor store directory failed: %w", err)
+		}
 	}
-	db, err := sql.Open("sqlite3", dbPath)
+	db, err := sql.Open(driver, resolved)
 	if err != nil {
-		return nil, fmt.Errorf("open monitor sqlite db failed: %w", err)
+		return nil, fmt.Errorf("open %s db failed: %w", driver, err)
 	}
 	db.SetMaxOpenConns(10)
 	db.SetMaxIdleConns(5)
@@ -75,6 +81,7 @@ func NewMonitorStoreWithPath(dbPath string) (*MonitorStore, error) {
 		records:      map[int64]model.Monitor{},
 		metricsViews: map[int64]MonitorMetricsViewPref{},
 		db:           db,
+		driver:       driver,
 	}
 	if err := s.initTable(); err != nil {
 		return nil, err
@@ -218,7 +225,7 @@ func (s *MonitorStore) Delete(id int64, version int64) error {
 	}
 	delete(s.metricsViews, id)
 	if s.db != nil {
-		_, _ = s.db.Exec(`DELETE FROM monitor_view_prefs WHERE monitor_id = ?`, id)
+		_, _ = s.exec(`DELETE FROM monitor_view_prefs WHERE monitor_id = ?`, id)
 	}
 	return nil
 }
@@ -245,7 +252,7 @@ func (s *MonitorStore) GetMetricsViewPref(monitorID int64) (MonitorMetricsViewPr
 	}
 	s.mu.RUnlock()
 
-	row := s.db.QueryRow(`
+	row := s.queryRow(`
 SELECT metrics_visible_json, updated_at
 FROM monitor_view_prefs
 WHERE monitor_id = ?
@@ -295,7 +302,7 @@ func (s *MonitorStore) UpsertMetricsViewPref(monitorID int64, visibleFieldsByGro
 	if err != nil {
 		return MonitorMetricsViewPref{}, err
 	}
-	_, err = s.db.Exec(`
+	_, err = s.exec(`
 INSERT INTO monitor_view_prefs (monitor_id, metrics_visible_json, updated_at)
 VALUES (?, ?, ?)
 ON CONFLICT(monitor_id) DO UPDATE SET
@@ -445,7 +452,7 @@ func (s *MonitorStore) initTable() error {
 	if s == nil || s.db == nil {
 		return nil
 	}
-	_, err := s.db.Exec(`
+	sqlStmt := `
 CREATE TABLE IF NOT EXISTS monitors (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   job_id BIGINT,
@@ -501,7 +508,67 @@ CREATE TABLE IF NOT EXISTS monitor_compile_logs (
 );
 CREATE INDEX IF NOT EXISTS idx_monitor_compile_logs_monitor_id ON monitor_compile_logs(monitor_id);
 CREATE INDEX IF NOT EXISTS idx_monitor_compile_logs_created_at ON monitor_compile_logs(created_at);
-`)
+`
+	if s.driver == "postgres" {
+		sqlStmt = `
+CREATE TABLE IF NOT EXISTS monitors (
+  id BIGSERIAL PRIMARY KEY,
+  job_id BIGINT,
+  name TEXT NOT NULL,
+  app TEXT NOT NULL,
+  scrape TEXT,
+  instance TEXT NOT NULL,
+  intervals INTEGER NOT NULL DEFAULT 60,
+  schedule_type TEXT NOT NULL DEFAULT 'interval',
+  cron_expression TEXT,
+  status INTEGER NOT NULL DEFAULT 0,
+  type INTEGER NOT NULL DEFAULT 0,
+  labels_json TEXT NOT NULL DEFAULT '{}',
+  annotations_json TEXT NOT NULL DEFAULT '{}',
+  description TEXT,
+  creator TEXT,
+  modifier TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_monitors_app ON monitors(app);
+CREATE INDEX IF NOT EXISTS idx_monitors_instance ON monitors(instance);
+CREATE INDEX IF NOT EXISTS idx_monitors_status ON monitors(status);
+
+CREATE TABLE IF NOT EXISTS monitor_params (
+  id BIGSERIAL PRIMARY KEY,
+  monitor_id BIGINT NOT NULL,
+  field TEXT NOT NULL,
+  param_value TEXT,
+  type INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(monitor_id, field)
+);
+CREATE INDEX IF NOT EXISTS idx_monitor_params_monitor_id ON monitor_params(monitor_id);
+CREATE INDEX IF NOT EXISTS idx_monitor_params_field ON monitor_params(field);
+
+CREATE TABLE IF NOT EXISTS monitor_view_prefs (
+  monitor_id BIGINT PRIMARY KEY,
+  metrics_visible_json TEXT NOT NULL DEFAULT '{}',
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS monitor_compile_logs (
+  id BIGSERIAL PRIMARY KEY,
+  monitor_id BIGINT NOT NULL,
+  app TEXT NOT NULL,
+  stage TEXT NOT NULL,
+  status TEXT NOT NULL,
+  error_path TEXT,
+  reason TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_monitor_compile_logs_monitor_id ON monitor_compile_logs(monitor_id);
+CREATE INDEX IF NOT EXISTS idx_monitor_compile_logs_created_at ON monitor_compile_logs(created_at);
+`
+	}
+	_, err := s.exec(sqlStmt)
 	return err
 }
 
@@ -515,7 +582,7 @@ func (s *MonitorStore) AddCompileLog(monitorID int64, app string, stage string, 
 	if strings.TrimSpace(status) == "" {
 		status = "unknown"
 	}
-	_, err := s.db.Exec(`
+	_, err := s.exec(`
 INSERT INTO monitor_compile_logs (monitor_id, app, stage, status, error_path, reason, created_at)
 VALUES (?, ?, ?, ?, ?, ?, ?)
 `, monitorID, strings.TrimSpace(app), strings.TrimSpace(stage), strings.TrimSpace(status), strings.TrimSpace(errorPath), strings.TrimSpace(reason), time.Now().Format(time.RFC3339Nano))
@@ -532,7 +599,7 @@ func (s *MonitorStore) ListCompileLogs(monitorID int64, limit int) ([]MonitorCom
 	if limit > 200 {
 		limit = 200
 	}
-	rows, err := s.db.Query(`
+	rows, err := s.query(`
 SELECT id, monitor_id, app, stage, status, error_path, reason, created_at
 FROM monitor_compile_logs
 WHERE monitor_id = ?
@@ -561,7 +628,7 @@ func (s *MonitorStore) loadFromDB() error {
 	if s == nil || s.db == nil {
 		return nil
 	}
-	rows, err := s.db.Query(`
+	rows, err := s.query(`
 SELECT id, job_id, name, app, instance, intervals, status, labels_json, annotations_json, created_at, updated_at
 FROM monitors
 ORDER BY id ASC
@@ -646,7 +713,7 @@ func (s *MonitorStore) persistUpsert(m model.Monitor) error {
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(`
+	_, err = s.txExec(tx, `
 INSERT INTO monitors
   (id, job_id, name, app, instance, intervals, schedule_type, status, type, labels_json, annotations_json, description, created_at, updated_at)
 VALUES
@@ -673,7 +740,7 @@ ON CONFLICT(id) DO UPDATE SET
 		_ = tx.Rollback()
 		return err
 	}
-	if _, err := tx.Exec(`DELETE FROM monitor_params WHERE monitor_id = ?`, m.ID); err != nil {
+	if _, err := s.txExec(tx, `DELETE FROM monitor_params WHERE monitor_id = ?`, m.ID); err != nil {
 		_ = tx.Rollback()
 		return err
 	}
@@ -682,7 +749,7 @@ ON CONFLICT(id) DO UPDATE SET
 		if field == "" {
 			continue
 		}
-		if _, err := tx.Exec(`
+		if _, err := s.txExec(tx, `
 INSERT INTO monitor_params (monitor_id, field, param_value, type, created_at, updated_at)
 VALUES (?, ?, ?, 1, ?, ?)
 `,
@@ -702,11 +769,11 @@ func (s *MonitorStore) persistDelete(id int64) error {
 	if err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`DELETE FROM monitor_params WHERE monitor_id = ?`, id); err != nil {
+	if _, err := s.txExec(tx, `DELETE FROM monitor_params WHERE monitor_id = ?`, id); err != nil {
 		_ = tx.Rollback()
 		return err
 	}
-	if _, err := tx.Exec(`DELETE FROM monitors WHERE id = ?`, id); err != nil {
+	if _, err := s.txExec(tx, `DELETE FROM monitors WHERE id = ?`, id); err != nil {
 		_ = tx.Rollback()
 		return err
 	}
@@ -717,7 +784,7 @@ func (s *MonitorStore) loadParamsByMonitorID(id int64) (map[string]string, error
 	if s == nil || s.db == nil {
 		return nil, nil
 	}
-	rows, err := s.db.Query(`SELECT field, param_value FROM monitor_params WHERE monitor_id = ?`, id)
+	rows, err := s.query(`SELECT field, param_value FROM monitor_params WHERE monitor_id = ?`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -813,21 +880,24 @@ func (s *MonitorStore) migrateLegacyManagerMonitors() error {
 		return nil
 	}
 	var legacyExists int
-	if err := s.db.QueryRow(`SELECT COUNT(1) FROM sqlite_master WHERE type='table' AND name='manager_monitors'`).Scan(&legacyExists); err != nil {
+	if s.driver == "postgres" {
+		return nil
+	}
+	if err := s.queryRow(`SELECT COUNT(1) FROM sqlite_master WHERE type='table' AND name='manager_monitors'`).Scan(&legacyExists); err != nil {
 		return err
 	}
 	if legacyExists == 0 {
 		return nil
 	}
 	var targetCount int
-	if err := s.db.QueryRow(`SELECT COUNT(1) FROM monitors`).Scan(&targetCount); err != nil {
+	if err := s.queryRow(`SELECT COUNT(1) FROM monitors`).Scan(&targetCount); err != nil {
 		return err
 	}
 	if targetCount > 0 {
 		return nil
 	}
 
-	rows, err := s.db.Query(`
+	rows, err := s.query(`
 SELECT id, ci_id, ci_model_id, ci_name, ci_code, name, app, target, template_id,
        interval_seconds, enabled, labels_json, params_json, version, created_at, updated_at
 FROM manager_monitors
@@ -879,7 +949,7 @@ ORDER BY id ASC
 			"ci_code":         ciCode,
 		}
 		annotationsJSON, _ := json.Marshal(meta)
-		if _, err := tx.Exec(`
+		if _, err := s.txExec(tx, `
 INSERT INTO monitors
   (id, job_id, name, app, instance, intervals, schedule_type, status, type, labels_json, annotations_json, description, created_at, updated_at)
 VALUES (?, ?, ?, ?, ?, ?, 'interval', ?, 0, ?, ?, '', ?, ?)
@@ -894,7 +964,7 @@ ON CONFLICT(id) DO NOTHING
 			if strings.TrimSpace(k) == "" {
 				continue
 			}
-			if _, err := tx.Exec(`
+			if _, err := s.txExec(tx, `
 INSERT INTO monitor_params (monitor_id, field, param_value, type, created_at, updated_at)
 VALUES (?, ?, ?, 1, ?, ?)
 ON CONFLICT(monitor_id, field) DO UPDATE SET param_value=excluded.param_value, updated_at=excluded.updated_at
@@ -909,4 +979,39 @@ ON CONFLICT(monitor_id, field) DO UPDATE SET param_value=excluded.param_value, u
 		return err
 	}
 	return tx.Commit()
+}
+
+func (s *MonitorStore) rebind(query string) string {
+	if s.driver != "postgres" {
+		return query
+	}
+	var b strings.Builder
+	b.Grow(len(query) + 16)
+	arg := 1
+	for _, ch := range query {
+		if ch == '?' {
+			b.WriteByte('$')
+			b.WriteString(strconv.Itoa(arg))
+			arg++
+			continue
+		}
+		b.WriteRune(ch)
+	}
+	return b.String()
+}
+
+func (s *MonitorStore) exec(query string, args ...any) (sql.Result, error) {
+	return s.db.Exec(s.rebind(query), args...)
+}
+
+func (s *MonitorStore) query(query string, args ...any) (*sql.Rows, error) {
+	return s.db.Query(s.rebind(query), args...)
+}
+
+func (s *MonitorStore) queryRow(query string, args ...any) *sql.Row {
+	return s.db.QueryRow(s.rebind(query), args...)
+}
+
+func (s *MonitorStore) txExec(tx *sql.Tx, query string, args ...any) (sql.Result, error) {
+	return tx.Exec(s.rebind(query), args...)
 }

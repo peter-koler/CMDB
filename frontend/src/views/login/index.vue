@@ -52,6 +52,21 @@
           <p>请登录您的账户以继续</p>
         </div>
 
+        <a-alert
+          v-if="licenseBlocked"
+          type="warning"
+          show-icon
+          class="license-alert"
+          :message="licenseWarningText"
+        >
+          <template #description>
+            <a-space>
+              <span>请先完成授权，然后再登录系统。</span>
+              <a-button type="link" size="small" @click="goLicensePage">前往授权页</a-button>
+            </a-space>
+          </template>
+        </a-alert>
+
 
 
         <a-form
@@ -221,6 +236,8 @@ const lockModalMessage = ref('')
 const remainingSeconds = ref(0)
 const captchaImage = ref('')
 const captchaLoading = ref(false)
+const licenseBlocked = ref(false)
+const licenseWarningText = ref('')
 let countdownTimer: number | null = null
 
 const rules = {
@@ -279,8 +296,14 @@ const handleLockModalOk = () => {
   formState.password = ''
 }
 
+const goLicensePage = () => {
+  router.push('/license')
+}
+
 const handleLogin = async () => {
   loading.value = true
+  licenseBlocked.value = false
+  licenseWarningText.value = ''
   try {
     const success = await userStore.loginAction(formState.username, formState.password, formState.captcha)
     if (success) {
@@ -298,7 +321,10 @@ const handleLogin = async () => {
     message.error('登录失败')
   } catch (error: any) {
     const response = error.response
-    if (response?.status === 400) {
+    if (response?.status === 402) {
+      licenseBlocked.value = true
+      licenseWarningText.value = response?.data?.message || '系统未授权或 License 已过期'
+    } else if (response?.status === 400) {
       // 验证码错误或过期
       message.error(response.data?.message || '验证码错误')
       refreshCaptcha()
@@ -561,6 +587,10 @@ onMounted(() => {
   font-size: 15px;
   color: #64748B;
   margin: 0;
+}
+
+.license-alert {
+  margin-bottom: 20px;
 }
 
 /* 自定义输入框样式 */

@@ -36,7 +36,6 @@ params:
     name:
       zh-CN: 目标Host
       en-US: Target Host
-      ja-JP: 目標ホスト
     # type-param field type(most mapping the html input type)
     type: host
     # required-true or false
@@ -47,7 +46,6 @@ params:
     name:
       zh-CN: 端口
       en-US: Port
-      ja-JP: ポート
     # type-param field type(most mapping the html input type)
     type: number
     # when type is number, range is required
@@ -60,7 +58,6 @@ params:
     name:
       zh-CN: 查询超时时间
       en-US: Query Timeout
-      ja-JP: クエリタイムアウト
     type: number
     required: false
     # hide param-true or false

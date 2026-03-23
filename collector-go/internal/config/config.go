@@ -62,6 +62,9 @@ type Config struct {
 			Summary   string  `json:"summary"`
 		} `json:"rules"`
 	} `json:"precompute"`
+	Logging struct {
+		Level string `json:"level"` // debug | info
+	} `json:"logging"`
 }
 
 func Default() Config {
@@ -87,6 +90,7 @@ func Default() Config {
 	c.Queue.Kafka.Bin = "kcat"
 	c.Stream.HeartbeatMs = 10000
 	c.Precompute.Enabled = false
+	c.Logging.Level = "info"
 	return c
 }
 

@@ -40,6 +40,17 @@ request.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config
 
+    if (error.response?.status === 402) {
+      const isLoginRequest = originalRequest?.url === '/auth/login'
+      if (window.location.pathname === '/login' && isLoginRequest) {
+        return Promise.reject(error)
+      }
+      if (window.location.pathname !== '/license') {
+        window.location.href = '/license'
+      }
+      return Promise.reject(error)
+    }
+
     // 如果不是 401 错误，直接返回错误
     if (error.response?.status !== 401) {
       return Promise.reject(error)

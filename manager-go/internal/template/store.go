@@ -7,26 +7,33 @@ import (
 	"path/filepath"
 	"time"
 
+	"manager-go/internal/dbutil"
+
+	_ "github.com/lib/pq"
 	_ "github.com/mattn/go-sqlite3"
 )
 
 type Store struct {
-	db *sql.DB
+	db     *sql.DB
+	driver string
 }
 
-func NewStoreWithPath(dbPath string) (*Store, error) {
-	dir := filepath.Dir(dbPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return nil, fmt.Errorf("create directory failed: %w", err)
+func NewStoreWithPath(dsn string) (*Store, error) {
+	driver, resolved := dbutil.ResolveDriverAndDSN(dsn, "../backend/instance/it_ops.db")
+	if driver == "sqlite3" {
+		dir := filepath.Dir(resolved)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return nil, fmt.Errorf("create directory failed: %w", err)
+		}
 	}
-	db, err := sql.Open("sqlite3", dbPath)
+	db, err := sql.Open(driver, resolved)
 	if err != nil {
-		return nil, fmt.Errorf("open sqlite db failed: %w", err)
+		return nil, fmt.Errorf("open %s db failed: %w", driver, err)
 	}
 	db.SetMaxOpenConns(5)
 	db.SetMaxIdleConns(2)
 	db.SetConnMaxLifetime(time.Hour)
-	return &Store{db: db}, nil
+	return &Store{db: db, driver: driver}, nil
 }
 
 func (s *Store) Close() error {
@@ -52,7 +59,11 @@ func (s *Store) ListVisibleTemplates() ([]TemplateRow, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("template store db is nil")
 	}
-	rows, err := s.db.Query(`
+	hiddenExpr := "CAST(COALESCE(is_hidden, 0) AS INTEGER)"
+	if s.driver == "postgres" {
+		hiddenExpr = "CASE WHEN COALESCE(is_hidden, false) THEN 1 ELSE 0 END"
+	}
+	query := fmt.Sprintf(`
 SELECT
   id,
   app,
@@ -60,13 +71,14 @@ SELECT
   category,
   content,
   version,
-  CAST(COALESCE(is_hidden, 0) AS INTEGER) AS is_hidden_norm,
-  created_at,
-  updated_at
+  %s AS is_hidden_norm,
+  CAST(created_at AS TEXT) AS created_at,
+  CAST(updated_at AS TEXT) AS updated_at
 FROM monitor_templates
-WHERE CAST(COALESCE(is_hidden, 0) AS INTEGER) = 0
+WHERE %s = 0
 ORDER BY app ASC, version ASC, id ASC
-`)
+`, hiddenExpr, hiddenExpr)
+	rows, err := s.db.Query(query)
 	if err != nil {
 		return nil, err
 	}

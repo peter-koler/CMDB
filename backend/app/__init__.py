@@ -1,4 +1,4 @@
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from flask_sqlalchemy import SQLAlchemy
 from flask_jwt_extended import JWTManager
 from flask_cors import CORS
@@ -6,6 +6,8 @@ from flask_migrate import Migrate
 from flask_session import Session
 from config import config
 import os
+import json
+from datetime import datetime
 
 db = SQLAlchemy()
 jwt = JWTManager()
@@ -30,6 +32,80 @@ def create_app(config_name="default"):
     from app.notifications.websocket import init_socketio
 
     socketio = init_socketio(app)
+
+    @app.before_request
+    def enforce_license_expire_guard():
+        def license_block_response(message, has_license=False, expired=False, expire_time=""):
+            data = {
+                "has_license": has_license,
+                "expired": expired,
+                "redirect": "/license",
+            }
+            if expire_time:
+                data["expire_time"] = expire_time
+            return jsonify({"code": 402, "message": message, "data": data}), 402
+
+        if request.method == "OPTIONS":
+            return None
+        path = request.path or ""
+        if not path.startswith("/api/v1"):
+            return None
+        whitelist = {
+            "/api/v1/health",
+            "/api/v1/auth/captcha",
+            "/api/v1/license/status",
+            "/api/v1/license/upload",
+        }
+        if path in whitelist:
+            return None
+        # 优先读取 manager-go 的实时授权状态（适配 PG + manager(sqlite) 的部署）。
+        try:
+            from app.services.manager_api_service import manager_api_service, ManagerError
+
+            status = manager_api_service.request("GET", "/api/v1/license/status")
+            has_license = bool((status or {}).get("has_license"))
+            expired = bool((status or {}).get("expired"))
+            expire_raw = str((status or {}).get("expire_time") or "").strip()
+            if not has_license:
+                return license_block_response("未授权，请先上传 License", has_license=False, expired=False)
+            if expired:
+                return license_block_response(
+                    "License 已过期，请上传新的 License",
+                    has_license=True,
+                    expired=True,
+                    expire_time=expire_raw,
+                )
+            return None
+        except Exception:
+            # manager-go 不可达时，回退本地配置判定，避免全站不可用。
+            from app.models.config import SystemConfig
+
+            claims_raw = SystemConfig.get_value("license_claims_json", "")
+            if not claims_raw:
+                return license_block_response("未授权，请先上传 License", has_license=False, expired=False)
+            try:
+                claims = json.loads(claims_raw)
+            except Exception:
+                return license_block_response("未授权，请先上传 License", has_license=False, expired=False)
+            expire_raw = str(claims.get("expire_time") or "").strip()
+            if not expire_raw:
+                return license_block_response("未授权，请先上传 License", has_license=False, expired=False)
+            try:
+                expire_at = datetime.fromisoformat(expire_raw.replace("Z", "+00:00"))
+            except ValueError:
+                try:
+                    expire_at = datetime.strptime(expire_raw, "%Y-%m-%d %H:%M:%S")
+                except ValueError:
+                    return license_block_response("未授权，请先上传 License", has_license=False, expired=False)
+            now = datetime.now(expire_at.tzinfo) if expire_at.tzinfo else datetime.now()
+            if now <= expire_at:
+                return None
+            return license_block_response(
+                "License 已过期，请上传新的 License",
+                has_license=True,
+                expired=True,
+                expire_time=expire_raw,
+            )
 
     # JWT error handlers
     @jwt.expired_token_loader
@@ -139,8 +215,8 @@ def init_monitoring_templates(app):
     if MonitorTemplate.query.count() == 0:
         import os
         template_dir = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 
-            'templates'
+            os.path.dirname(os.path.dirname(__file__)),
+            "templates",
         )
         if os.path.exists(template_dir):
             for filename in os.listdir(template_dir):

@@ -357,6 +357,8 @@ interface ModelOption {
   id: number
   name: string
   code: string
+  keyFieldCodes: string[]
+  fieldLabelMap: Record<string, string>
 }
 
 interface CiOption {
@@ -499,7 +501,8 @@ function isParamRequired(param: TemplateParamDef): boolean {
 
 function parseTemplateContent(content: string): ParsedTemplate {
   try {
-    const parsed = (yaml.load(content || '') || {}) as any
+    const sanitizedContent = String(content || '').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+    const parsed = (yaml.load(sanitizedContent) || {}) as any
     const rawParams = Array.isArray(parsed?.params) ? parsed.params : []
     const deduped: TemplateParamDef[] = []
     const seen = new Set<string>()
@@ -716,10 +719,30 @@ async function loadModels() {
   try {
     const res = await getModels({ page: 1, per_page: 1000 })
     const parsed = normalizeList(res?.data)
+    const extractFieldLabelMap = (formConfig: any): Record<string, string> => {
+      const out: Record<string, string> = {}
+      const walk = (nodes: any[]) => {
+        if (!Array.isArray(nodes)) return
+        for (const node of nodes) {
+          if (!node || typeof node !== 'object') continue
+          const props = node.props && typeof node.props === 'object' ? node.props : {}
+          const code = String(props.code || '').trim()
+          const label = String(props.label || code).trim()
+          if (code) out[code] = label || code
+          if (Array.isArray(node.children) && node.children.length) walk(node.children)
+        }
+      }
+      walk(formConfig)
+      return out
+    }
     modelOptions.value = parsed.items.map((item: any) => ({
       id: Number(item.id),
       name: String(item.name || item.code || item.id),
-      code: String(item.code || item.id)
+      code: String(item.code || item.id),
+      keyFieldCodes: Array.isArray(item.key_field_codes)
+        ? item.key_field_codes.map((x: any) => String(x || '').trim()).filter(Boolean)
+        : [],
+      fieldLabelMap: extractFieldLabelMap(Array.isArray(item.form_config) ? item.form_config : [])
     }))
   } catch {
     modelOptions.value = []
@@ -737,13 +760,33 @@ async function loadCiOptions(modelId?: number) {
   try {
     const res = await getInstances({ model_id: modelId, page: 1, per_page: 500 })
     const parsed = normalizeList(res?.data)
+    const modelMeta = modelOptions.value.find((item) => item.id === Number(modelId))
     ciOptions.value = parsed.items.map((item: any) => {
       const attrs = item.attributes && typeof item.attributes === 'object' ? item.attributes : {}
-      const short = attrs.ip || attrs.host || attrs.hostname || attrs.name || ''
+      const keyPairs: string[] = []
+      if (modelMeta?.keyFieldCodes?.length) {
+        for (const keyCode of modelMeta.keyFieldCodes) {
+          const raw = attrs[keyCode]
+          if (raw === undefined || raw === null || String(raw).trim() === '') continue
+          const label = modelMeta.fieldLabelMap[keyCode] || keyCode
+          keyPairs.push(`${label}: ${String(raw)}`)
+        }
+      }
+      if (!keyPairs.length) {
+        const fallbackKeys = ['name', 'hostname', 'host', 'ip']
+        for (const key of fallbackKeys) {
+          const raw = attrs[key]
+          if (raw === undefined || raw === null || String(raw).trim() === '') continue
+          keyPairs.push(`${key}: ${String(raw)}`)
+        }
+      }
+      const codeText = String(item.code || item.id)
+      const idText = `CIID:${item.id}`
+      const keyText = keyPairs.length ? ` | ${keyPairs.join(' | ')}` : ''
       return {
         id: Number(item.id),
-        code: String(item.code || item.id),
-        display: `${item.code || item.id}${short ? ` (${short})` : ''}`,
+        code: codeText,
+        display: `${idText} | 编码:${codeText}${keyText}`,
         attributes: attrs
       }
     })

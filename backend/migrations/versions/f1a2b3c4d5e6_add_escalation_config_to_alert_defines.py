@@ -1,7 +1,7 @@
 """add escalation config to alert defines
 
 Revision ID: f1a2b3c4d5e6
-Revises: e8c1b2a3c4d5
+Revises: b9d0e1f2a3b4
 Create Date: 2026-03-14 10:00:00.000000
 
 """
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 
 revision = "f1a2b3c4d5e6"
-down_revision = "e8c1b2a3c4d5"
+down_revision = "b9d0e1f2a3b4"
 branch_labels = None
 depends_on = None
 

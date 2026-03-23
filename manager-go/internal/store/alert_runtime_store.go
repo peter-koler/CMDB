@@ -10,6 +10,9 @@ import (
 	"strings"
 	"time"
 
+	"manager-go/internal/dbutil"
+
+	_ "github.com/lib/pq"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -102,22 +105,26 @@ type RuntimeSingleAlertSnapshot struct {
 }
 
 type AlertRuntimeStore struct {
-	db *sql.DB
+	db     *sql.DB
+	driver string
 }
 
-func NewAlertRuntimeStoreWithPath(dbPath string) (*AlertRuntimeStore, error) {
-	dir := filepath.Dir(dbPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return nil, fmt.Errorf("create alert runtime dir failed: %w", err)
+func NewAlertRuntimeStoreWithPath(dsn string) (*AlertRuntimeStore, error) {
+	driver, resolved := dbutil.ResolveDriverAndDSN(dsn, "../backend/instance/it_ops.db")
+	if driver == "sqlite3" {
+		dir := filepath.Dir(resolved)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return nil, fmt.Errorf("create alert runtime dir failed: %w", err)
+		}
 	}
-	db, err := sql.Open("sqlite3", dbPath)
+	db, err := sql.Open(driver, resolved)
 	if err != nil {
-		return nil, fmt.Errorf("open sqlite db failed: %w", err)
+		return nil, fmt.Errorf("open %s db failed: %w", driver, err)
 	}
 	db.SetMaxOpenConns(10)
 	db.SetMaxIdleConns(5)
 	db.SetConnMaxLifetime(time.Hour)
-	return &AlertRuntimeStore{db: db}, nil
+	return &AlertRuntimeStore{db: db, driver: driver}, nil
 }
 
 func (s *AlertRuntimeStore) LoadEnabledRealtimeMetricRules() ([]RuntimeAlertRule, error) {
@@ -135,7 +142,7 @@ FROM alert_defines
 WHERE enabled = 1 AND type = 'realtime_metric'
 ORDER BY updated_at DESC, id DESC
 `
-	rows, err := s.db.Query(query)
+	rows, err := s.query(query)
 	if err != nil {
 		return nil, err
 	}
@@ -210,7 +217,7 @@ FROM alert_defines
 WHERE enabled = 1 AND type = 'periodic_metric'
 ORDER BY updated_at DESC, id DESC
 `
-	rows, err := s.db.Query(query)
+	rows, err := s.query(query)
 	if err != nil {
 		return nil, err
 	}
@@ -274,7 +281,7 @@ func (s *AlertRuntimeStore) LoadEnabledAlertGroups() ([]RuntimeAlertGroup, error
 	if s == nil || s.db == nil {
 		return nil, nil
 	}
-	rows, err := s.db.Query(`
+	rows, err := s.query(`
 SELECT id, group_key, match_type, labels_json, group_wait, group_interval, repeat_interval
 FROM alert_groups
 WHERE enabled = 1
@@ -315,7 +322,7 @@ func (s *AlertRuntimeStore) LoadEnabledAlertInhibits() ([]RuntimeAlertInhibit, e
 	if s == nil || s.db == nil {
 		return nil, nil
 	}
-	rows, err := s.db.Query(`
+	rows, err := s.query(`
 SELECT id, source_labels_json, target_labels_json, equal_labels_json
 FROM alert_inhibits
 WHERE enabled = 1
@@ -354,7 +361,7 @@ func (s *AlertRuntimeStore) LoadEnabledAlertSilences() ([]RuntimeAlertSilence, e
 	if s == nil || s.db == nil {
 		return nil, nil
 	}
-	rows, err := s.db.Query(`
+	rows, err := s.query(`
 SELECT id, type, match_type, labels_json, days_json, start_time, end_time
 FROM alert_silences
 WHERE enabled = 1
@@ -437,20 +444,20 @@ func (s *AlertRuntimeStore) UpsertFiringAlert(ev RuntimeAlertEvent) (bool, error
 		triggerTimes int
 		exists       bool
 	)
-	row := tx.QueryRow(`SELECT id, status, trigger_times FROM single_alerts WHERE fingerprint = ?`, fingerprint)
+	row := s.txQueryRow(tx, `SELECT id, status, trigger_times FROM single_alerts WHERE fingerprint = ?`, fingerprint)
 	if err := row.Scan(&id, &status, &triggerTimes); err == nil {
 		exists = true
 	}
 	newCycle := !exists || strings.TrimSpace(strings.ToLower(status)) != "firing"
 	if exists {
-		_, err = tx.Exec(`
+		_, err = s.txExec(tx, `
 UPDATE single_alerts
 SET labels_json = ?, annotations_json = ?, content = ?, status = 'firing',
     trigger_times = ?, active_at = ?, end_at = NULL, modifier = 'manager-go', updated_at = ?
 WHERE id = ?
 `, string(labelsJSON), string(annotationsJSON), content, triggerTimes+1, nowMS, now.Format(time.RFC3339Nano), id)
 	} else {
-		_, err = tx.Exec(`
+		_, err = s.txExec(tx, `
 INSERT INTO single_alerts
   (fingerprint, labels_json, annotations_json, content, status, trigger_times, start_at, active_at, end_at, creator, modifier, created_at, updated_at)
 VALUES
@@ -491,7 +498,7 @@ func (s *AlertRuntimeStore) ResolveAlert(ruleID int64, monitorID int64, resolved
 		annotationsJSON string
 		content         sql.NullString
 	)
-	row := tx.QueryRow(`
+	row := s.txQueryRow(tx, `
 SELECT id, status, trigger_times, start_at, labels_json, annotations_json, content
 FROM single_alerts
 WHERE fingerprint = ?
@@ -507,7 +514,7 @@ WHERE fingerprint = ?
 		_ = tx.Rollback()
 		return false, nil
 	}
-	if _, err := tx.Exec(`
+	if _, err := s.txExec(tx, `
 UPDATE single_alerts
 SET status = 'resolved', end_at = ?, modifier = 'manager-go', updated_at = ?
 WHERE id = ?
@@ -523,7 +530,7 @@ WHERE id = ?
 	if duration < 0 {
 		duration = 0
 	}
-	if _, err := tx.Exec(`
+	if _, err := s.txExec(tx, `
 INSERT INTO alert_history
   (alert_id, alert_type, labels_json, annotations_json, content, status, trigger_times, start_at, end_at, duration_ms, created_at)
 VALUES
@@ -544,7 +551,7 @@ func (s *AlertRuntimeStore) FindCurrentAlertID(ruleID int64, monitorID int64) (i
 	}
 	fingerprint := alertFingerprint(ruleID, monitorID)
 	var id int64
-	row := s.db.QueryRow(`
+	row := s.queryRow(`
 SELECT id
 FROM single_alerts
 WHERE fingerprint = ?
@@ -571,7 +578,7 @@ func (s *AlertRuntimeStore) LoadSingleAlertSnapshot(ruleID int64, monitorID int6
 		content         sql.NullString
 		startAt         sql.NullInt64
 	)
-	row := s.db.QueryRow(`
+	row := s.queryRow(`
 SELECT id, status, labels_json, annotations_json, content, start_at, trigger_times
 FROM single_alerts
 WHERE fingerprint = ?
@@ -609,7 +616,7 @@ func (s *AlertRuntimeStore) AddEscalationHistory(alertID int64, level int, conte
 		triggerTimes    int
 		startAt         sql.NullInt64
 	)
-	row := s.db.QueryRow(`
+	row := s.queryRow(`
 SELECT labels_json, annotations_json, trigger_times, start_at
 FROM single_alerts
 WHERE id = ?
@@ -640,7 +647,7 @@ LIMIT 1
 	annotations["escalated_at"] = createdAt.UTC().Format(time.RFC3339Nano)
 	annotationsJSONBytes, _ := json.Marshal(annotations)
 
-	if _, err := s.db.Exec(`
+	if _, err := s.exec(`
 INSERT INTO alert_history
   (alert_id, alert_type, labels_json, annotations_json, content, status, trigger_times, start_at, end_at, duration_ms, created_at)
 VALUES
@@ -674,7 +681,7 @@ func (s *AlertRuntimeStore) SaveAlertNotification(
 	}
 	now := time.Now().UTC()
 	nowMS := now.UnixMilli()
-	_, err := s.db.Exec(`
+	_, err := s.exec(`
 INSERT INTO alert_notifications
   (alert_id, rule_id, receiver_type, receiver_id, notify_type, status, content, error_msg, retry_times, sent_at, created_at, updated_at)
 VALUES
@@ -730,7 +737,7 @@ func (s *AlertRuntimeStore) LoadNoticeDispatch(noticeRuleID int64) (NoticeDispat
 		wecomKey         sql.NullString
 		templateContent  sql.NullString
 	)
-	row := s.db.QueryRow(`
+	row := s.queryRow(`
 SELECT
   nr.id,
   nr.name,
@@ -1022,7 +1029,7 @@ WITH RECURSIVE dept_tree(id) AS (
 )
 SELECT id FROM dept_tree
 `, placeholders)
-	rows, err := s.db.Query(query, args...)
+	rows, err := s.query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1048,7 +1055,7 @@ SELECT id, email, phone
 FROM users
 WHERE deleted_at IS NULL AND status = 'active' AND id IN (%s)
 `, placeholders)
-	return scanRecipientUsers(s.db, query, args...)
+	return s.scanRecipientUsers(query, args...)
 }
 
 func (s *AlertRuntimeStore) queryUsersByDepartments(deptIDs []int64) ([]recipientUser, error) {
@@ -1063,7 +1070,7 @@ SELECT id, email, phone
 FROM users
 WHERE deleted_at IS NULL AND status = 'active' AND department_id IN (%s)
 `, placeholders)
-	rows, err := scanRecipientUsers(s.db, query, args...)
+	rows, err := s.scanRecipientUsers(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1077,7 +1084,7 @@ FROM users u
 JOIN department_users du ON du.user_id = u.id
 WHERE u.deleted_at IS NULL AND u.status = 'active' AND du.department_id IN (%s)
 `, placeholders)
-	rows, err = scanRecipientUsers(s.db, query, args...)
+	rows, err = s.scanRecipientUsers(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1092,8 +1099,8 @@ WHERE u.deleted_at IS NULL AND u.status = 'active' AND du.department_id IN (%s)
 	return out, nil
 }
 
-func scanRecipientUsers(db *sql.DB, query string, args ...any) ([]recipientUser, error) {
-	rows, err := db.Query(query, args...)
+func (s *AlertRuntimeStore) scanRecipientUsers(query string, args ...any) ([]recipientUser, error) {
+	rows, err := s.query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1162,32 +1169,54 @@ func (s *AlertRuntimeStore) SendSystemNotification(title, content string, recipi
 	}()
 
 	var typeID int64
-	if err = tx.QueryRow(`SELECT id FROM notification_types WHERE name = 'system' LIMIT 1`).Scan(&typeID); err != nil {
+	if err = s.txQueryRow(tx, `SELECT id FROM notification_types WHERE name = 'system' LIMIT 1`).Scan(&typeID); err != nil {
 		return fmt.Errorf("notification type system not found")
 	}
 	var senderID int64
-	if err = tx.QueryRow(`SELECT id FROM users WHERE deleted_at IS NULL AND status = 'active' AND role = 'admin' ORDER BY id LIMIT 1`).Scan(&senderID); err != nil {
-		if err = tx.QueryRow(`SELECT id FROM users WHERE deleted_at IS NULL AND status = 'active' ORDER BY id LIMIT 1`).Scan(&senderID); err != nil {
+	if err = s.txQueryRow(tx, `SELECT id FROM users WHERE deleted_at IS NULL AND status = 'active' AND role = 'admin' ORDER BY id LIMIT 1`).Scan(&senderID); err != nil {
+		if err = s.txQueryRow(tx, `SELECT id FROM users WHERE deleted_at IS NULL AND status = 'active' ORDER BY id LIMIT 1`).Scan(&senderID); err != nil {
 			return fmt.Errorf("no active sender user found")
 		}
 	}
 
-	res, err := tx.Exec(`
+	insertNotificationSQL := `
 INSERT INTO notifications (title, content, content_html, type_id, sender_id, created_at, expires_at, is_archived)
 VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now', '+90 days'), 0)
-`, title, content, content, typeID, senderID)
+`
+	if s.driver == "postgres" {
+		insertNotificationSQL = `
+INSERT INTO notifications (title, content, content_html, type_id, sender_id, created_at, expires_at, is_archived)
+VALUES (?, ?, ?, ?, ?, NOW(), NOW() + INTERVAL '90 days', false)
+`
+	}
+	res, err := s.txExec(tx, insertNotificationSQL, title, content, content, typeID, senderID)
 	if err != nil {
 		return err
 	}
-	notificationID, err := res.LastInsertId()
-	if err != nil {
-		return err
+	var notificationID int64
+	if s.driver == "postgres" {
+		if err = s.txQueryRow(tx, `SELECT id FROM notifications WHERE sender_id = ? ORDER BY id DESC LIMIT 1`, senderID).Scan(&notificationID); err != nil {
+			return err
+		}
+	} else {
+		notificationID, err = res.LastInsertId()
+		if err != nil {
+			return err
+		}
 	}
 
-	stmt, err := tx.Prepare(`
+	insertRecipientSQL := `
 INSERT OR IGNORE INTO notification_recipients (notification_id, user_id, is_read, delivery_status, created_at)
 VALUES (?, ?, 0, 'pending', datetime('now'))
-`)
+`
+	if s.driver == "postgres" {
+		insertRecipientSQL = `
+INSERT INTO notification_recipients (notification_id, user_id, is_read, delivery_status, created_at)
+VALUES (?, ?, false, 'pending', NOW())
+ON CONFLICT (notification_id, user_id) DO NOTHING
+`
+	}
+	stmt, err := s.txPrepare(tx, insertRecipientSQL)
 	if err != nil {
 		return err
 	}
@@ -1397,7 +1426,16 @@ func (s *AlertRuntimeStore) hasTableColumn(table, column string) bool {
 	if s == nil || s.db == nil {
 		return false
 	}
-	rows, err := s.db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if s.driver == "postgres" {
+		var count int
+		err := s.queryRow(`
+SELECT COUNT(1)
+FROM information_schema.columns
+WHERE table_schema = 'public' AND table_name = ? AND column_name = ?
+`, strings.ToLower(strings.TrimSpace(table)), strings.ToLower(strings.TrimSpace(column))).Scan(&count)
+		return err == nil && count > 0
+	}
+	rows, err := s.query(fmt.Sprintf("PRAGMA table_info(%s)", table))
 	if err != nil {
 		return false
 	}
@@ -1419,6 +1457,49 @@ func (s *AlertRuntimeStore) hasTableColumn(table, column string) bool {
 		}
 	}
 	return false
+}
+
+func (s *AlertRuntimeStore) rebind(query string) string {
+	if s.driver != "postgres" {
+		return query
+	}
+	var b strings.Builder
+	b.Grow(len(query) + 16)
+	arg := 1
+	for _, ch := range query {
+		if ch == '?' {
+			b.WriteByte('$')
+			b.WriteString(strconv.Itoa(arg))
+			arg++
+			continue
+		}
+		b.WriteRune(ch)
+	}
+	return b.String()
+}
+
+func (s *AlertRuntimeStore) exec(query string, args ...any) (sql.Result, error) {
+	return s.db.Exec(s.rebind(query), args...)
+}
+
+func (s *AlertRuntimeStore) query(query string, args ...any) (*sql.Rows, error) {
+	return s.db.Query(s.rebind(query), args...)
+}
+
+func (s *AlertRuntimeStore) queryRow(query string, args ...any) *sql.Row {
+	return s.db.QueryRow(s.rebind(query), args...)
+}
+
+func (s *AlertRuntimeStore) txExec(tx *sql.Tx, query string, args ...any) (sql.Result, error) {
+	return tx.Exec(s.rebind(query), args...)
+}
+
+func (s *AlertRuntimeStore) txQueryRow(tx *sql.Tx, query string, args ...any) *sql.Row {
+	return tx.QueryRow(s.rebind(query), args...)
+}
+
+func (s *AlertRuntimeStore) txPrepare(tx *sql.Tx, query string) (*sql.Stmt, error) {
+	return tx.Prepare(s.rebind(query))
 }
 
 func parseStringMapJSON(raw string) map[string]string {

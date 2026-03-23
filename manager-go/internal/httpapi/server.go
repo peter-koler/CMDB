@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"sort"
 	"strconv"
@@ -13,6 +14,7 @@ import (
 
 	"manager-go/internal/alert"
 	"manager-go/internal/collector"
+	"manager-go/internal/license"
 	"manager-go/internal/metrics"
 	"manager-go/internal/model"
 	"manager-go/internal/notify"
@@ -32,6 +34,7 @@ type Server struct {
 	deadLetterStore  *alert.DeadLetterStore
 	retryDeadLetter  func(int64) error
 	collectorManager *collector.Manager
+	licenseManager   *license.Manager
 	vmQuery          *metrics.VMClient
 	stringLatest     func(monitorID int64, names []string) map[string]StringLatestValue
 }
@@ -61,6 +64,12 @@ func WithCollectorRegistry(reg *collector.Registry, timeout time.Duration) Optio
 func WithCollectorManager(mgr *collector.Manager) Option {
 	return func(s *Server) {
 		s.collectorManager = mgr
+	}
+}
+
+func WithLicenseManager(mgr *license.Manager) Option {
+	return func(s *Server) {
+		s.licenseManager = mgr
 	}
 }
 
@@ -115,6 +124,8 @@ func (s *Server) Handler() http.Handler {
 
 func (s *Server) routes() {
 	s.mux.HandleFunc("/api/v1/health", s.handleHealth)
+	s.mux.HandleFunc("/api/v1/license/status", s.handleLicenseStatus)
+	s.mux.HandleFunc("/api/v1/license/upload", s.handleLicenseUpload)
 	s.mux.HandleFunc("/api/v1/monitors", s.handleMonitors)
 	s.mux.HandleFunc("/api/v1/monitors/", s.handleMonitorByID)
 	s.mux.HandleFunc("/api/v1/notify/test", s.handleNotifyTest)
@@ -162,6 +173,12 @@ func (s *Server) handleMonitors(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 			writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error())
 			return
+		}
+		if in.Enabled && s.licenseManager != nil {
+			if err := s.licenseManager.ValidateEnableAllowed(); err != nil {
+				writeErr(w, http.StatusPaymentRequired, "LICENSE_LIMIT_EXCEEDED", err.Error())
+				return
+			}
 		}
 		candidate := model.Monitor{
 			ID:              0,
@@ -1392,6 +1409,12 @@ func (s *Server) handleMonitorCRUD(w http.ResponseWriter, r *http.Request, id in
 			writeErr(w, http.StatusUnprocessableEntity, "MONITOR_INVALID_CONFIG", err.Error())
 			return
 		}
+		if !current.Enabled && in.Enabled && s.licenseManager != nil {
+			if err := s.licenseManager.ValidateEnableAllowed(); err != nil {
+				writeErr(w, http.StatusPaymentRequired, "LICENSE_LIMIT_EXCEEDED", err.Error())
+				return
+			}
+		}
 		m, err := s.store.Update(id, in)
 		if err != nil {
 			writeStoreErr(w, err)
@@ -1453,6 +1476,12 @@ func (s *Server) handleEnableDisable(w http.ResponseWriter, r *http.Request, id 
 			writeStoreErr(w, err)
 			return
 		}
+		if !current.Enabled && s.licenseManager != nil {
+			if err := s.licenseManager.ValidateEnableAllowed(); err != nil {
+				writeErr(w, http.StatusPaymentRequired, "LICENSE_LIMIT_EXCEEDED", err.Error())
+				return
+			}
+		}
 		if err := s.preCompileAndAudit(&current, "enable"); err != nil {
 			writeErr(w, http.StatusUnprocessableEntity, "MONITOR_INVALID_CONFIG", err.Error())
 			return
@@ -1480,6 +1509,71 @@ func (s *Server) handleEnableDisable(w http.ResponseWriter, r *http.Request, id 
 		}
 	}
 	writeJSON(w, http.StatusOK, m)
+}
+
+func (s *Server) handleLicenseStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if s.licenseManager == nil {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"has_license":      false,
+			"expired":          false,
+			"machine_code":     "",
+			"max_monitors":     0,
+			"enabled_monitors": 0,
+			"halted":           false,
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, s.licenseManager.Status())
+}
+
+func (s *Server) handleLicenseUpload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if s.licenseManager == nil {
+		writeErr(w, http.StatusServiceUnavailable, "LICENSE_UNAVAILABLE", "license manager not configured")
+		return
+	}
+	var raw []byte
+	contentType := strings.ToLower(strings.TrimSpace(r.Header.Get("Content-Type")))
+	if strings.Contains(contentType, "application/json") {
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error())
+			return
+		}
+		value := strings.TrimSpace(fmt.Sprintf("%v", payload["license"]))
+		if value == "" {
+			value = strings.TrimSpace(fmt.Sprintf("%v", payload["content"]))
+		}
+		raw = []byte(value)
+	} else {
+		buf, err := io.ReadAll(r.Body)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error())
+			return
+		}
+		raw = buf
+	}
+	if len(raw) == 0 {
+		writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "license content required")
+		return
+	}
+	claims, err := s.licenseManager.Install(raw)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "LICENSE_INVALID", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"machine_code": claims.MachineCode,
+		"expire_time":  claims.ExpireTime,
+		"max_monitors": claims.MaxMonitors,
+	})
 }
 
 func writeStoreErr(w http.ResponseWriter, err error) {

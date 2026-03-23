@@ -1,6 +1,6 @@
 """add notice rule ids to alert defines
 
-Revision ID: a1b2c3d4e5f6
+Revision ID: b9d0e1f2a3b4
 Revises: e8c1b2a3c4d5
 Create Date: 2026-03-13 19:26:00
 """
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision = "a1b2c3d4e5f6"
+revision = "b9d0e1f2a3b4"
 down_revision = "e8c1b2a3c4d5"
 branch_labels = None
 depends_on = None

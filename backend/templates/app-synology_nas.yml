@@ -21,13 +21,11 @@ app: synology_nas
 name:
   zh-CN: Synology NAS
   en-US: Synology NAS
-  ja-JP: Synology NAS
 # The description and help of this monitoring type
 help:
   zh-CN: Hertzbeat 使用 <a class='help_module_content' href='https://hertzbeat.apache.org/docs/advanced/extend-snmp'> SNMP 协议</a> 对 Synology NAS 的通用指标进行采集监控。<br><span class='help_module_span'>注意⚠️：Synology NAS 要开启 SNMP 服务，<a class='help_module_content' href='https://kb.synology.cn/zh-cn/DSM/help/DSM/AdminCenter/system_snmp'>点击查看开启步骤</a>。</span>您可以点击 “<i>新建 Synology NAS</i>” 并进行配置SNMP相关参数添加，或者选择“<i>更多操作</i>”，导入已有配置。
   en-US: HertzBeat uses <a class='help_module_content' href='https://hertzbeat.apache.org/docs/advanced/extend-snmp'> SNMP Protocol</a> to monitoring Synology NAS general performance metrics. <br><span class='help_module_span'>Note⚠️:Synology NAS need enable the SNMP services <a class='help_module_content' href='https://kb.synology.com/en-global/DSM/help/DSM/AdminCenter/system_snmp'>Click here to view the specific steps.</a></span> You can click the "<i>Synology NAS</i>" button and config snmp params to add monitor or import an existing setup through the "<i>More Actions</i>" menu.
   zh-TW: Hertzbeat 使用 <a class='help_module_content' href='https://hertzbeat.apache.org/docs/advanced/extend-snmp'> SNMP 协议</a> 对 Synology NAS 的通用指标进行采集监控。<br><span class='help_module_span'>注意⚠️：Synology NAS 需要开启 SNMP 服务，<a class='help_module_content' href='https://kb.synology.com/zh-tw/DSM/help/DSM/AdminCenter/system_snmp'>点击查看开启步骤</a>。</span>您可以点击 “<i>新建 Synology NAS</i>” 并进行配置SNMP相关参数添加，或者选择“<i>更多操作</i>”，导入已有配置。
-  ja-JP: Hertzbeat は <a class='help_module_content' href='https://hertzbeat.apache.org/docs/advanced/extend-snmp'> SNMP プロトコルを介して</a> Synology NAS 一般的なメトリクスを監視します。<br><span class='help_module_span'>注意⚠️：Synology NAS で SNMP サービスを有効にする必要があります，<a class='help_module_content' href='https://kb.synology.com/ja-jp/DSM/help/DSM/AdminCenter/system_snmp'>クリックしてガイドを見ます</a>。<br>「<i>新規 Synology NAS</i>」をクリックしてSNMPなどのパラメタを設定した後、新規することができます。
 helpLink:
   zh-CN: https://hertzbeat.apache.org/zh-cn/docs/help/synology_nas
   en-US: https://hertzbeat.apache.org/docs/help/synology_nas
@@ -39,7 +37,6 @@ params:
     name:
       zh-CN: 目标Host
       en-US: Target Host
-      ja-JP: 目標ホスト
     # type-param field type(most mapping the html input type)
     type: host
     # required-true or false
@@ -50,7 +47,6 @@ params:
     name:
       zh-CN: 端口
       en-US: Port
-      ja-JP: ポート
     # type-param field type(most mapping the html input type)
     type: number
     # when type is number, range is required
@@ -65,7 +61,6 @@ params:
     name:
       zh-CN: SNMP 版本
       en-US: SNMP Version
-      ja-JP: SNMPバージョン
     # type-param field type(radio mapping the html radio tag)
     type: radio
     # required-true or false
@@ -84,7 +79,6 @@ params:
     name:
       zh-CN: SNMP 团体字
       en-US: SNMP Community
-      ja-JP: SNMPコミュニティ
     # type-param field type(most mapping the html input type)
     type: text
     # when type is text, use limit to limit string length
@@ -104,7 +98,6 @@ params:
     name:
       zh-CN: SNMP username
       en-US: SNMP username
-      ja-JP: SNMPユーザー名
     # type-param field type(most mapping the html input type)
     type: text
     # when type is text, use limit to limit string length
@@ -123,7 +116,6 @@ params:
     name:
       zh-CN: SNMP contextName
       en-US: SNMP contextName
-      ja-JP: SNMPコンテキスト名
     # type-param field type(most mapping the html input type)
     type: text
     # when type is text, use limit to limit string length
@@ -142,7 +134,6 @@ params:
     name:
       zh-CN: SNMP authPassword
       en-US: SNMP authPassword
-      ja-JP: SNMP認証パスワード
     # type-param field type(most mapping the html input type)
     type: text
     # when type is text, use limit to limit string length
@@ -161,7 +152,6 @@ params:
     name:
       zh-CN: authPassword 加密方式
       en-US: authPassword Encryption
-      ja-JP: 認証暗号
     # type-param field type(radio mapping the html radio tag)
     type: radio
     # required-true or false
@@ -182,7 +172,6 @@ params:
     name:
       zh-CN: SNMP privPassphrase
       en-US: SNMP privPassphrase
-      ja-JP: SNMPパスワードフレーズ
     # type-param field type(most mapping the html input type)
     type: text
     # when type is text, use limit to limit string length
@@ -201,7 +190,6 @@ params:
     name:
       zh-CN: privPassword 加密方式
       en-US: privPassword Encryption
-      ja-JP: パスワードの暗号
     # type-param field type(radio mapping the html radio tag)
     type: radio
     # required-true or false
@@ -222,7 +210,6 @@ params:
     name:
       zh-CN: 超时时间(ms)
       en-US: Timeout(ms)
-      ja-JP: タイムアウト（ｍｓ）
     # type-param field type(most mapping the html input type)
     type: number
     # when type is number, range is required
@@ -240,7 +227,6 @@ metrics:
     i18n:
       zh-CN: 系统
       en-US: System
-      ja-JP: システム
     # metrics scheduling priority(0->127)->(high->low), metrics with the same priority will be scheduled in parallel
     # priority 0's metrics is availability metrics, it will be scheduled first, only availability metrics collect success will the scheduling continue
     priority: 0
@@ -250,25 +236,21 @@ metrics:
         i18n:
           zh-CN: 型号
           en-US: Name
-          ja-JP: モデル
       - field: serialNumber
         type: 1
         i18n:
           zh-CN: 序列号
           en-US: Serial Number
-          ja-JP: シリアル番号
       - field: version
         type: 1
         i18n:
           zh-CN: DSM 版本
           en-US: Version
-          ja-JP: DSM バージョン
       - field: controllerNumber
         type: 1
         i18n:
           zh-CN: 控制器编号
           en-US: Number of Users
-          ja-JP: コントローラー番号
     protocol: snmp
     snmp:
       # server host: ipv4 ipv6 domain
@@ -305,7 +287,6 @@ metrics:
     i18n:
       zh-CN: 状态
       en-US: Status
-      ja-JP: ステータス
     priority: 1
     fields:
       - field: powerStatus
@@ -313,49 +294,41 @@ metrics:
         i18n:
           zh-CN: 电源
           en-US: Power
-          ja-JP: 電源
       - field: systemFanStatus
         type: 0
         i18n:
           zh-CN: 系统风扇
           en-US: System Fan
-          ja-JP: システムファン
       - field: cpuFanStatus
         type: 0
         i18n:
           zh-CN: CPU 风扇
           en-US: CPU Fan
-          ja-JP: CPUファン
       - field: systemStatus
         type: 0
         i18n:
           zh-CN: 系统分区
           en-US: System Partition
-          ja-JP: システムパーティション
       - field: thermalStatus
         type: 0
         i18n:
           zh-CN: 散热状态
           en-US: Thermal Partition
-          ja-JP: 熱源
       - field: temperature
         type: 0
         i18n:
           zh-CN: 温度
           en-US: Temperature
-          ja-JP: 温度
       - field: cpuUtilization
         type: 0
         i18n:
           zh-CN: CPU 利用率
           en-US: CPU Utilization
-          ja-JP: CPU 使用率
       - field: memUtilization
         type: 0
         i18n:
           zh-CN: 内存利用率
           en-US: Memory Utilization
-          ja-JP: メモリ使用率
     protocol: snmp
     snmp:
       # server host: ipv4 ipv6 domain
@@ -396,7 +369,6 @@ metrics:
     i18n:
       zh-CN: 硬盘
       en-US: Disk
-      ja-JP: ディスク
     priority: 2
     fields:
       - field: diskID
@@ -404,73 +376,61 @@ metrics:
         i18n:
           zh-CN: ID
           en-US: ID
-          ja-JP: ディスクID
       - field: diskModel
         type: 1
         i18n:
           zh-CN: 型号
           en-US: Model
-          ja-JP: ディスクモデル
       - field: diskType
         type: 1
         i18n:
           zh-CN: 类型
           en-US: Type
-          ja-JP: ディスクタイプ
       - field: diskStatus
         type: 1
         i18n:
           zh-CN: 状态
           en-US: Status
-          ja-JP: ディスクステータス
       - field: diskTemperature
         type: 0
         i18n:
           zh-CN: 温度
           en-US: Temperature
-          ja-JP: ディスク温度
       - field: diskRole
         type: 1
         i18n:
           zh-CN: 作用
           en-US: Role
-          ja-JP: ディスク作用
       - field: diskRetry
         type: 0
         i18n:
           zh-CN: 连接重试次数
           en-US: Retry count
-          ja-JP: ディスクリミネーション
       - field: diskBadSector
         type: 0
         i18n:
           zh-CN: 坏扇区数
           en-US: Bad Sector
-          ja-JP: ディスクバッドセクタ
       - field: diskIdentifyFail
         type: 0
         i18n:
           zh-CN: 计数失败
           en-US: Identify Fail
-          ja-JP: ディスク識別失敗
       - field: diskRemainLife
         type: 0
         i18n:
           zh-CN: 预计剩余寿命
           en-US: Remain Life
-          ja-JP: ディスク残り寿命
       - field: diskName
         type: 1
         i18n:
           zh-CN: 保留名称
           en-US: Disk Name
-          ja-JP: ディスク名
       - field: diskHealthStatus
         type: 0
         i18n:
           zh-CN: 健康状况
           en-US: Health Status
-          ja-JP: ディスクヘルスステータス
     protocol: snmp
     snmp:
       # server host: ipv4 ipv6 domain
@@ -515,7 +475,6 @@ metrics:
     i18n:
       zh-CN: RAID
       en-US: RAID
-      ja-JP: RAID
     priority: 3
     fields:
       - field: raidName
@@ -523,31 +482,26 @@ metrics:
         i18n:
           zh-CN: 名称
           en-US: Name
-          ja-JP: 名
       - field: raidStatus
         type: 0
         i18n:
           zh-CN: 状态
           en-US:  Status
-          ja-JP: ディスクモデル
       - field: raidFreeSize
         type: 0
         i18n:
           zh-CN: 可用容量
           en-US: Free Size
-          ja-JP: ディスク残りサイズ
       - field: raidTotalSize
         type: 0
         i18n:
           zh-CN: 总大小
           en-US: Total Size
-          ja-JP: ディスクサイズ
       - field: raidHotspareCnt
         type: 0
         i18n:
           zh-CN: 热备数
           en-US: Hot Spare Count
-          ja-JP: ディスクホットスパア数
     protocol: snmp
     snmp:
       # server host: ipv4 ipv6 domain
@@ -585,7 +539,6 @@ metrics:
     i18n:
       zh-CN: S.M.A.R.T
       en-US: S.M.A.R.T
-      ja-JP: S.M.A.R.T
     priority: 4
     fields:
       - field: diskSMARTInfoDevName
@@ -593,49 +546,41 @@ metrics:
         i18n:
           zh-CN: 设备名称
           en-US: Device Name
-          ja-JP: ディスク名
       - field: diskSMARTAttrName
         type: 1
         i18n:
           zh-CN: 属性名
           en-US: Attribute Name
-          ja-JP: ディスク属性名
       - field: diskSMARTAttrId
         type: 1
         i18n:
           zh-CN: 属性 ID
           en-US: Attribute ID
-          ja-JP: ディスク属性ID
       - field: diskSMARTAttrCurrent
         type: 0
         i18n:
           zh-CN: 当前值
           en-US: Attribute Current
-          ja-JP: ディスク属性現在値
       - field: diskSMARTAttrWorst
         type: 0
         i18n:
           zh-CN: 最差值
           en-US: Attribute Worst
-          ja-JP: ディスク属性最差値
       - field: diskSMARTAttrThreshold
         type: 0
         i18n:
           zh-CN: 阈值
           en-US: Attribute Threshold
-          ja-JP: ディスク属性しきい値
       - field: diskSMARTAttrRaw
         type: 0
         i18n:
           zh-CN: 原始值
           en-US: Raw
-          ja-JP: ディスク属性原始値
       - field: diskSMARTAttrStatus
         type: 1
         i18n:
           zh-CN: 信息状态
           en-US: Attribute Status
-          ja-JP: ディスク属性情報ステータス
     protocol: snmp
     snmp:
       # server host: ipv4 ipv6 domain
@@ -676,7 +621,6 @@ metrics:
     i18n:
       zh-CN: 存储空间 I/O
       en-US: Space I/O
-      ja-JP: スペースI/O
     priority: 5
     fields:
       - field: spaceIODevice
@@ -684,53 +628,45 @@ metrics:
         i18n:
           zh-CN: 设备名称
           en-US: Device Name
-          ja-JP: ディスク名
       - field: spaceIOReads
         type: 0
         i18n:
           zh-CN: 读取访问次数
           en-US: Read Accesses Count
-          ja-JP: ディスク属性読み込みアクセス回数
       - field: spaceIOWrites
         type: 0
         i18n:
           zh-CN: 写入访问次数
           en-US: Write Accesses Count
-          ja-JP: ディスク属性書き込みアクセス回数
       - field: spaceIOLA
         type: 0
         unit: '%'
         i18n:
           zh-CN: 硬盘负载
           en-US: The load of disk
-          ja-JP: ディスク属性ディスクロード
       - field: spaceIOLA1
         type: 0
         unit: '%'
         i18n:
           zh-CN: 1 分钟平均负载
           en-US: The 1-minute average load of disk
-          ja-JP: 1分平均負荷
       - field: spaceIOLA5
         type: 0
         unit: '%'
         i18n:
           zh-CN: 5分钟平均负载
           en-US: The 5-minute average load of disk
-          ja-JP: 5分平均負荷
       - field: spaceIOLA15
         type: 0
         unit: '%'
         i18n:
           zh-CN: 15 分钟平均负载
           en-US: The-15 minute average load of disk
-          ja-JP: 15分平均負荷
       - field: spaceUUID
         type: 1
         i18n:
           zh-CN: 卷UUID
           en-US: UUID
-          ja-JP: UUID
     protocol: snmp
     snmp:
       # server host: ipv4 ipv6 domain
@@ -771,7 +707,6 @@ metrics:
     i18n:
       zh-CN: 硬盘 I/O
       en-US: Storage I/O
-      ja-JP: ハードディスクI/O
     priority: 6
     fields:
       - field: storageIODevice
@@ -779,53 +714,45 @@ metrics:
         i18n:
           zh-CN: 设备名称
           en-US: Device Name
-          ja-JP: ディスク名
       - field: storageIOReads
         type: 0
         i18n:
           zh-CN: 读取访问次数
           en-US: Read Accesses Count
-          ja-JP: ディスク属性読み込みアクセス回数
       - field: storageIOWrites
         type: 0
         i18n:
           zh-CN: 写入访问次数
           en-US: Write Accesses Count
-          ja-JP: ディスク属性書き込みアクセス回数
       - field: storageIOLA
         type: 0
         unit: '%'
         i18n:
           zh-CN: 硬盘负载
           en-US: The load of disk
-          ja-JP: ディスク属性ディスクロード
       - field: storageIOLA1
         type: 0
         unit: '%'
         i18n:
           zh-CN: 1 分钟平均负载
           en-US: The 1-minute average load of disk
-          ja-JP: 1分平均負荷
       - field: storageIOLA5
         type: 0
         unit: '%'
         i18n:
           zh-CN: 5分钟平均负载
           en-US: The 5-minute average load of disk
-          ja-JP: 5分平均負荷
       - field: storageIOLA15
         type: 0
         unit: '%'
         i18n:
           zh-CN: 15 分钟平均负载
           en-US: The-15 minute average load of disk
-          ja-JP: 15分平均負荷
       - field: storageIODeviceSerial
         type: 1
         i18n:
           zh-CN: 序列号
           en-US: Serial Number
-          ja-JP: シリアルナンバー
     protocol: snmp
     snmp:
       # server host: ipv4 ipv6 domain

@@ -71,7 +71,30 @@ fi
 # 每次启动前重新编译
 BINARY="./collector"
 echo "[INFO] Building collector..."
-go build -o "$BINARY" ./cmd/collector
+BUILD_TAGS="${COLLECTOR_GO_BUILD_TAGS:-}"
+BUILD_ARGS=()
+if [ -n "$BUILD_TAGS" ]; then
+    BUILD_ARGS=(-tags "$BUILD_TAGS")
+    echo "[INFO] collector build tags: $BUILD_TAGS"
+fi
+if [[ ",$BUILD_TAGS," == *",db2,"* ]] || [[ " $BUILD_TAGS " == *" db2 "* ]]; then
+    if [ -z "${IBM_DB_HOME:-}" ]; then
+        echo "[ERROR] db2 tag enabled but IBM_DB_HOME is empty"
+        echo "[INFO] Please set IBM_DB_HOME, CGO_CFLAGS, CGO_LDFLAGS and library path env before build"
+        exit 1
+    fi
+    if [ ! -f "${IBM_DB_HOME}/include/sqlcli1.h" ]; then
+        echo "[ERROR] Missing ${IBM_DB_HOME}/include/sqlcli1.h"
+        echo "[INFO] IBM_DB_HOME should point to clidriver root directory"
+        exit 1
+    fi
+    if [ ! -f "${IBM_DB_HOME}/lib/libdb2.dylib" ] && [ ! -f "${IBM_DB_HOME}/lib/libdb2.so" ]; then
+        echo "[ERROR] Missing libdb2 under ${IBM_DB_HOME}/lib"
+        echo "[INFO] Please ensure clidriver lib files are complete and library path env is set"
+        exit 1
+    fi
+fi
+go build "${BUILD_ARGS[@]}" -o "$BINARY" ./cmd/collector
 if [ ! -f "$BINARY" ]; then
     echo "[ERROR] Build failed"
     exit 1

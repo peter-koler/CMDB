@@ -7,9 +7,13 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
+	"manager-go/internal/dbutil"
+
+	_ "github.com/lib/pq"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -33,25 +37,28 @@ type Collector struct {
 
 // CollectorStore 采集器存储
 type CollectorStore struct {
-	db *sql.DB
+	db     *sql.DB
+	driver string
 }
 
 // NewCollectorStore 创建采集器存储
 func NewCollectorStore(db *sql.DB) *CollectorStore {
-	return &CollectorStore{db: db}
+	return &CollectorStore{db: db, driver: "sqlite3"}
 }
 
 // NewCollectorStoreWithPath 从文件路径创建采集器存储
-func NewCollectorStoreWithPath(dbPath string) (*CollectorStore, error) {
-	// 确保目录存在
-	dir := filepath.Dir(dbPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return nil, fmt.Errorf("create directory failed: %w", err)
+func NewCollectorStoreWithPath(dsn string) (*CollectorStore, error) {
+	driver, resolved := dbutil.ResolveDriverAndDSN(dsn, "../backend/instance/it_ops.db")
+	if driver == "sqlite3" {
+		dir := filepath.Dir(resolved)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return nil, fmt.Errorf("create directory failed: %w", err)
+		}
 	}
 
-	db, err := sql.Open("sqlite3", dbPath)
+	db, err := sql.Open(driver, resolved)
 	if err != nil {
-		return nil, fmt.Errorf("open sqlite db failed: %w", err)
+		return nil, fmt.Errorf("open %s db failed: %w", driver, err)
 	}
 
 	// 设置连接池
@@ -59,12 +66,12 @@ func NewCollectorStoreWithPath(dbPath string) (*CollectorStore, error) {
 	db.SetMaxIdleConns(5)
 	db.SetConnMaxLifetime(time.Hour)
 
-	return &CollectorStore{db: db}, nil
+	return &CollectorStore{db: db, driver: driver}, nil
 }
 
 // InitTable 初始化表结构
 func (s *CollectorStore) InitTable() error {
-	sql := `
+	sqlStmt := `
 CREATE TABLE IF NOT EXISTS collectors (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
@@ -96,8 +103,46 @@ CREATE TABLE IF NOT EXISTS collector_monitor_binds (
 CREATE INDEX IF NOT EXISTS idx_binds_collector ON collector_monitor_binds(collector);
 CREATE INDEX IF NOT EXISTS idx_binds_monitor ON collector_monitor_binds(monitor_id);
 `
-	if _, err := s.db.Exec(sql); err != nil {
+	if s.driver == "postgres" {
+		sqlStmt = `
+CREATE TABLE IF NOT EXISTS collectors (
+    id BIGSERIAL PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    ip TEXT NOT NULL,
+    version TEXT,
+    status SMALLINT NOT NULL DEFAULT 1,
+    mode TEXT NOT NULL DEFAULT 'public',
+    creator TEXT,
+    modifier TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_collectors_name ON collectors(name);
+CREATE INDEX IF NOT EXISTS idx_collectors_status ON collectors(status);
+
+CREATE TABLE IF NOT EXISTS collector_monitor_binds (
+    id BIGSERIAL PRIMARY KEY,
+    collector TEXT NOT NULL,
+    monitor_id BIGINT NOT NULL,
+    pinned SMALLINT NOT NULL DEFAULT 0,
+    creator TEXT,
+    modifier TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(collector, monitor_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_binds_collector ON collector_monitor_binds(collector);
+CREATE INDEX IF NOT EXISTS idx_binds_monitor ON collector_monitor_binds(monitor_id);
+`
+	}
+	if _, err := s.exec(sqlStmt); err != nil {
 		return err
+	}
+
+	if s.driver == "postgres" {
+		return nil
 	}
 
 	// 尝试添加可能缺失的列（兼容旧表）
@@ -110,7 +155,7 @@ CREATE INDEX IF NOT EXISTS idx_binds_monitor ON collector_monitor_binds(monitor_
 
 // addColumnIfNotExists 如果列不存在则添加
 func (s *CollectorStore) addColumnIfNotExists(table, column, colType string) error {
-	rows, err := s.db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	rows, err := s.query(fmt.Sprintf("PRAGMA table_info(%s)", table))
 	if err != nil {
 		return err
 	}
@@ -136,7 +181,7 @@ func (s *CollectorStore) addColumnIfNotExists(table, column, colType string) err
 		return err
 	}
 
-	_, err = s.db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, colType))
+	_, err = s.exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, colType))
 	if err != nil {
 		return err
 	}
@@ -147,7 +192,7 @@ func (s *CollectorStore) addColumnIfNotExists(table, column, colType string) err
 // CreateOrUpdate 创建或更新采集器
 func (s *CollectorStore) CreateOrUpdate(name, ip, version, mode string) (*Collector, error) {
 	// 先尝试更新
-	result, err := s.db.Exec(`
+	result, err := s.exec(`
 UPDATE collectors 
 SET ip = ?, version = ?, status = 0, mode = ?, updated_at = ?
 WHERE name = ?
@@ -163,7 +208,19 @@ WHERE name = ?
 	}
 
 	// 不存在，创建新记录
-	result, err = s.db.Exec(`
+	if s.driver == "postgres" {
+		var id int64
+		err = s.queryRow(`
+INSERT INTO collectors (name, ip, version, status, mode, created_at, updated_at)
+VALUES (?, ?, ?, 0, ?, ?, ?)
+RETURNING id
+`, name, ip, version, mode, time.Now(), time.Now()).Scan(&id)
+		if err != nil {
+			return nil, fmt.Errorf("create collector failed: %w", err)
+		}
+		return s.GetByID(id)
+	}
+	result, err = s.exec(`
 INSERT INTO collectors (name, ip, version, status, mode, created_at, updated_at)
 VALUES (?, ?, ?, 0, ?, ?, ?)
 `, name, ip, version, mode, time.Now(), time.Now())
@@ -181,7 +238,7 @@ func (s *CollectorStore) GetByID(id int64) (*Collector, error) {
 	var createdAt, updatedAt string
 	var creator, modifier sql.NullString
 
-	err := s.db.QueryRow(`
+	err := s.queryRow(`
 SELECT id, name, ip, version, status, mode, creator, modifier, created_at, updated_at
 FROM collectors WHERE id = ?
 `, id).Scan(&c.ID, &c.Name, &c.IP, &c.Version, &c.Status, &c.Mode,
@@ -207,7 +264,7 @@ func (s *CollectorStore) GetByName(name string) (*Collector, error) {
 	var createdAt, updatedAt string
 	var creator, modifier sql.NullString
 
-	err := s.db.QueryRow(`
+	err := s.queryRow(`
 SELECT id, name, ip, version, status, mode, creator, modifier, created_at, updated_at
 FROM collectors WHERE name = ?
 `, name).Scan(&c.ID, &c.Name, &c.IP, &c.Version, &c.Status, &c.Mode,
@@ -229,7 +286,7 @@ FROM collectors WHERE name = ?
 
 // UpdateStatus 更新采集器状态
 func (s *CollectorStore) UpdateStatus(name string, status int8) error {
-	_, err := s.db.Exec(`
+	_, err := s.exec(`
 UPDATE collectors SET status = ?, updated_at = ? WHERE name = ?
 `, status, time.Now(), name)
 	return err
@@ -247,7 +304,7 @@ func (s *CollectorStore) SetOnline(name string) error {
 
 // List 获取采集器列表
 func (s *CollectorStore) List() ([]*Collector, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.query(`
 SELECT id, name, ip, version, status, mode, creator, modifier, created_at, updated_at
 FROM collectors ORDER BY id DESC
 `)
@@ -278,7 +335,7 @@ FROM collectors ORDER BY id DESC
 
 // ListByStatus 根据状态获取采集器列表
 func (s *CollectorStore) ListByStatus(status int8) ([]*Collector, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.query(`
 SELECT id, name, ip, version, status, mode, creator, modifier, created_at, updated_at
 FROM collectors WHERE status = ? ORDER BY id DESC
 `, status)
@@ -309,21 +366,21 @@ FROM collectors WHERE status = ? ORDER BY id DESC
 
 // Delete 删除采集器
 func (s *CollectorStore) Delete(name string) error {
-	_, err := s.db.Exec(`DELETE FROM collectors WHERE name = ?`, name)
+	_, err := s.exec(`DELETE FROM collectors WHERE name = ?`, name)
 	return err
 }
 
 // Count 统计采集器数量
 func (s *CollectorStore) Count() (int, error) {
 	var count int
-	err := s.db.QueryRow(`SELECT COUNT(*) FROM collectors`).Scan(&count)
+	err := s.queryRow(`SELECT COUNT(*) FROM collectors`).Scan(&count)
 	return count, err
 }
 
 // CountByStatus 按状态统计采集器数量
 func (s *CollectorStore) CountByStatus(status int8) (int, error) {
 	var count int
-	err := s.db.QueryRow(`SELECT COUNT(*) FROM collectors WHERE status = ?`, status).Scan(&count)
+	err := s.queryRow(`SELECT COUNT(*) FROM collectors WHERE status = ?`, status).Scan(&count)
 	return count, err
 }
 
@@ -364,7 +421,19 @@ type CollectorMonitorBind struct {
 
 // CreateBind 创建绑定关系
 func (s *CollectorStore) CreateBind(collector string, monitorID int64, pinned int8) (*CollectorMonitorBind, error) {
-	result, err := s.db.Exec(`
+	if s.driver == "postgres" {
+		var id int64
+		err := s.queryRow(`
+		INSERT INTO collector_monitor_binds (collector, monitor_id, pinned, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+		RETURNING id
+	`, collector, monitorID, pinned, time.Now(), time.Now()).Scan(&id)
+		if err != nil {
+			return nil, fmt.Errorf("create bind failed: %w", err)
+		}
+		return s.GetBindByID(id)
+	}
+	result, err := s.exec(`
 		INSERT INTO collector_monitor_binds (collector, monitor_id, pinned, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?)
 	`, collector, monitorID, pinned, time.Now(), time.Now())
@@ -380,7 +449,7 @@ func (s *CollectorStore) CreateBind(collector string, monitorID int64, pinned in
 func (s *CollectorStore) GetBindByID(id int64) (*CollectorMonitorBind, error) {
 	var bind CollectorMonitorBind
 	var createdAt, updatedAt string
-	err := s.db.QueryRow(`
+	err := s.queryRow(`
 		SELECT id, collector, monitor_id, pinned, creator, modifier, created_at, updated_at
 		FROM collector_monitor_binds WHERE id = ?
 	`, id).Scan(&bind.ID, &bind.Collector, &bind.MonitorID, &bind.Pinned,
@@ -397,7 +466,7 @@ func (s *CollectorStore) GetBindByID(id int64) (*CollectorMonitorBind, error) {
 func (s *CollectorStore) GetBindByMonitor(monitorID int64) (*CollectorMonitorBind, error) {
 	var bind CollectorMonitorBind
 	var createdAt, updatedAt string
-	err := s.db.QueryRow(`
+	err := s.queryRow(`
 		SELECT id, collector, monitor_id, pinned, creator, modifier, created_at, updated_at
 		FROM collector_monitor_binds WHERE monitor_id = ?
 	`, monitorID).Scan(&bind.ID, &bind.Collector, &bind.MonitorID, &bind.Pinned,
@@ -412,7 +481,7 @@ func (s *CollectorStore) GetBindByMonitor(monitorID int64) (*CollectorMonitorBin
 
 // GetBindsByCollector 获取指定 Collector 的所有绑定
 func (s *CollectorStore) GetBindsByCollector(collector string) ([]*CollectorMonitorBind, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.query(`
 		SELECT id, collector, monitor_id, pinned, creator, modifier, created_at, updated_at
 		FROM collector_monitor_binds WHERE collector = ?
 	`, collector)
@@ -439,25 +508,25 @@ func (s *CollectorStore) GetBindsByCollector(collector string) ([]*CollectorMoni
 
 // DeleteBind 删除绑定关系
 func (s *CollectorStore) DeleteBind(id int64) error {
-	_, err := s.db.Exec(`DELETE FROM collector_monitor_binds WHERE id = ?`, id)
+	_, err := s.exec(`DELETE FROM collector_monitor_binds WHERE id = ?`, id)
 	return err
 }
 
 // DeleteBindByMonitor 根据监控任务 ID 删除绑定
 func (s *CollectorStore) DeleteBindByMonitor(monitorID int64) error {
-	_, err := s.db.Exec(`DELETE FROM collector_monitor_binds WHERE monitor_id = ?`, monitorID)
+	_, err := s.exec(`DELETE FROM collector_monitor_binds WHERE monitor_id = ?`, monitorID)
 	return err
 }
 
 // DeleteBindsByCollector 删除指定 Collector 的所有绑定
 func (s *CollectorStore) DeleteBindsByCollector(collector string) error {
-	_, err := s.db.Exec(`DELETE FROM collector_monitor_binds WHERE collector = ?`, collector)
+	_, err := s.exec(`DELETE FROM collector_monitor_binds WHERE collector = ?`, collector)
 	return err
 }
 
 // ListPinnedBinds 获取所有用户固定指定的绑定
 func (s *CollectorStore) ListPinnedBinds() ([]*CollectorMonitorBind, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.query(`
 		SELECT id, collector, monitor_id, pinned, creator, modifier, created_at, updated_at
 		FROM collector_monitor_binds WHERE pinned = 1
 	`)
@@ -480,4 +549,35 @@ func (s *CollectorStore) ListPinnedBinds() ([]*CollectorMonitorBind, error) {
 		binds = append(binds, &bind)
 	}
 	return binds, nil
+}
+
+func (s *CollectorStore) rebind(query string) string {
+	if s.driver != "postgres" {
+		return query
+	}
+	var b strings.Builder
+	b.Grow(len(query) + 16)
+	arg := 1
+	for _, ch := range query {
+		if ch == '?' {
+			b.WriteByte('$')
+			b.WriteString(strconv.Itoa(arg))
+			arg++
+			continue
+		}
+		b.WriteRune(ch)
+	}
+	return b.String()
+}
+
+func (s *CollectorStore) exec(query string, args ...any) (sql.Result, error) {
+	return s.db.Exec(s.rebind(query), args...)
+}
+
+func (s *CollectorStore) query(query string, args ...any) (*sql.Rows, error) {
+	return s.db.Query(s.rebind(query), args...)
+}
+
+func (s *CollectorStore) queryRow(query string, args ...any) *sql.Row {
+	return s.db.QueryRow(s.rebind(query), args...)
 }

@@ -49,6 +49,34 @@ echo "[INFO] Script directory: $SCRIPT_DIR"
 echo "[INFO] Config path: ${CONFIG_PATH:-<default>}"
 echo "[INFO] Log file: $LOG_FILE"
 
+# 输出配置摘要（脱敏）
+if [ -n "$CONFIG_PATH" ] && [ -f "$CONFIG_PATH" ]; then
+    MASK_DSN() {
+        local dsn="$1"
+        if [[ -z "$dsn" ]]; then
+            echo "<empty>"
+            return
+        fi
+        if [[ "$dsn" == *"://"* ]]; then
+            # 脱敏 user:pass@ 部分
+            echo "$dsn" | sed -E 's#(.*://)[^@]*@#\1***@#'
+            return
+        fi
+        echo "$dsn"
+    }
+
+    CFG_MANAGER_ADDR=$(grep -E '^[[:space:]]*manager_addr:' "$CONFIG_PATH" | head -n1 | cut -d: -f2- | sed 's/#.*//' | xargs)
+    CFG_DB_URL=$(grep -E '^[[:space:]]*manager_database_url:' "$CONFIG_PATH" | head -n1 | cut -d: -f2- | sed 's/#.*//' | sed 's/^ *//;s/ *$//' | sed 's/^"//;s/"$//;s/^'\''//;s/'\''$//')
+    CFG_REDIS=$(grep -E '^[[:space:]]*redis_addr:' "$CONFIG_PATH" | head -n1 | cut -d: -f2- | sed 's/#.*//' | xargs)
+    CFG_VM=$(grep -E '^[[:space:]]*victoria_metrics_url:' "$CONFIG_PATH" | head -n1 | cut -d: -f2- | sed 's/#.*//' | xargs)
+
+    echo "[INFO] Config summary:"
+    echo "       manager_addr: ${CFG_MANAGER_ADDR:-<env/default>}"
+    echo "       manager_database_url: $(MASK_DSN "$CFG_DB_URL")"
+    echo "       redis_addr: ${CFG_REDIS:-<env/default>}"
+    echo "       victoria_metrics_url: ${CFG_VM:-<env/default>}"
+fi
+
 # 检查 Go 环境
 if ! command -v go &> /dev/null; then
     echo "[ERROR] Go is not installed or not in PATH"

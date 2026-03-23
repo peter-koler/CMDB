@@ -223,6 +223,50 @@
         </a-col>
       </a-row>
 
+      <a-row :gutter="[16, 16]" style="margin-top: 0">
+        <a-col :span="24">
+          <a-card :bordered="false" class="config-card">
+            <template #title>
+              <div class="card-title">
+                <IdcardOutlined class="title-icon" />
+                <span>License 信息</span>
+              </div>
+            </template>
+            <template #extra>
+              <a-button size="small" @click="fetchLicenseStatus" :loading="licenseLoading">
+                刷新状态
+              </a-button>
+            </template>
+            <a-descriptions :column="{ xs: 1, sm: 1, md: 2, lg: 2 }" bordered>
+              <a-descriptions-item label="机器码">
+                {{ licenseStatus.machine_code || '-' }}
+              </a-descriptions-item>
+              <a-descriptions-item label="授权状态">
+                {{ licenseStatus.has_license ? (licenseStatus.expired ? '已过期' : '有效') : '未授权' }}
+              </a-descriptions-item>
+              <a-descriptions-item label="到期时间">
+                {{ licenseStatus.expire_time || '-' }}
+              </a-descriptions-item>
+              <a-descriptions-item label="监控上限">
+                {{ licenseStatus.max_monitors || 0 }}
+              </a-descriptions-item>
+              <a-descriptions-item label="已启用监控">
+                {{ licenseStatus.enabled_monitors || 0 }}
+              </a-descriptions-item>
+              <a-descriptions-item label="防回拨状态">
+                {{ licenseStatus.halted ? '已停止采集' : '正常' }}
+              </a-descriptions-item>
+              <a-descriptions-item v-if="licenseStatus.halt_reason" label="停止原因">
+                {{ licenseStatus.halt_reason }}
+              </a-descriptions-item>
+              <a-descriptions-item label="最后运行时间">
+                {{ licenseStatus.last_running_time || '-' }}
+              </a-descriptions-item>
+            </a-descriptions>
+          </a-card>
+        </a-col>
+      </a-row>
+
       <div class="footer-actions">
         <a-button type="primary" @click="handleSave" :loading="saving" size="large">
           <template #icon><SaveOutlined /></template>
@@ -246,9 +290,11 @@ import {
   PictureOutlined,
   PlusOutlined,
   EditOutlined,
-  DeleteOutlined
+  DeleteOutlined,
+  IdcardOutlined
 } from '@ant-design/icons-vue'
 import { getConfigs, updateConfigs, uploadLogo, deleteLogo } from '@/api/config'
+import { getLicenseStatus, type LicenseStatus } from '@/api/license'
 import { getBaseURL } from '@/utils/request'
 
 const { t } = useI18n()
@@ -275,6 +321,15 @@ const configs = reactive({
 
 const logoUrl = ref('')
 const uploading = ref(false)
+const licenseLoading = ref(false)
+const licenseStatus = reactive<LicenseStatus>({
+  has_license: false,
+  expired: false,
+  machine_code: '',
+  max_monitors: 0,
+  enabled_monitors: 0,
+  halted: false
+})
 
 const fetchConfigs = async () => {
   loading.value = true
@@ -368,8 +423,21 @@ const handleDeleteLogo = async () => {
   }
 }
 
+const fetchLicenseStatus = async () => {
+  licenseLoading.value = true
+  try {
+    const res = await getLicenseStatus()
+    Object.assign(licenseStatus, res.data || {})
+  } catch (error: any) {
+    message.error(error?.response?.data?.message || '获取 License 状态失败')
+  } finally {
+    licenseLoading.value = false
+  }
+}
+
 onMounted(() => {
   fetchConfigs()
+  fetchLicenseStatus()
 })
 </script>
 

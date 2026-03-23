@@ -37,6 +37,8 @@ type Dispatcher struct {
 	precompute  PrecomputeEvaluator
 }
 
+var collectorDebugEnabled atomic.Bool
+
 func New(wheel *scheduler.Wheel, pool *worker.Pool, q queue.ResultQueue) *Dispatcher {
 	return &Dispatcher{
 		wheel:       wheel,
@@ -140,6 +142,8 @@ func (d *Dispatcher) submitWithRetry(ctx context.Context, task worker.Task, job 
 func (d *Dispatcher) executeTask(ctx context.Context, job model.Job, task model.MetricsTask, redisCache *redisCycleCache, jdbcCache *jdbcCycleCache, valueStore *cycleValueStore) {
 	collector, err := protocol.Get(task.Protocol)
 	if err != nil {
+		debugf("[collect-fail] monitor_id=%d job_id=%d app=%s metrics=%s protocol=%s reason=%v params=%v",
+			job.Monitor, job.ID, job.App, task.Name, task.Protocol, err, maskedTaskParams(task.Params))
 		d.pushResult(ctx, model.Result{
 			JobID: job.ID, MonitorID: job.Monitor, App: job.App, Metrics: task.Name,
 			Protocol: task.Protocol, Time: time.Now(), Success: false, Code: model.CodeProtocolMissing, Message: err.Error(),
@@ -179,6 +183,8 @@ func (d *Dispatcher) executeTask(ctx context.Context, job model.Job, task model.
 			res.Code = model.CodeTimeout
 		}
 		res.Message = fmt.Sprintf("%s: %v", msg, err)
+		debugf("[collect-fail] monitor_id=%d job_id=%d app=%s metrics=%s protocol=%s code=%s message=%q reason=%v params=%v",
+			job.Monitor, job.ID, job.App, task.Name, task.Protocol, res.Code, msg, err, maskedTaskParams(task.Params))
 	}
 	if err == nil && d.precompute != nil && d.precompute.Enabled() {
 		triggered, summary := d.precompute.Evaluate(task, fields)
@@ -194,6 +200,33 @@ func (d *Dispatcher) executeTask(ctx context.Context, job model.Job, task model.
 		valueStore.Save(fields)
 	}
 	d.pushResult(ctx, res)
+}
+
+func debugf(format string, args ...any) {
+	if !collectorDebugEnabled.Load() {
+		return
+	}
+	log.Printf("[DEBUG] "+format, args...)
+}
+
+func SetLogLevel(level string) {
+	collectorDebugEnabled.Store(strings.EqualFold(strings.TrimSpace(level), "debug"))
+}
+
+func maskedTaskParams(params map[string]string) map[string]string {
+	if len(params) == 0 {
+		return map[string]string{}
+	}
+	out := make(map[string]string, len(params))
+	for key, value := range params {
+		lowerKey := strings.ToLower(strings.TrimSpace(key))
+		if lowerKey == "password" || lowerKey == "passwd" || lowerKey == "secret" || lowerKey == "token" || strings.Contains(lowerKey, "password") || strings.Contains(lowerKey, "secret") || strings.Contains(lowerKey, "token") {
+			out[key] = "***"
+			continue
+		}
+		out[key] = value
+	}
+	return out
 }
 
 func (d *Dispatcher) collectDynamicTask(ctx context.Context, collector protocol.Collector, task model.MetricsTask, redisCache *redisCycleCache, jdbcCache *jdbcCycleCache, valueStore *cycleValueStore) (map[string]string, string, error) {

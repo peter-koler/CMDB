@@ -38,6 +38,7 @@ func main() {
 	pool := worker.New(cfg.Worker.Size, cfg.Worker.QueueSize)
 	wheel := scheduler.NewWheel(cfg.TickDuration(), cfg.Scheduler.WheelSize)
 	d := dispatcher.New(wheel, pool, resultQueue)
+	dispatcher.SetLogLevel(cfg.Logging.Level)
 	rules := make([]precompute.Rule, 0, len(cfg.Precompute.Rules))
 	for _, r := range cfg.Precompute.Rules {
 		rules = append(rules, precompute.Rule{

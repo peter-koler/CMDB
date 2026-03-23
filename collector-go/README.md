@@ -104,6 +104,10 @@ Manager(gRPC Stream)
 - `worker.size/queue_size`: 协程池参数
 - `queue.backend`: `memory` 或 `kafka`
 - `stream.heartbeat_ms`: 心跳周期
+- `logging.level`: 日志级别（`info` / `debug`）
+
+说明：
+- Collector 的调试日志级别已改为只读取配置文件 `logging.level`，不再依赖系统环境变量。
 
 启动：
 

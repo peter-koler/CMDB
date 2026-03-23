@@ -10,4 +10,15 @@ os.environ.setdefault("no_proxy", "127.0.0.1,localhost")
 app = create_app('development')
 
 if __name__ == '__main__':
-    app_module.socketio.run(app, host='0.0.0.0', port=5000, debug=True)
+    kwargs = {
+        "host": "0.0.0.0",
+        "port": 5000,
+        "debug": True,
+    }
+    try:
+        app_module.socketio.run(app, allow_unsafe_werkzeug=True, **kwargs)
+    except TypeError as exc:
+        # Compatibility path for Flask/Werkzeug stacks that do not accept this kwarg.
+        if "allow_unsafe_werkzeug" not in str(exc):
+            raise
+        app_module.socketio.run(app, **kwargs)

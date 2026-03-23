@@ -43,5 +43,8 @@
   "precompute": {
     "enabled": false,
     "rules": []
+  },
+  "logging": {
+    "level": "info"
   }
 }

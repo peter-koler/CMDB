@@ -13,6 +13,7 @@ from app.routes.custom_view import custom_view_bp
 from app.routes.template import template_bp
 from app.routes.monitoring_target import monitoring_target_bp
 from app.routes.monitoring_alert_admin import monitoring_alert_admin_bp
+from app.routes.license import license_bp
 
 
 def register_routes(app):
@@ -31,3 +32,4 @@ def register_routes(app):
     app.register_blueprint(template_bp)
     app.register_blueprint(monitoring_target_bp)
     app.register_blueprint(monitoring_alert_admin_bp)
+    app.register_blueprint(license_bp)
