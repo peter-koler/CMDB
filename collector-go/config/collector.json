@@ -45,6 +45,6 @@
     "rules": []
   },
   "logging": {
-    "level": "info"
+    "level": "DEBUG"
   }
 }

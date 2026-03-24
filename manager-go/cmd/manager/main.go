@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"gopkg.in/yaml.v3"
 	"manager-go/internal/alert"
 	"manager-go/internal/collector"
 	"manager-go/internal/dbutil"
@@ -31,7 +32,6 @@ import (
 	"manager-go/internal/scheduler"
 	"manager-go/internal/store"
 	templ "manager-go/internal/template"
-	"gopkg.in/yaml.v3"
 )
 
 type runtimeConfig struct {
@@ -607,6 +607,116 @@ func main() {
 		stringSnapshotMu sync.RWMutex
 		stringSnapshot   = map[int64]map[string]latestStringMetric{}
 	)
+	isRowToken := func(raw string) bool {
+		v := strings.TrimSpace(strings.ToLower(raw))
+		if len(v) <= 3 || !strings.HasPrefix(v, "row") {
+			return false
+		}
+		for i := 3; i < len(v); i++ {
+			if v[i] < '0' || v[i] > '9' {
+				return false
+			}
+		}
+		return true
+	}
+	buildStringSnapshotKeys := func(metricName string, rawField string) []string {
+		metricToken := normalizeAlertToken(metricName)
+		fieldRaw := strings.TrimSpace(rawField)
+		fieldToken := normalizeAlertToken(rawField)
+		keys := make([]string, 0, 4)
+		seen := map[string]struct{}{}
+		push := func(v string) {
+			key := strings.TrimSpace(v)
+			if key == "" {
+				return
+			}
+			if _, ok := seen[key]; ok {
+				return
+			}
+			seen[key] = struct{}{}
+			keys = append(keys, key)
+		}
+		push(fieldRaw)
+		push(strings.ToLower(fieldRaw))
+		push(fieldToken)
+		if metricToken != "" && fieldToken != "" {
+			push(metricToken + "_" + fieldToken)
+		}
+		return keys
+	}
+	putStringSnapshotValue := func(cur map[string]latestStringMetric, key string, value string, timestamp int64) {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			return
+		}
+		if prev, ok := cur[key]; ok {
+			if strings.TrimSpace(value) == "" && strings.TrimSpace(prev.Value) != "" {
+				return
+			}
+		}
+		cur[key] = latestStringMetric{
+			Value:     strings.TrimSpace(value),
+			Timestamp: timestamp,
+		}
+	}
+	findStringSnapshotValue := func(cur map[string]latestStringMetric, rawName string) (latestStringMetric, bool) {
+		name := strings.TrimSpace(rawName)
+		if name == "" || len(cur) == 0 {
+			return latestStringMetric{}, false
+		}
+		candidates := make([]string, 0, 6)
+		seen := map[string]struct{}{}
+		push := func(v string) {
+			key := strings.TrimSpace(v)
+			if key == "" {
+				return
+			}
+			if _, ok := seen[key]; ok {
+				return
+			}
+			seen[key] = struct{}{}
+			candidates = append(candidates, key)
+		}
+		push(name)
+		push(strings.ToLower(name))
+		normName := normalizeAlertToken(name)
+		push(normName)
+		if normName != "" {
+			parts := strings.Split(normName, "_")
+			if len(parts) >= 2 {
+				last := parts[len(parts)-1]
+				prev := parts[len(parts)-2]
+				if isRowToken(prev) {
+					push(prev + "_" + last)
+				}
+				push(last)
+			}
+		}
+
+		best := latestStringMetric{}
+		hasBest := false
+		for _, key := range candidates {
+			item, ok := cur[key]
+			if !ok {
+				continue
+			}
+			if !hasBest {
+				best = item
+				hasBest = true
+				continue
+			}
+			bestEmpty := strings.TrimSpace(best.Value) == ""
+			itemEmpty := strings.TrimSpace(item.Value) == ""
+			if bestEmpty && !itemEmpty {
+				best = item
+				continue
+			}
+			if best.Timestamp < item.Timestamp {
+				best = item
+			}
+		}
+		return best, hasBest
+	}
 	updateMetricSnapshot := func(point model.MetricPoint) map[string]float64 {
 		base := pointVars(point)
 		// direct aliases for expression convenience, e.g. used_memory > 0
@@ -663,14 +773,14 @@ func main() {
 		if cur == nil {
 			cur = map[string]latestStringMetric{}
 		}
+		metricName := strings.TrimSpace(rep.GetMetrics())
 		for rawKey, rawValue := range fields {
 			key := strings.TrimSpace(rawKey)
 			if key == "" || key == "identity" || key == "section" {
 				continue
 			}
-			cur[key] = latestStringMetric{
-				Value:     strings.TrimSpace(rawValue),
-				Timestamp: timestamp,
+			for _, one := range buildStringSnapshotKeys(metricName, key) {
+				putStringSnapshotValue(cur, one, rawValue, timestamp)
 			}
 		}
 		stringSnapshot[rep.GetMonitorId()] = cur
@@ -693,7 +803,7 @@ func main() {
 			if name == "" {
 				continue
 			}
-			if item, ok := cur[name]; ok {
+			if item, ok := findStringSnapshotValue(cur, name); ok {
 				out[name] = httpapi.StringLatestValue{
 					Value:     item.Value,
 					Timestamp: item.Timestamp,
@@ -702,7 +812,7 @@ func main() {
 			}
 			if strings.HasSuffix(name, "_ok") {
 				base := strings.TrimSuffix(name, "_ok")
-				item, ok := cur[base]
+				item, ok := findStringSnapshotValue(cur, base)
 				if !ok {
 					continue
 				}

@@ -11,19 +11,20 @@
       <a-tab-pane v-for="group in groups" :key="group.key" :tab="group.title">
         <a-space direction="vertical" style="width: 100%" :size="12">
           <a-space wrap>
-            <a-button type="primary" @click="openAddModal">添加</a-button>
-            <a-button danger :disabled="!currentSelectedRowKeys.length" @click="removeSelectedMetrics">删除</a-button>
+            <a-button v-if="!currentIsRowMode" type="primary" @click="openAddModal">添加</a-button>
+            <a-button v-if="!currentIsRowMode" danger :disabled="!currentSelectedRowKeys.length" @click="removeSelectedMetrics">删除</a-button>
             <a-button :loading="refreshing" @click="refreshCurrentGroup">刷新</a-button>
             <a-input-search
               v-model:value="currentSearchKeyword"
               allow-clear
-              placeholder="按中文名/指标名搜索"
+              :placeholder="currentIsRowMode ? '按任意列搜索' : '按中文名/指标名搜索'"
               style="width: 260px"
             />
             <span class="sub-text">最后刷新：{{ lastRefreshByGroup[group.key] || '-' }}</span>
           </a-space>
 
           <a-table
+            v-if="!currentIsRowMode"
             size="small"
             :pagination="currentPaginationConfig"
             :loading="refreshing"
@@ -59,6 +60,44 @@
             <a-table-column title="操作" key="actions" width="140">
               <template #default="{ record }">
                 <a-button type="link" size="small" @click="openTrend(record)">查看趋势明细</a-button>
+              </template>
+            </a-table-column>
+          </a-table>
+
+          <a-table
+            v-else
+            size="small"
+            :pagination="currentPaginationConfig"
+            :loading="refreshing"
+            :data-source="pagedRowRows"
+            row-key="__row_key__"
+            @change="handleTableChange"
+          >
+            <a-table-column title="序号" key="__row_index__" width="80">
+              <template #default="{ record }">{{ record.__row_index__ }}</template>
+            </a-table-column>
+            <a-table-column
+              v-for="field in currentVisibleFields"
+              :key="field.field"
+              :title="field.title"
+              :data-index="field.field"
+            >
+              <template #default="{ record }">{{ record[field.field] ?? '-' }}</template>
+            </a-table-column>
+            <a-table-column title="操作" key="actions" width="320">
+              <template #default="{ record }">
+                <a-space :size="[4, 0]" wrap>
+                  <a-button
+                    v-for="field in rowTrendFields"
+                    :key="`${record.__row_key__}-${field.field}`"
+                    type="link"
+                    size="small"
+                    :disabled="!canOpenRowTrend(record, field)"
+                    @click="openRowTrend(record, field)"
+                  >
+                    查看{{ field.title }}趋势
+                  </a-button>
+                </a-space>
               </template>
             </a-table-column>
           </a-table>
@@ -135,6 +174,13 @@ interface MetricTableRow {
   status: RowStatus
 }
 
+interface MetricGroupRow {
+  __row_key__: string
+  __row_index__: number
+  __metric_name_by_field__?: Record<string, string>
+  [field: string]: string | number | Record<string, string> | undefined
+}
+
 const props = defineProps<{
   monitorId: number
   app: string
@@ -150,6 +196,8 @@ const activeGroupKey = ref('')
 const seriesNames = ref<string[]>([])
 const refreshing = ref(false)
 const rowsByGroup = ref<Record<string, MetricTableRow[]>>({})
+const rowRowsByGroup = ref<Record<string, MetricGroupRow[]>>({})
+const rowModeByGroup = ref<Record<string, boolean>>({})
 const visibleFieldKeysByGroup = ref<Record<string, string[]>>({})
 const selectedRowKeysByGroup = ref<Record<string, string[]>>({})
 const searchKeywordByGroup = ref<Record<string, string>>({})
@@ -170,7 +218,37 @@ const trendMetricTitle = ref('')
 const trendMetricType = ref<MetricFieldType>('number')
 
 const currentGroup = computed(() => groups.value.find((group) => group.key === activeGroupKey.value) || null)
+const currentIsRowMode = computed(() => !!rowModeByGroup.value[activeGroupKey.value])
+const osApps = new Set([
+  'linux',
+  'windows',
+  'ubuntu',
+  'debian',
+  'centos',
+  'almalinux',
+  'opensuse',
+  'freebsd',
+  'redhat',
+  'rockylinux',
+  'euleros',
+  'fedora',
+  'darwin',
+  'macos'
+])
+const isOsApp = computed(() => osApps.has(normalizeMetricToken(props.app || '')))
 const currentRows = computed(() => rowsByGroup.value[activeGroupKey.value] || [])
+const currentRowRows = computed(() => rowRowsByGroup.value[activeGroupKey.value] || [])
+const currentVisibleFields = computed<TemplateMetricField[]>(() => {
+  const group = currentGroup.value
+  if (!group) return []
+  const visible = new Set(visibleFieldKeysByGroup.value[group.key] || [])
+  return group.fields.filter((field) => visible.has(field.field))
+})
+const rowTrendFields = computed<TemplateMetricField[]>(() => {
+  if (!currentIsRowMode.value) return []
+  if (!isOsApp.value) return currentVisibleFields.value
+  return currentVisibleFields.value.filter((field) => field.type === 'number')
+})
 const currentSearchKeyword = computed({
   get: () => searchKeywordByGroup.value[activeGroupKey.value] || '',
   set: (value: string) => {
@@ -196,6 +274,17 @@ const filteredRows = computed(() => {
     return title.includes(keyword) || field.includes(keyword)
   })
 })
+const filteredRowRows = computed(() => {
+  const keyword = String(currentSearchKeyword.value || '').trim().toLowerCase()
+  if (!keyword) return currentRowRows.value
+  return currentRowRows.value.filter((row) => {
+    for (const field of currentVisibleFields.value) {
+      const val = String(row[field.field] ?? '').toLowerCase()
+      if (val.includes(keyword)) return true
+    }
+    return String(row.__row_index__).includes(keyword)
+  })
+})
 const currentSelectedRowKeys = computed(() => selectedRowKeysByGroup.value[activeGroupKey.value] || [])
 const currentPagination = computed(() => paginationByGroup.value[activeGroupKey.value] || { current: 1, pageSize: DEFAULT_PAGE_SIZE })
 const pagedRows = computed(() => {
@@ -203,10 +292,15 @@ const pagedRows = computed(() => {
   const start = (current - 1) * pageSize
   return filteredRows.value.slice(start, start + pageSize)
 })
+const pagedRowRows = computed(() => {
+  const { current, pageSize } = currentPagination.value
+  const start = (current - 1) * pageSize
+  return filteredRowRows.value.slice(start, start + pageSize)
+})
 const currentPaginationConfig = computed(() => ({
   current: currentPagination.value.current,
   pageSize: currentPagination.value.pageSize,
-  total: filteredRows.value.length,
+  total: currentIsRowMode.value ? filteredRowRows.value.length : filteredRows.value.length,
   showSizeChanger: true,
   pageSizeOptions: PAGE_SIZE_OPTIONS,
   showTotal: (total: number) => `共 ${total} 条`
@@ -241,15 +335,50 @@ function statusColor(status: RowStatus) {
   return 'default'
 }
 
-function formatLatestValueText(fieldType: MetricFieldType, metricName: string, latest?: MetricLatestPoint): string {
+function isOsPercentUsageField(groupKey: string, fieldKey: string): boolean {
+  if (!isOsApp.value) return false
+  const group = normalizeMetricToken(groupKey)
+  const field = normalizeMetricToken(fieldKey)
+  if (field !== 'usage') return false
+  return group === 'memory' || group === 'disk_free'
+}
+
+function formatPercentTwo(raw: unknown): string {
+  const num = parseNumericCellValue(raw)
+  if (num === undefined) return '-'
+  return `${num.toFixed(2)}%`
+}
+
+function formatLatestValueText(
+  _fieldType: MetricFieldType,
+  metricName: string,
+  latest?: MetricLatestPoint,
+  groupKey = '',
+  fieldKey = ''
+): string {
   if (!latest) return '-'
-  if (latest.text && String(latest.text).trim()) return String(latest.text).trim()
-  if (latest.value === undefined || !Number.isFinite(latest.value)) return '-'
   const key = String(metricName || '').trim().toLowerCase()
-  if (fieldType === 'string' || key.endsWith('_ok') || key.endsWith('_up')) {
-    return latest.value >= 0.5 ? 'OK' : 'FAIL'
+  const text = String(latest.text || '').trim()
+  const forcePercent = isOsPercentUsageField(groupKey, fieldKey)
+  if (key.endsWith('_ok') || key.endsWith('_up')) {
+    if (latest.value !== undefined && Number.isFinite(latest.value)) {
+      return latest.value >= 0.5 ? 'OK' : 'FAIL'
+    }
+    if (text) return text
+    return '-'
   }
-  return formatMetricValue(latest.value)
+  if (text) {
+    if (forcePercent) {
+      const percentText = formatPercentTwo(text)
+      return percentText === '-' ? text : percentText
+    }
+    return text
+  }
+  if (latest.value !== undefined && Number.isFinite(latest.value)) {
+    if (forcePercent) return `${latest.value.toFixed(2)}%`
+    return formatMetricValue(latest.value)
+  }
+  return '-'
 }
 
 function normalizeList(payload: any): { items: any[]; total: number } {
@@ -287,6 +416,8 @@ function initVisibleFields() {
   searchKeywordByGroup.value = nextSearchKeyword
   paginationByGroup.value = nextPagination
   rowsByGroup.value = {}
+  rowRowsByGroup.value = {}
+  rowModeByGroup.value = {}
   lastRefreshByGroup.value = {}
 }
 
@@ -367,6 +498,141 @@ function isAlertingMetric(group: TemplateMetricGroup, field: TemplateMetricField
   return false
 }
 
+function escapeRegex(raw: string): string {
+  return String(raw || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function detectRowIndices(group: TemplateMetricGroup, visibleFields: TemplateMetricField[]): number[] {
+  const out = new Set<number>()
+  if (!visibleFields.length || !seriesNames.value.length) return []
+  const groupNorm = normalizeMetricToken(group.key)
+  const fieldSet = new Set(visibleFields.map((field) => normalizeMetricToken(field.field)))
+  const withGroup = new RegExp(`^${escapeRegex(groupNorm)}_row(\\d+)_([a-z0-9_]+)$`)
+  const plain = /^row(\d+)_([a-z0-9_]+)$/
+  for (const rawName of seriesNames.value) {
+    const name = String(rawName || '').trim().toLowerCase()
+    if (!name) continue
+    let matched = withGroup.exec(name)
+    if (!matched) matched = plain.exec(name)
+    if (!matched) continue
+    const idx = Number(matched[1])
+    const field = String(matched[2] || '').trim()
+    if (!Number.isFinite(idx) || idx <= 0) continue
+    if (!fieldSet.has(field)) continue
+    out.add(idx)
+  }
+  return Array.from(out).sort((a, b) => a - b)
+}
+
+function buildRowMetricNameCandidates(
+  group: TemplateMetricGroup,
+  field: TemplateMetricField,
+  baseMetricName: string,
+  rowIndex: number
+): string[] {
+  const out: string[] = []
+  const push = (value: string) => {
+    const key = String(value || '').trim()
+    if (!key || out.includes(key)) return
+    out.push(key)
+  }
+
+  const groupRaw = String(group.key || '').trim()
+  const groupNorm = normalizeMetricToken(group.key)
+  const fieldRaw = String(field.field || '').trim()
+  const fieldNorm = normalizeMetricToken(field.field)
+  const rowRaw = `row${rowIndex}_${fieldRaw}`
+  const rowNorm = `row${rowIndex}_${fieldNorm}`
+  const groupRowRaw = `${groupRaw}_row${rowIndex}_${fieldRaw}`
+  const groupRowNorm = `${groupNorm}_row${rowIndex}_${fieldNorm}`
+
+  if (field.type === 'string') {
+    push(groupRowRaw)
+    push(groupRowNorm)
+    push(rowRaw)
+    push(rowNorm)
+  } else {
+    push(groupRowRaw)
+    push(groupRowNorm)
+    push(rowRaw)
+    push(rowNorm)
+  }
+
+  const base = String(baseMetricName || '').trim()
+  if (base) {
+    if (fieldRaw) {
+      if (base.endsWith(`_${fieldRaw}_ok`)) {
+        push(base.replace(`_${fieldRaw}_ok`, `_row${rowIndex}_${fieldRaw}_ok`))
+        push(`row${rowIndex}_${fieldRaw}_ok`)
+      }
+      if (base.endsWith(`_${fieldRaw}`)) {
+        push(base.replace(`_${fieldRaw}`, `_row${rowIndex}_${fieldRaw}`))
+      }
+    }
+    if (fieldNorm && fieldNorm !== fieldRaw) {
+      if (base.endsWith(`_${fieldNorm}_ok`)) {
+        push(base.replace(`_${fieldNorm}_ok`, `_row${rowIndex}_${fieldNorm}_ok`))
+        push(`row${rowIndex}_${fieldNorm}_ok`)
+      }
+      if (base.endsWith(`_${fieldNorm}`)) {
+        push(base.replace(`_${fieldNorm}`, `_row${rowIndex}_${fieldNorm}`))
+      }
+    }
+    if (groupRaw && fieldRaw) {
+      push(`${groupRaw}_row${rowIndex}_${fieldRaw}`)
+    }
+    if (groupNorm && fieldNorm) {
+      push(`${groupNorm}_row${rowIndex}_${fieldNorm}`)
+    }
+  }
+
+  return out
+}
+
+function resolveRowMetricName(
+  candidates: string[],
+  seriesNameSet: Set<string>,
+  seriesNameMapLower: Map<string, string>
+): string {
+  for (const candidate of candidates) {
+    if (seriesNameSet.has(candidate)) return candidate
+    const matched = seriesNameMapLower.get(String(candidate || '').toLowerCase())
+    if (matched) return matched
+  }
+  return candidates[0] || ''
+}
+
+function parseNumericCellValue(raw: unknown): number | undefined {
+  const text = String(raw ?? '').trim()
+  if (!text || text === '-') return undefined
+  const normalized = text.replace(/,/g, '').replace(/%/g, '').trim()
+  if (!normalized) return undefined
+  const value = Number(normalized)
+  if (!Number.isFinite(value)) return undefined
+  return value
+}
+
+function applyOsComputedRowFields(group: TemplateMetricGroup, row: MetricGroupRow) {
+  if (!isOsApp.value) return
+  const groupKey = normalizeMetricToken(group.key)
+  if (groupKey !== 'disk_free') return
+  const usageText = String(row.usage ?? '').trim()
+  if (usageText && usageText !== '-') return
+
+  const used = parseNumericCellValue(row.used)
+  const available = parseNumericCellValue(row.available ?? row.free)
+  const total = parseNumericCellValue(row.size ?? row.total)
+
+  let usage: number | undefined
+  if (used !== undefined && available !== undefined && used + available > 0) {
+    usage = (used / (used + available)) * 100
+  } else if (used !== undefined && total !== undefined && total > 0) {
+    usage = (used / total) * 100
+  }
+  if (usage === undefined) return
+  row.usage = formatPercentTwo(usage)
+}
+
 async function refreshActiveAlertMetrics() {
   if (!props.monitorId) {
     activeAlertMetricSet.value = new Set()
@@ -409,7 +675,7 @@ function mapRows(group: TemplateMetricGroup, latestMap: Record<string, MetricLat
       type: field.type,
       metricName,
       latest,
-      latestValueText: formatLatestValueText(field.type, metricName, latest),
+      latestValueText: formatLatestValueText(field.type, metricName, latest, group.key, field.field),
       latestTimeText: latest?.timestamp ? dayjs(latest.timestamp).format('YYYY-MM-DD HH:mm:ss') : '-',
       status
     })
@@ -429,11 +695,88 @@ async function refreshGroup(groupKey: string) {
     }
 
     const visibleSet = new Set(visibleFieldKeysByGroup.value[group.key] || [])
+    const visibleFields = group.fields.filter((field) => visibleSet.has(field.field))
+    const baseMetricByField: Record<string, string> = {}
     const metricNames: string[] = []
-    for (const field of group.fields) {
-      if (!visibleSet.has(field.field)) continue
+    for (const field of visibleFields) {
       const metricName = resolveMetricName(props.app || '', group.key, field.field, field.type, seriesNames.value)
+      baseMetricByField[field.field] = metricName
       if (metricName) metricNames.push(metricName)
+    }
+
+    const rowIndices = detectRowIndices(group, visibleFields)
+    const seriesNamesClean = seriesNames.value.map((item) => String(item || '').trim()).filter(Boolean)
+    const seriesNameSet = new Set(seriesNamesClean)
+    const seriesNameMapLower = new Map<string, string>()
+    for (const name of seriesNamesClean) {
+      const lower = name.toLowerCase()
+      if (!seriesNameMapLower.has(lower)) {
+        seriesNameMapLower.set(lower, name)
+      }
+    }
+    if (rowIndices.length) {
+      const rowMetricNameByKey: Record<string, string> = {}
+      for (const rowIndex of rowIndices) {
+        for (const field of visibleFields) {
+          const rowMetricName = resolveRowMetricName(
+            buildRowMetricNameCandidates(group, field, baseMetricByField[field.field], rowIndex),
+            seriesNameSet,
+            seriesNameMapLower
+          )
+          if (!rowMetricName) continue
+          rowMetricNameByKey[`${rowIndex}:${field.field}`] = rowMetricName
+          metricNames.push(rowMetricName)
+        }
+      }
+      const latestMap = metricNames.length
+        ? await fetchLatestByNames(props.monitorId, metricNames, props.intervalSeconds)
+        : {}
+      const nextRows: MetricGroupRow[] = []
+      for (const rowIndex of rowIndices) {
+        const row: MetricGroupRow = {
+          __row_key__: `row-${rowIndex}`,
+          __row_index__: rowIndex,
+          __metric_name_by_field__: {}
+        }
+        let hasAny = false
+        for (const field of visibleFields) {
+          const key = `${rowIndex}:${field.field}`
+          const rowMetricName = rowMetricNameByKey[key]
+          const latest = rowMetricName ? latestMap[rowMetricName] : undefined
+          const fallbackName = rowIndex === 1 ? baseMetricByField[field.field] : ''
+          const fallback = fallbackName ? latestMap[fallbackName] : undefined
+          const metricNameForCell = rowMetricName || (latest ? '' : fallbackName)
+          const text = formatLatestValueText(field.type, metricNameForCell, latest || fallback, group.key, field.field)
+          if (metricNameForCell && row.__metric_name_by_field__) {
+            row.__metric_name_by_field__[field.field] = metricNameForCell
+          }
+          row[field.field] = text
+          if (text !== '-') hasAny = true
+        }
+        applyOsComputedRowFields(group, row)
+        if (String(row.usage ?? '').trim() && String(row.usage ?? '').trim() !== '-') {
+          hasAny = true
+        }
+        if (hasAny) nextRows.push(row)
+      }
+      await refreshActiveAlertMetrics()
+      rowRowsByGroup.value = {
+        ...rowRowsByGroup.value,
+        [group.key]: nextRows
+      }
+      rowModeByGroup.value = {
+        ...rowModeByGroup.value,
+        [group.key]: true
+      }
+      rowsByGroup.value = {
+        ...rowsByGroup.value,
+        [group.key]: []
+      }
+      lastRefreshByGroup.value = {
+        ...lastRefreshByGroup.value,
+        [group.key]: dayjs().format('YYYY-MM-DD HH:mm:ss')
+      }
+      return
     }
 
     const latestMap = metricNames.length
@@ -441,6 +784,14 @@ async function refreshGroup(groupKey: string) {
       : {}
     await refreshActiveAlertMetrics()
 
+    rowRowsByGroup.value = {
+      ...rowRowsByGroup.value,
+      [group.key]: []
+    }
+    rowModeByGroup.value = {
+      ...rowModeByGroup.value,
+      [group.key]: false
+    }
     rowsByGroup.value = {
       ...rowsByGroup.value,
       [group.key]: mapRows(group, latestMap)
@@ -450,6 +801,14 @@ async function refreshGroup(groupKey: string) {
       [group.key]: dayjs().format('YYYY-MM-DD HH:mm:ss')
     }
   } catch {
+    rowRowsByGroup.value = {
+      ...rowRowsByGroup.value,
+      [group.key]: []
+    }
+    rowModeByGroup.value = {
+      ...rowModeByGroup.value,
+      [group.key]: false
+    }
     rowsByGroup.value = {
       ...rowsByGroup.value,
       [group.key]: mapRows(group, {})
@@ -536,6 +895,37 @@ function openTrend(row: MetricTableRow) {
   trendOpen.value = true
 }
 
+function resolveRowMetricNameFromRecord(record: MetricGroupRow, fieldKey: string): string {
+  const map = record.__metric_name_by_field__
+  if (!map || typeof map !== 'object') return ''
+  return String(map[fieldKey] || '').trim()
+}
+
+function canOpenRowTrend(record: MetricGroupRow, field: TemplateMetricField): boolean {
+  const metricName = resolveRowMetricNameFromRecord(record, field.field)
+  return !!metricName
+}
+
+function openRowTrend(record: MetricGroupRow, field: TemplateMetricField) {
+  if (isOsApp.value && field.type !== 'number') {
+    message.warning('操作系统行模式仅支持数值指标趋势')
+    return
+  }
+  const metricName = resolveRowMetricNameFromRecord(record, field.field)
+  if (!metricName) {
+    message.warning('当前指标暂无可用时序数据')
+    return
+  }
+  const group = currentGroup.value
+  const rowIndex = Number(record.__row_index__) || 0
+  trendMetricName.value = metricName
+  trendMetricTitle.value = group
+    ? `${group.title}-${field.title}(序号${rowIndex})`
+    : `${field.title}(序号${rowIndex})`
+  trendMetricType.value = field.type
+  trendOpen.value = true
+}
+
 async function initialize() {
   ensureActiveGroup()
   initVisibleFields()
@@ -555,13 +945,14 @@ watch(
 )
 
 watch(
-  () => [activeGroupKey.value, filteredRows.value.length],
+  () => [activeGroupKey.value, filteredRows.value.length, filteredRowRows.value.length, currentIsRowMode.value],
   () => {
     const key = activeGroupKey.value
     if (!key) return
     const pag = paginationByGroup.value[key]
     if (!pag) return
-    const maxPage = Math.max(1, Math.ceil(filteredRows.value.length / pag.pageSize))
+    const total = currentIsRowMode.value ? filteredRowRows.value.length : filteredRows.value.length
+    const maxPage = Math.max(1, Math.ceil(total / pag.pageSize))
     if (pag.current > maxPage) {
       paginationByGroup.value = {
         ...paginationByGroup.value,
