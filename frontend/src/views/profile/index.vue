@@ -1,8 +1,8 @@
 <template>
-  <div class="profile-page">
+  <div class="app-page profile-page">
     <a-row :gutter="[24, 24]">
       <a-col :xs="24" :sm="24" :lg="8">
-        <a-card class="profile-card" :bordered="false">
+        <a-card class="profile-card app-surface-card" :bordered="false">
           <div class="avatar-section">
             <div class="avatar-wrapper" @click="triggerAvatarUpload">
               <a-avatar :size="100" class="user-avatar">
@@ -48,7 +48,7 @@
         </a-card>
       </a-col>
       <a-col :xs="24" :sm="24" :lg="16">
-        <a-card :bordered="false" class="form-section">
+        <a-card :bordered="false" class="form-section app-surface-card">
           <a-tabs v-model:activeKey="activeTab">
             <a-tab-pane key="info" :tab="t('profile.basicInfo')">
               <a-form
@@ -307,10 +307,12 @@ onMounted(() => {
 }
 
 .profile-card {
-  background: linear-gradient(180deg, #f0f5ff 0%, #ffffff 100%);
-  border-radius: 12px;
+  background:
+    radial-gradient(circle at top center, color-mix(in srgb, var(--arco-primary) 10%, transparent), transparent 38%),
+    var(--arco-surface);
+  border-radius: var(--arco-radius-md);
   overflow: hidden;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  box-shadow: none;
 }
 
 .avatar-section {
@@ -330,9 +332,9 @@ onMounted(() => {
 }
 
 .user-avatar {
-  background: linear-gradient(135deg, #1890ff 0%, #36cfc9 100%);
-  box-shadow: 0 4px 12px rgba(24, 144, 255, 0.35);
-  border: 3px solid #fff;
+  background: linear-gradient(135deg, var(--arco-primary) 0%, var(--arco-primary-gradient-end) 100%);
+  box-shadow: none;
+  border: 3px solid var(--arco-surface);
 }
 
 .avatar-img {
@@ -355,7 +357,8 @@ onMounted(() => {
   width: 100px;
   height: 100px;
   border-radius: 50%;
-  background: rgba(0, 0, 0, 0.55);
+  background: color-mix(in srgb, var(--arco-text) 42%, transparent);
+  backdrop-filter: blur(2px);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -375,7 +378,7 @@ onMounted(() => {
   margin: 0 0 12px;
   font-size: 20px;
   font-weight: 600;
-  color: #1f1f1f;
+  color: var(--arco-text);
 }
 
 .user-meta {
@@ -389,12 +392,12 @@ onMounted(() => {
 }
 
 .department-info {
-  color: #666;
+  color: var(--arco-text-secondary);
   font-size: 14px;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  background: #f5f5f5;
+  background: var(--arco-fill);
   padding: 4px 12px;
   border-radius: 16px;
 }
@@ -412,7 +415,7 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
   padding: 12px 0;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--arco-border);
 }
 
 .stat-item:last-child {
@@ -420,19 +423,19 @@ onMounted(() => {
 }
 
 .stat-label {
-  color: #8c8c8c;
+  color: var(--arco-text-tertiary);
   font-size: 13px;
 }
 
 .stat-value {
-  color: #1f1f1f;
+  color: var(--arco-text);
   font-size: 14px;
   font-weight: 500;
 }
 
 .form-section {
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  border-radius: var(--arco-radius-md);
+  box-shadow: none;
   min-height: 400px;
 }
 
@@ -443,7 +446,7 @@ onMounted(() => {
 .form-section :deep(.ant-tabs-nav) {
   padding: 0 24px;
   margin-bottom: 0;
-  background: #fafafa;
+  background: var(--arco-surface-muted);
 }
 
 .form-section :deep(.ant-tabs-tab) {
@@ -455,14 +458,14 @@ onMounted(() => {
 }
 
 .input-icon {
-  color: #bfbfbf;
+  color: var(--arco-text-tertiary);
 }
 
 .form-actions {
   margin-top: 24px;
   margin-bottom: 0;
   padding-top: 16px;
-  border-top: 1px solid #f0f0f0;
+  border-top: 1px solid var(--arco-border);
 }
 
 @media (max-width: 768px) {

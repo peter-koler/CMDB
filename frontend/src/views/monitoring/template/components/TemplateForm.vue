@@ -380,7 +380,8 @@ const handleCancel = () => {
   .param-item {
     margin-bottom: 8px;
     padding: 8px;
-    background: #f5f5f5;
+    background: var(--app-surface-subtle);
+    border: 1px solid var(--app-border);
     border-radius: 4px;
   }
 

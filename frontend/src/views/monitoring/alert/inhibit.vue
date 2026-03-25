@@ -1,6 +1,7 @@
 <template>
-  <a-card :bordered="false">
-    <a-space direction="vertical" style="width: 100%" :size="16">
+  <div class="app-page">
+    <a-card :bordered="false" class="app-surface-card">
+      <a-space direction="vertical" style="width: 100%" :size="16">
       <!-- 说明卡片 -->
       <a-alert type="info" show-icon>
         <template #message>告警抑制说明</template>
@@ -61,81 +62,82 @@
           </template>
         </template>
       </a-table>
-    </a-space>
+      </a-space>
 
-    <a-modal v-model:open="modalOpen" :title="editing?.id ? '编辑告警抑制' : '新增告警抑制'" :confirm-loading="saving" width="750px" @ok="saveItem">
-      <a-form layout="vertical" :model="formState">
-        <a-form-item label="名称" required>
-          <a-input v-model:value="formState.name" placeholder="如：disk-full-inhibit-usage" />
-        </a-form-item>
+      <a-modal v-model:open="modalOpen" :title="editing?.id ? '编辑告警抑制' : '新增告警抑制'" :confirm-loading="saving" width="750px" @ok="saveItem">
+        <a-form layout="vertical" :model="formState">
+          <a-form-item label="名称" required>
+            <a-input v-model:value="formState.name" placeholder="如：disk-full-inhibit-usage" />
+          </a-form-item>
 
-        <a-divider orientation="left">源告警匹配条件</a-divider>
-        <a-alert type="info" show-icon style="margin-bottom: 16px;">
-          <template #message>源告警</template>
-          <template #description>当此告警存在时，会抑制目标告警</template>
-        </a-alert>
-        <a-form-item label="源告警标签">
-          <div v-for="(item, index) in formState.sourceLabels" :key="index" style="margin-bottom: 8px;">
-            <a-row :gutter="8">
-              <a-col :span="10">
-                <a-input v-model:value="item.key" placeholder="标签键，如 severity" />
-              </a-col>
-              <a-col :span="10">
-                <a-input v-model:value="item.value" placeholder="标签值，如 critical" />
-              </a-col>
-              <a-col :span="4">
-                <a-button type="link" danger @click="removeSourceLabel(index)">删除</a-button>
-              </a-col>
-            </a-row>
-          </div>
-          <a-button type="dashed" block @click="addSourceLabel">
-            <plus-outlined /> 添加源告警标签
-          </a-button>
-        </a-form-item>
+          <a-divider orientation="left">源告警匹配条件</a-divider>
+          <a-alert type="info" show-icon style="margin-bottom: 16px;">
+            <template #message>源告警</template>
+            <template #description>当此告警存在时，会抑制目标告警</template>
+          </a-alert>
+          <a-form-item label="源告警标签">
+            <div v-for="(item, index) in formState.sourceLabels" :key="index" style="margin-bottom: 8px;">
+              <a-row :gutter="8">
+                <a-col :span="10">
+                  <a-input v-model:value="item.key" placeholder="标签键，如 severity" />
+                </a-col>
+                <a-col :span="10">
+                  <a-input v-model:value="item.value" placeholder="标签值，如 critical" />
+                </a-col>
+                <a-col :span="4">
+                  <a-button type="link" danger @click="removeSourceLabel(index)">删除</a-button>
+                </a-col>
+              </a-row>
+            </div>
+            <a-button type="dashed" block @click="addSourceLabel">
+              <plus-outlined /> 添加源告警标签
+            </a-button>
+          </a-form-item>
 
-        <a-divider orientation="left">目标告警匹配条件</a-divider>
-        <a-alert type="warning" show-icon style="margin-bottom: 16px;">
-          <template #message>目标告警</template>
-          <template #description>当源告警存在时，此告警将被抑制不发送</template>
-        </a-alert>
-        <a-form-item label="目标告警标签">
-          <div v-for="(item, index) in formState.targetLabels" :key="index" style="margin-bottom: 8px;">
-            <a-row :gutter="8">
-              <a-col :span="10">
-                <a-input v-model:value="item.key" placeholder="标签键，如 alertname" />
-              </a-col>
-              <a-col :span="10">
-                <a-input v-model:value="item.value" placeholder="标签值，如 disk_high_usage" />
-              </a-col>
-              <a-col :span="4">
-                <a-button type="link" danger @click="removeTargetLabel(index)">删除</a-button>
-              </a-col>
-            </a-row>
-          </div>
-          <a-button type="dashed" block @click="addTargetLabel">
-            <plus-outlined /> 添加目标告警标签
-          </a-button>
-        </a-form-item>
+          <a-divider orientation="left">目标告警匹配条件</a-divider>
+          <a-alert type="warning" show-icon style="margin-bottom: 16px;">
+            <template #message>目标告警</template>
+            <template #description>当源告警存在时，此告警将被抑制不发送</template>
+          </a-alert>
+          <a-form-item label="目标告警标签">
+            <div v-for="(item, index) in formState.targetLabels" :key="index" style="margin-bottom: 8px;">
+              <a-row :gutter="8">
+                <a-col :span="10">
+                  <a-input v-model:value="item.key" placeholder="标签键，如 alertname" />
+                </a-col>
+                <a-col :span="10">
+                  <a-input v-model:value="item.value" placeholder="标签值，如 disk_high_usage" />
+                </a-col>
+                <a-col :span="4">
+                  <a-button type="link" danger @click="removeTargetLabel(index)">删除</a-button>
+                </a-col>
+              </a-row>
+            </div>
+            <a-button type="dashed" block @click="addTargetLabel">
+              <plus-outlined /> 添加目标告警标签
+            </a-button>
+          </a-form-item>
 
-        <a-divider orientation="left">相等标签配置</a-divider>
-        <a-form-item label="相等标签 (Equal Labels)">
-          <a-select
-            v-model:value="formState.equal_labels"
-            mode="tags"
-            placeholder="输入标签键，如：instance, cluster"
-            style="width: 100%"
-          />
-          <div style="margin-top: 4px; color: #999; font-size: 12px;">
-            源告警和目标告警的这些标签值必须相同才会触发抑制（如相同的 instance）
-          </div>
-        </a-form-item>
+          <a-divider orientation="left">相等标签配置</a-divider>
+          <a-form-item label="相等标签 (Equal Labels)">
+            <a-select
+              v-model:value="formState.equal_labels"
+              mode="tags"
+              placeholder="输入标签键，如：instance, cluster"
+              style="width: 100%"
+            />
+            <div style="margin-top: 4px; color: var(--app-text-muted); font-size: 12px;">
+              源告警和目标告警的这些标签值必须相同才会触发抑制（如相同的 instance）
+            </div>
+          </a-form-item>
 
-        <a-form-item label="启用">
-          <a-switch v-model:checked="formState.enabled" />
-        </a-form-item>
-      </a-form>
-    </a-modal>
-  </a-card>
+          <a-form-item label="启用">
+            <a-switch v-model:checked="formState.enabled" />
+          </a-form-item>
+        </a-form>
+      </a-modal>
+    </a-card>
+  </div>
 </template>
 
 <script setup lang="ts">

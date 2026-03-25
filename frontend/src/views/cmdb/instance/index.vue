@@ -1,5 +1,5 @@
 <template>
-  <div class="ci-page">
+  <div class="app-page ci-page">
     <a-row :gutter="16" class="full-height">
       <!-- 左侧模型树 -->
       <a-col :xs="24" :sm="8" :md="6" :lg="5" class="tree-col">
@@ -123,7 +123,7 @@
           >
             <template #bodyCell="{ column, record }">
               <template v-if="column.key === 'code'">
-                <a @click="handleView(record)" style="color: #1890ff; cursor: pointer;">{{ record.code }}</a>
+                <a @click="handleView(record)" class="ci-code-link">{{ record.code }}</a>
               </template>
               <template v-else-if="column.key === 'action'">
                 <a-space>
@@ -1244,17 +1244,17 @@ const drop = (_e: DragEvent, col: any) => {
 .ci-name {
   font-size: 16px;
   font-weight: 500;
-  color: #333;
+  color: var(--app-text-primary);
 }
 
 .ci-code {
   font-size: 12px;
-  color: #999;
+  color: var(--app-text-muted);
 }
 
 .ci-card-body {
   font-size: 13px;
-  color: #666;
+  color: var(--app-text-secondary);
 }
 
 .ci-card-body p {
@@ -1262,17 +1262,23 @@ const drop = (_e: DragEvent, col: any) => {
 }
 
 .label {
-  color: #999;
+  color: var(--app-text-muted);
 }
 
 .batch-bar {
   margin-top: 16px;
   padding: 12px 16px;
-  background: #f0f2f5;
+  background: var(--app-surface-subtle);
+  border: 1px solid var(--app-border);
   border-radius: 4px;
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.ci-code-link {
+  color: var(--app-accent);
+  cursor: pointer;
 }
 
 .column-list {
@@ -1285,12 +1291,12 @@ const drop = (_e: DragEvent, col: any) => {
   justify-content: space-between;
   align-items: center;
   padding: 8px;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--app-border);
   cursor: move;
 }
 
 .drag-icon {
-  color: #999;
+  color: var(--app-text-muted);
   cursor: move;
 }
 
@@ -1311,7 +1317,7 @@ const drop = (_e: DragEvent, col: any) => {
 }
 
 .model-count {
-  color: #999;
+  color: var(--app-text-muted);
   font-size: 12px;
 }
 
@@ -1319,7 +1325,7 @@ const drop = (_e: DragEvent, col: any) => {
   display: flex;
   align-items: center;
   gap: 6px;
-  color: #666;
+  color: var(--app-text-secondary);
 }
 
 .category-name {
@@ -1332,7 +1338,7 @@ const drop = (_e: DragEvent, col: any) => {
 }
 
 :deep(.key-attr-star) {
-  color: #f5222d;
+  color: var(--arco-danger);
   margin-right: 2px;
   font-weight: 600;
 }
@@ -1349,12 +1355,12 @@ const drop = (_e: DragEvent, col: any) => {
 .batch-edit-field-label {
   margin-bottom: 8px;
   font-size: 14px;
-  color: #333;
+  color: var(--app-text-primary);
 }
 
 .batch-edit-field-label.required::before {
   content: '* ';
-  color: #f5222d;
+  color: var(--arco-danger);
 }
 
 .batch-edit-field-input {

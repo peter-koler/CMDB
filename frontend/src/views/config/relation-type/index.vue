@@ -1,5 +1,5 @@
 <template>
-  <div class="relation-type-page">
+  <div class="app-page relation-type-page">
     <a-card :bordered="false" class="search-card">
       <a-form layout="inline" class="search-form">
         <a-row :gutter="[16, 16]" style="width: 100%">

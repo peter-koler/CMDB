@@ -33,11 +33,13 @@ defineEmits<{
 
 .notification-btn {
   font-size: 18px;
-  color: #666;
+  color: var(--arco-text-secondary);
   padding: 4px 8px;
+  border-radius: 10px;
 }
 
 .notification-btn:hover {
-  color: #1890ff;
+  color: var(--arco-primary);
+  background: var(--arco-primary-soft);
 }
 </style>

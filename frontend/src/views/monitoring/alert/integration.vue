@@ -1,6 +1,7 @@
 <template>
-  <a-card :bordered="false">
-    <a-space direction="vertical" style="width: 100%" :size="16">
+  <div class="app-page alert-integration-page">
+    <a-card :bordered="false" class="app-surface-card">
+      <a-space direction="vertical" style="width: 100%" :size="16">
       <!-- 说明卡片 -->
       <a-alert type="info" show-icon>
         <template #message>
@@ -290,7 +291,8 @@
         </a-form-item>
       </a-form>
     </a-modal>
-  </a-card>
+    </a-card>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -670,18 +672,18 @@ onMounted(() => {
   transition: all 0.3s;
 }
 .source-card:hover {
-  border-color: #1890ff;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.09);
+  border-color: var(--app-accent);
+  box-shadow: var(--app-shadow-sm);
 }
 .source-card.active {
-  border-color: #1890ff;
-  background-color: #e6f7ff;
+  border-color: var(--app-accent);
+  background-color: var(--app-accent-soft);
 }
 .source-icon {
   width: 32px;
   height: 32px;
-  background: #1890ff;
-  color: white;
+  background: var(--app-accent);
+  color: #fff;
   border-radius: 50%;
   display: flex;
   align-items: center;

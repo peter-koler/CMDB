@@ -1,6 +1,7 @@
 <template>
-  <a-card :bordered="false">
-    <a-space direction="vertical" style="width: 100%" :size="16">
+  <div class="app-page alert-notice-page">
+    <a-card :bordered="false" class="app-surface-card">
+      <a-space direction="vertical" style="width: 100%" :size="16">
       <!-- 说明卡片 -->
       <a-alert type="info" show-icon>
         <template #message>通知规则说明</template>
@@ -74,7 +75,7 @@
           </template>
         </template>
       </a-table>
-    </a-space>
+      </a-space>
 
     <a-modal v-model:open="modalOpen" :title="editing?.id ? '编辑通知规则' : '新增通知规则'" :confirm-loading="saving" width="800px" @ok="saveItem">
       <a-form layout="vertical" :model="formState">
@@ -214,7 +215,8 @@
         </a-form-item>
       </a-form>
     </a-modal>
-  </a-card>
+    </a-card>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -584,7 +586,7 @@ onMounted(() => {
 }
 .form-help {
   margin-top: 4px;
-  color: #999;
+  color: var(--app-text-muted);
   font-size: 12px;
 }
 </style>

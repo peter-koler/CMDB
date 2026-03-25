@@ -1,8 +1,8 @@
 <template>
-  <div class="custom-view-page">
+  <div class="app-page custom-view-page">
     <a-row :gutter="16" class="full-height">
       <a-col :xs="24" :sm="8" :md="6" :lg="5" class="tree-col">
-        <a-card :bordered="false" class="tree-card" :title="viewInfo.name">
+        <a-card :bordered="false" class="tree-card app-surface-card" :title="viewInfo.name">
           <a-input-search
             v-model:value="treeSearchKeyword"
             placeholder="搜索节点"
@@ -34,7 +34,7 @@
       </a-col>
 
       <a-col :xs="24" :sm="16" :md="18" :lg="19" class="content-col">
-        <a-card :bordered="false" class="search-card" :title="currentNodeName ? currentNodeName + ' - CI列表' : '请选择节点'">
+        <a-card :bordered="false" class="search-card app-surface-card" :title="currentNodeName ? currentNodeName + ' - CI列表' : '请选择节点'">
           <div class="ci-toolbar" v-if="currentNodeId">
             <div class="ci-toolbar-filters">
               <a-input-search
@@ -95,7 +95,7 @@
           </div>
         </a-card>
 
-        <a-card :bordered="false" class="table-card" v-if="currentNodeId">
+        <a-card :bordered="false" class="table-card app-surface-card" v-if="currentNodeId">
           <a-table
             :columns="displayColumns"
             :data-source="instances"
@@ -137,7 +137,7 @@
           </div>
         </a-card>
 
-        <a-card :bordered="false" v-if="!currentNodeId">
+        <a-card :bordered="false" class="app-surface-card" v-if="!currentNodeId">
           <a-empty description="请在左侧选择一个节点查看CI列表" />
         </a-card>
       </a-col>
@@ -808,7 +808,7 @@ const handleBatchDelete = async () => {
 <style scoped>
 .custom-view-page {
   height: calc(100vh - 100px);
-  background: #f0f2f5;
+  background: transparent;
 }
 
 .full-height {
@@ -880,7 +880,7 @@ const handleBatchDelete = async () => {
 .batch-bar {
   margin-top: 16px;
   padding: 12px;
-  background: #fafafa;
+  background: var(--app-surface-subtle);
   border-radius: 4px;
   display: flex;
   justify-content: space-between;
@@ -897,16 +897,16 @@ const handleBatchDelete = async () => {
   justify-content: space-between;
   align-items: center;
   padding: 8px 12px;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--app-border);
   cursor: move;
 }
 
 .column-item:hover {
-  background: #f5f5f5;
+  background: var(--app-surface-hover);
 }
 
 .drag-icon {
-  color: #999;
+  color: var(--app-text-muted);
   cursor: move;
 }
 

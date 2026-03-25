@@ -1,6 +1,6 @@
 <template>
-  <div class="template-edit-page">
-    <a-card :bordered="false" :title="isNew ? '新建拓扑模板' : '编辑拓扑模板'">
+  <div class="app-page template-edit-page">
+    <a-card :bordered="false" class="app-surface-card" :title="isNew ? '新建拓扑模板' : '编辑拓扑模板'">
       <template #extra>
         <a-space>
           <a-button @click="goBack">返回</a-button>
@@ -95,7 +95,7 @@
         </a-col>
 
         <a-col :xs="24" :xl="10">
-          <a-card size="small" title="模板摘要">
+          <a-card size="small" class="app-surface-card" title="模板摘要">
             <a-descriptions :column="1" size="small" bordered>
               <a-descriptions-item label="名称">{{ form.name || '-' }}</a-descriptions-item>
               <a-descriptions-item label="Seed">{{ form.seedModels.join(', ') || '-' }}</a-descriptions-item>
@@ -107,7 +107,7 @@
             </a-descriptions>
           </a-card>
 
-          <a-card size="small" title="层级定义" style="margin-top: 12px">
+          <a-card size="small" class="app-surface-card" title="层级定义" style="margin-top: 12px">
             <a-timeline>
               <a-timeline-item v-for="layer in form.layers" :key="layer.id">
                 <b>{{ layer.name || '未命名层' }}</b>
@@ -284,10 +284,10 @@ watch(
 }
 
 .layer-item {
-  border: 1px solid #f0f0f0;
+  border: 1px solid var(--app-border);
   border-radius: 8px;
   padding: 8px;
-  background: #fafafa;
+  background: var(--app-surface-subtle);
 }
 
 .layer-head {
@@ -299,7 +299,7 @@ watch(
 }
 
 .timeline-desc {
-  color: #8c8c8c;
+  color: var(--app-text-muted);
   font-size: 12px;
 }
 </style>

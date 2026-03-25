@@ -1,6 +1,6 @@
 <template>
-  <div class="license-page">
-    <a-card title="License 授权管理" :bordered="false">
+  <div class="app-page license-page">
+    <a-card title="License 授权管理" :bordered="false" class="app-surface-card">
       <a-descriptions :column="1" bordered size="small">
         <a-descriptions-item label="机器码">{{ status.machine_code || '-' }}</a-descriptions-item>
         <a-descriptions-item label="授权状态">{{ status.has_license ? (status.expired ? '已过期' : '有效') : '未授权' }}</a-descriptions-item>
@@ -71,10 +71,12 @@ onMounted(() => {
 
 <style scoped>
 .license-page {
-  padding: 24px;
+  min-height: 100%;
 }
 
 .upload-box {
   margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--arco-border);
 }
 </style>

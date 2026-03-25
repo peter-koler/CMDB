@@ -1447,26 +1447,26 @@ onMounted(() => {
 .monitoring-template-page {
   height: 100%;
   padding: 16px;
-  background: #f5f5f5;
+  background: var(--arco-app-bg);
 
   .template-layout {
     display: flex;
     height: calc(100vh - 120px);
-    background: #fff;
+    background: var(--app-surface-card);
     border-radius: 8px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    box-shadow: var(--app-shadow-sm);
     overflow: hidden;
 
     .category-sidebar {
       width: 240px;
-      border-right: 1px solid #f0f0f0;
-      background: #fafafa;
+      border-right: 1px solid var(--app-border);
+      background: var(--app-surface-subtle);
       display: flex;
       flex-direction: column;
 
       .sidebar-header {
         padding: 16px;
-        border-bottom: 1px solid #f0f0f0;
+        border-bottom: 1px solid var(--app-border);
         display: flex;
         justify-content: space-between;
         align-items: center;
@@ -1474,6 +1474,7 @@ onMounted(() => {
         .title {
           font-weight: 600;
           font-size: 16px;
+          color: var(--app-text-primary);
         }
       }
 
@@ -1492,7 +1493,7 @@ onMounted(() => {
           }
 
           .node-count {
-            color: #999;
+            color: var(--app-text-muted);
             font-size: 12px;
           }
         }
@@ -1507,11 +1508,11 @@ onMounted(() => {
 
       .editor-header {
         padding: 16px;
-        border-bottom: 1px solid #f0f0f0;
+        border-bottom: 1px solid var(--app-border);
         display: flex;
         justify-content: space-between;
         align-items: center;
-        background: #fff;
+        background: var(--app-surface-card);
 
         .header-left {
           display: flex;
@@ -1528,17 +1529,18 @@ onMounted(() => {
               align-items: center;
               gap: 6px;
               padding: 6px 12px;
-              background: #f5f5f5;
+              background: var(--app-surface-subtle);
               border-radius: 4px;
               cursor: pointer;
               transition: all 0.3s;
+              color: var(--app-text-secondary);
 
               &:hover {
-                background: #e6f7ff;
+                background: color-mix(in srgb, var(--app-accent) 10%, var(--app-surface-card));
               }
 
               &.active {
-                background: #1890ff;
+                background: var(--app-accent);
                 color: #fff;
               }
 
@@ -1589,14 +1591,15 @@ onMounted(() => {
         }
 
         .editor-toolbar {
-          background: #fff;
+          background: var(--app-surface-card);
           padding: 12px 16px;
-          border-bottom: 1px solid #f0f0f0;
+          border-bottom: 1px solid var(--app-border);
           border-radius: 4px 4px 0 0;
 
           .template-name {
             font-weight: 500;
             margin-left: 8px;
+            color: var(--app-text-primary);
           }
         }
 
@@ -1628,7 +1631,7 @@ onMounted(() => {
         .policy-content {
           height: 100%;
           overflow: auto;
-          background: #fff;
+          background: var(--app-surface-card);
           padding: 8px 4px;
 
           .policy-name-cell {
@@ -1653,9 +1656,9 @@ onMounted(() => {
 .context-menu {
   position: fixed;
   z-index: 1000;
-  background: #fff;
+  background: var(--app-surface-card);
   border-radius: 4px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--app-shadow-sm);
   min-width: 160px;
 
   :deep(.ant-menu) {

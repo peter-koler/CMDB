@@ -183,11 +183,13 @@ const fieldColumns = [
     font-weight: 500;
     margin-bottom: 16px;
     font-size: 16px;
+    color: var(--app-text-primary);
   }
 
   .fields-title {
     font-weight: 500;
     margin: 16px 0 8px 0;
+    color: var(--app-text-primary);
   }
 }
 </style>

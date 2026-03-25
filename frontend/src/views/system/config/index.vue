@@ -452,7 +452,7 @@ onMounted(() => {
 }
 
 .config-card :deep(.ant-card-head) {
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--app-border);
   padding: 0 24px;
 }
 
@@ -469,7 +469,7 @@ onMounted(() => {
 }
 
 .title-icon {
-  color: #1890ff;
+  color: var(--app-accent);
   font-size: 18px;
 }
 
@@ -479,13 +479,13 @@ onMounted(() => {
 
 .unit {
   margin-left: 8px;
-  color: #999;
+  color: var(--app-text-muted);
   font-size: 13px;
 }
 
 :deep(.ant-descriptions-item-label) {
   font-weight: 500;
-  background: #fafafa;
+  background: var(--app-surface-subtle);
 }
 
 :deep(.ant-descriptions-item-content) {
@@ -498,11 +498,11 @@ onMounted(() => {
   right: 0;
   left: 208px;
   padding: 16px 24px;
-  background: #fff;
-  border-top: 1px solid #f0f0f0;
+  background: var(--app-surface-card);
+  border-top: 1px solid var(--app-border);
   text-align: center;
   z-index: 99;
-  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.06);
+  box-shadow: 0 -8px 24px color-mix(in srgb, var(--app-text-primary) 8%, transparent);
 }
 
 .logo-upload-container {
@@ -519,12 +519,12 @@ onMounted(() => {
   border-radius: 8px;
   overflow: hidden;
   cursor: pointer;
-  border: 2px dashed #d9d9d9;
+  border: 2px dashed var(--app-border);
   transition: all 0.3s;
 }
 
 .logo-preview:hover {
-  border-color: #1890ff;
+  border-color: var(--app-accent);
 }
 
 .logo-image {
@@ -540,7 +540,7 @@ onMounted(() => {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: color-mix(in srgb, var(--app-text-primary) 42%, transparent);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -562,7 +562,7 @@ onMounted(() => {
 .logo-upload-placeholder {
   width: 120px;
   height: 120px;
-  border: 2px dashed #d9d9d9;
+  border: 2px dashed var(--app-border);
   border-radius: 8px;
   display: flex;
   flex-direction: column;
@@ -570,27 +570,27 @@ onMounted(() => {
   justify-content: center;
   cursor: pointer;
   transition: all 0.3s;
-  background: #fafafa;
+  background: var(--app-surface-subtle);
 }
 
 .logo-upload-placeholder:hover {
-  border-color: #1890ff;
-  background: #e6f7ff;
+  border-color: var(--app-accent);
+  background: var(--app-accent-soft);
 }
 
 .upload-icon {
   font-size: 32px;
-  color: #999;
+  color: var(--app-text-muted);
   margin-bottom: 8px;
 }
 
 .upload-text {
-  color: #666;
+  color: var(--app-text-secondary);
   font-size: 14px;
 }
 
 .upload-hint {
-  color: #999;
+  color: var(--app-text-muted);
   font-size: 12px;
   margin-top: 4px;
   text-align: center;

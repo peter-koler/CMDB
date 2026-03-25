@@ -972,7 +972,7 @@ onUnmounted(() => {
 
 <style scoped>
 .sub-text {
-  color: #8c8c8c;
+  color: var(--app-text-muted);
   font-size: 12px;
 }
 
@@ -982,7 +982,7 @@ onUnmounted(() => {
 }
 
 .field-name {
-  color: #8c8c8c;
+  color: var(--app-text-muted);
   font-size: 12px;
 }
 </style>

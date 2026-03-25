@@ -29,7 +29,7 @@
       </a-form-item>
 
       <!-- 动态字段 -->
-      <div v-if="modelFields.length === 0" style="padding: 16px; color: #999;">
+      <div v-if="modelFields.length === 0" class="model-fields-empty">
         暂无属性字段配置
       </div>
       <div v-else>
@@ -644,6 +644,11 @@ const handleCancel = () => {
   margin: 16px 0;
 }
 
+.model-fields-empty {
+  padding: 16px;
+  color: var(--app-text-muted);
+}
+
 .field-groups {
   display: flex;
   flex-direction: column;
@@ -651,16 +656,16 @@ const handleCancel = () => {
 }
 
 .field-group-card {
-  border: 1px solid #f0f0f0;
+  border: 1px solid var(--app-border);
   border-radius: 8px;
   padding: 12px;
-  background: #fff;
+  background: var(--app-surface-card);
 }
 
 .field-group-title {
   font-size: 14px;
   font-weight: 600;
-  color: #1f1f1f;
+  color: var(--app-text-primary);
   margin-bottom: 8px;
 }
 </style>

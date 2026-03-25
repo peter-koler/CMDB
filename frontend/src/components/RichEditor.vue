@@ -93,17 +93,46 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .rich-editor-container {
-  border: 1px solid #d9d9d9;
-  border-radius: 6px;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
   overflow: hidden;
+  background: var(--app-surface-card);
 }
 
 .toolbar {
-  border-bottom: 1px solid #d9d9d9;
+  border-bottom: 1px solid var(--app-border);
+  background: var(--app-surface-subtle);
 }
 
 .editor {
   height: v-bind('height ? height + "px" : "300px"');
   overflow-y: auto;
+  background: var(--app-surface-card);
+}
+
+.toolbar :deep(.w-e-bar) {
+  background: transparent;
+  border: 0;
+}
+
+.toolbar :deep(.w-e-bar-item button:hover) {
+  background: var(--app-surface-hover);
+}
+
+.editor :deep(.w-e-text-container) {
+  background: transparent;
+  color: var(--app-text-primary);
+}
+
+.editor :deep(.w-e-scroll) {
+  background: transparent;
+}
+
+.editor :deep([data-slate-editor]) {
+  color: var(--app-text-primary);
+}
+
+.editor :deep(.w-e-text-placeholder) {
+  color: var(--app-text-muted);
 }
 </style>

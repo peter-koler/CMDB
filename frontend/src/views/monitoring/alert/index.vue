@@ -1,6 +1,7 @@
 <template>
-  <a-card :bordered="false">
-    <a-space direction="vertical" style="width: 100%" :size="16">
+  <div class="app-page">
+    <a-card :bordered="false" class="app-surface-card">
+      <a-space direction="vertical" style="width: 100%" :size="16">
       <a-tabs v-if="!isMyAlertsView" v-model:activeKey="activeTab" @change="handleTabChange">
         <a-tab-pane key="current" tab="当前告警" />
         <a-tab-pane key="history" tab="告警历史" />
@@ -156,54 +157,55 @@
           </template>
         </template>
       </a-table>
-    </a-space>
+      </a-space>
 
-    <a-modal
-      v-model:open="assignModalOpen"
-      title="分派告警"
-      :confirm-loading="assigning"
-      @ok="submitAssign"
-      @cancel="resetAssignModal"
-    >
-      <a-form layout="vertical">
-        <a-form-item label="部门筛选">
-          <a-select
-            v-model:value="assignForm.department"
-            allow-clear
-            show-search
-            placeholder="全部部门"
-            option-filter-prop="label"
-            @change="handleAssignDepartmentChange"
-          >
-            <a-select-option
-              v-for="item in assignDepartments"
-              :key="item"
-              :value="item"
-              :label="item"
+      <a-modal
+        v-model:open="assignModalOpen"
+        title="分派告警"
+        :confirm-loading="assigning"
+        @ok="submitAssign"
+        @cancel="resetAssignModal"
+      >
+        <a-form layout="vertical">
+          <a-form-item label="部门筛选">
+            <a-select
+              v-model:value="assignForm.department"
+              allow-clear
+              show-search
+              placeholder="全部部门"
+              option-filter-prop="label"
+              @change="handleAssignDepartmentChange"
             >
-              {{ item }}
-            </a-select-option>
-          </a-select>
-        </a-form-item>
-        <a-form-item label="处理人" required>
-          <a-select
-            v-model:value="assignForm.assignee"
-            show-search
-            allow-clear
-            placeholder="请选择处理人"
-            option-filter-prop="label"
-          >
-            <a-select-option v-for="item in assignUsers" :key="item.username" :value="item.username" :label="item.username">
-              {{ item.username }} <span v-if="getUserDepartmentName(item)">({{ getUserDepartmentName(item) }})</span>
-            </a-select-option>
-          </a-select>
-        </a-form-item>
-        <a-form-item label="备注">
-          <a-textarea v-model:value="assignForm.note" :rows="3" placeholder="可选：填写分派说明" />
-        </a-form-item>
-      </a-form>
-    </a-modal>
-  </a-card>
+              <a-select-option
+                v-for="item in assignDepartments"
+                :key="item"
+                :value="item"
+                :label="item"
+              >
+                {{ item }}
+              </a-select-option>
+            </a-select>
+          </a-form-item>
+          <a-form-item label="处理人" required>
+            <a-select
+              v-model:value="assignForm.assignee"
+              show-search
+              allow-clear
+              placeholder="请选择处理人"
+              option-filter-prop="label"
+            >
+              <a-select-option v-for="item in assignUsers" :key="item.username" :value="item.username" :label="item.username">
+                {{ item.username }} <span v-if="getUserDepartmentName(item)">({{ getUserDepartmentName(item) }})</span>
+              </a-select-option>
+            </a-select>
+          </a-form-item>
+          <a-form-item label="备注">
+            <a-textarea v-model:value="assignForm.note" :rows="3" placeholder="可选：填写分派说明" />
+          </a-form-item>
+        </a-form>
+      </a-modal>
+    </a-card>
+  </div>
 </template>
 
 <script setup lang="ts">

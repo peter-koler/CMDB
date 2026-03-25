@@ -1,6 +1,6 @@
 <template>
-  <div class="role-page">
-    <a-card :bordered="false">
+  <div class="app-page role-page">
+    <a-card :bordered="false" class="app-surface-card">
       <div class="search-bar">
         <a-space>
           <a-input-search

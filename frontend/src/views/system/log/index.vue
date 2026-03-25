@@ -1,5 +1,5 @@
 <template>
-  <div class="page-container">
+  <div class="app-page page-container">
     <a-card :bordered="false" class="search-card">
       <a-form layout="inline" class="search-form">
         <a-row :gutter="[16, 16]" style="width: 100%">
@@ -97,7 +97,7 @@
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'username'">
             <a-space>
-              <a-avatar :style="{ backgroundColor: '#1890ff' }" :size="28">
+              <a-avatar :style="{ backgroundColor: 'var(--app-accent)' }" :size="28">
                 {{ record.username?.charAt(0)?.toUpperCase() }}
               </a-avatar>
               <span>{{ record.username }}</span>
@@ -345,7 +345,7 @@ onMounted(() => {
 }
 
 .table-card :deep(.ant-card-head) {
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--app-border);
   padding: 0 24px;
 }
 
@@ -363,21 +363,21 @@ onMounted(() => {
 .title-text {
   font-size: 16px;
   font-weight: 500;
-  color: #333;
+  color: var(--app-text-primary);
 }
 
 .time-text {
-  color: #666;
+  color: var(--app-text-secondary);
   font-size: 13px;
 }
 
 :deep(.ant-table-thead > tr > th) {
-  background: #fafafa;
+  background: var(--app-surface-subtle);
   font-weight: 500;
 }
 
 :deep(.ant-table-tbody > tr:hover > td) {
-  background: #e6f7ff;
+  background: var(--app-accent-soft);
 }
 
 :deep(.ant-table-wrapper) {

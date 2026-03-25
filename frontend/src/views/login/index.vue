@@ -182,20 +182,20 @@
         class="lock-result"
       >
         <template #icon>
-          <a-avatar :size="72" style="background-color: #fff2f0; color: #ff4d4f;">
-            <LockOutlined style="font-size: 32px;" />
+          <a-avatar :size="72" class="lock-avatar">
+            <LockOutlined class="lock-avatar-icon" />
           </a-avatar>
         </template>
         <template #extra>
-          <a-space direction="vertical" style="width: 100%;">
+          <a-space direction="vertical" class="lock-actions">
             <a-statistic-countdown
               v-if="remainingSeconds > 0"
               title="剩余锁定时间"
               :value="Date.now() + remainingSeconds * 1000"
               format="mm:ss"
-              :value-style="{ color: '#ff4d4f', fontSize: '24px', fontWeight: 600 }"
+              :value-style="lockCountdownStyle"
             />
-            <a-button type="primary" size="large" block @click="handleLockModalOk" style="margin-top: 16px;">
+            <a-button type="primary" size="large" block @click="handleLockModalOk" class="lock-confirm-btn">
               我知道了
             </a-button>
           </a-space>
@@ -239,6 +239,12 @@ const captchaLoading = ref(false)
 const licenseBlocked = ref(false)
 const licenseWarningText = ref('')
 let countdownTimer: number | null = null
+
+const lockCountdownStyle = {
+  color: 'var(--arco-danger)',
+  fontSize: '24px',
+  fontWeight: 600
+}
 
 const rules = {
   username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
@@ -377,6 +383,20 @@ onMounted(() => {
   display: flex;
   min-height: 100vh;
   font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --login-form-bg: var(--arco-surface);
+  --login-form-bg-muted: var(--arco-surface-muted);
+  --login-form-border: var(--arco-border-strong);
+  --login-form-text: var(--app-text-primary);
+  --login-form-text-secondary: var(--app-text-secondary);
+  --login-form-text-muted: var(--app-text-muted);
+  --login-focus-ring: color-mix(in srgb, var(--app-accent) 14%, transparent);
+  --login-glass-bg: color-mix(in srgb, white 14%, transparent);
+  --login-glass-border: color-mix(in srgb, white 20%, transparent);
+  --login-glass-strong: color-mix(in srgb, white 20%, transparent);
+  --login-shadow:
+    0 4px 6px -1px rgba(0, 0, 0, 0.05),
+    0 10px 15px -3px rgba(0, 0, 0, 0.05),
+    0 20px 25px -5px rgba(0, 0, 0, 0.03);
 }
 
 /* 左侧视觉区域 */
@@ -413,8 +433,8 @@ onMounted(() => {
   bottom: 0;
   background: linear-gradient(
     135deg,
-    rgba(30, 64, 175, 0.92) 0%,
-    rgba(30, 58, 138, 0.88) 50%,
+    color-mix(in srgb, var(--arco-primary-active) 88%, transparent) 0%,
+    color-mix(in srgb, var(--arco-primary) 78%, transparent) 50%,
     rgba(15, 23, 42, 0.85) 100%
   );
 }
@@ -436,14 +456,14 @@ onMounted(() => {
 .logo {
   width: 80px;
   height: 80px;
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--login-glass-bg);
   border-radius: 20px;
   display: flex;
   align-items: center;
   justify-content: center;
   margin: 0 auto 24px;
   backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  border: 1px solid var(--login-glass-border);
 }
 
 .logo :deep(.anticon) {
@@ -485,10 +505,10 @@ onMounted(() => {
   justify-content: center;
   gap: 32px;
   padding: 24px 32px;
-  background: rgba(255, 255, 255, 0.1);
+  background: color-mix(in srgb, white 10%, transparent);
   border-radius: 16px;
   backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  border: 1px solid var(--login-glass-border);
 }
 
 .stat-item {
@@ -498,7 +518,7 @@ onMounted(() => {
 .stat-number {
   font-size: 32px;
   font-weight: 700;
-  color: #22C55E;
+  color: var(--arco-success);
   margin-bottom: 4px;
   text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
@@ -514,14 +534,14 @@ onMounted(() => {
 .stat-divider {
   width: 1px;
   height: 40px;
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--login-glass-strong);
 }
 
 /* 装饰圆形 */
 .decoration-circle {
   position: absolute;
   border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid color-mix(in srgb, white 12%, transparent);
   z-index: 1;
 }
 
@@ -530,7 +550,7 @@ onMounted(() => {
   height: 300px;
   top: -100px;
   right: -100px;
-  background: radial-gradient(circle, rgba(59, 130, 246, 0.15) 0%, transparent 70%);
+  background: radial-gradient(circle, color-mix(in srgb, var(--arco-primary) 18%, transparent) 0%, transparent 70%);
 }
 
 .circle-2 {
@@ -538,7 +558,7 @@ onMounted(() => {
   height: 200px;
   bottom: 10%;
   left: -50px;
-  background: radial-gradient(circle, rgba(34, 197, 94, 0.1) 0%, transparent 70%);
+  background: radial-gradient(circle, color-mix(in srgb, var(--arco-success) 14%, transparent) 0%, transparent 70%);
 }
 
 .circle-3 {
@@ -546,7 +566,7 @@ onMounted(() => {
   height: 150px;
   top: 40%;
   right: 10%;
-  background: radial-gradient(circle, rgba(255, 255, 255, 0.05) 0%, transparent 70%);
+  background: radial-gradient(circle, color-mix(in srgb, white 8%, transparent) 0%, transparent 70%);
 }
 
 /* 右侧表单区 */
@@ -556,19 +576,16 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   padding: 40px;
-  background-color: #F8FAFC;
+  background-color: var(--arco-app-bg);
 }
 
 .login-form-container {
   width: 100%;
   max-width: 440px;
-  background: white;
+  background: var(--login-form-bg);
   border-radius: 20px;
   padding: 48px;
-  box-shadow: 
-    0 4px 6px -1px rgba(0, 0, 0, 0.05),
-    0 10px 15px -3px rgba(0, 0, 0, 0.05),
-    0 20px 25px -5px rgba(0, 0, 0, 0.03);
+  box-shadow: var(--login-shadow);
 }
 
 .form-header {
@@ -579,13 +596,13 @@ onMounted(() => {
 .form-header h2 {
   font-size: 28px;
   font-weight: 700;
-  color: #0F172A;
+  color: var(--login-form-text);
   margin: 0 0 8px 0;
 }
 
 .form-header p {
   font-size: 15px;
-  color: #64748B;
+  color: var(--login-form-text-secondary);
   margin: 0;
 }
 
@@ -596,23 +613,23 @@ onMounted(() => {
 /* 自定义输入框样式 */
 .custom-input :deep(.ant-input) {
   border-radius: 10px;
-  border-color: #E2E8F0;
+  border-color: var(--login-form-border);
   padding-left: 44px;
   height: 52px;
   font-size: 15px;
   transition: all 0.2s ease;
-  background: #F8FAFC;
+  background: var(--login-form-bg-muted);
 }
 
 .custom-input :deep(.ant-input:hover) {
-  border-color: #3B82F6;
-  background: white;
+  border-color: var(--arco-primary-hover);
+  background: var(--login-form-bg);
 }
 
 .custom-input :deep(.ant-input:focus) {
-  border-color: #1E40AF;
-  background: white;
-  box-shadow: 0 0 0 4px rgba(30, 64, 175, 0.08);
+  border-color: var(--app-accent);
+  background: var(--login-form-bg);
+  box-shadow: 0 0 0 4px var(--login-focus-ring);
 }
 
 .custom-input :deep(.ant-input-prefix) {
@@ -620,13 +637,13 @@ onMounted(() => {
 }
 
 .input-icon {
-  color: #94A3B8;
+  color: var(--login-form-text-muted);
   font-size: 18px;
   transition: color 0.2s ease;
 }
 
 .custom-input :deep(.ant-input:focus) + .ant-input-prefix .input-icon {
-  color: #1E40AF;
+  color: var(--app-accent);
 }
 
 /* 登录选项 */
@@ -638,16 +655,16 @@ onMounted(() => {
 }
 
 .custom-checkbox :deep(.ant-checkbox-checked .ant-checkbox-inner) {
-  background-color: #1E40AF;
-  border-color: #1E40AF;
+  background-color: var(--app-accent);
+  border-color: var(--app-accent);
 }
 
 .custom-checkbox :deep(.ant-checkbox-wrapper:hover .ant-checkbox-inner) {
-  border-color: #1E40AF;
+  border-color: var(--app-accent);
 }
 
 .forgot-link {
-  color: #3B82F6;
+  color: var(--arco-primary-hover);
   font-size: 14px;
   font-weight: 500;
   text-decoration: none;
@@ -655,7 +672,7 @@ onMounted(() => {
 }
 
 .forgot-link:hover {
-  color: #1E40AF;
+  color: var(--app-accent);
 }
 
 /* 登录按钮 */
@@ -664,16 +681,16 @@ onMounted(() => {
   font-size: 16px;
   font-weight: 600;
   border-radius: 10px;
-  background: linear-gradient(135deg, #1E40AF 0%, #3B82F6 100%);
+  background: linear-gradient(135deg, var(--arco-primary-active) 0%, var(--arco-primary-gradient-end) 100%);
   border: none;
   transition: all 0.2s ease;
   margin-top: 8px;
 }
 
 .login-button:hover {
-  background: linear-gradient(135deg, #1E3A8A 0%, #2563EB 100%);
+  background: linear-gradient(135deg, var(--arco-primary-active) 0%, var(--arco-primary-hover) 100%);
   transform: translateY(-1px);
-  box-shadow: 0 8px 20px rgba(30, 64, 175, 0.35);
+  box-shadow: 0 8px 20px color-mix(in srgb, var(--app-accent) 34%, transparent);
 }
 
 .login-button:active {
@@ -684,13 +701,13 @@ onMounted(() => {
 .form-footer {
   margin-top: 32px;
   text-align: center;
-  border-top: 1px solid #E2E8F0;
+  border-top: 1px solid var(--login-form-border);
   padding-top: 24px;
 }
 
 .form-footer p {
   font-size: 13px;
-  color: #94A3B8;
+  color: var(--login-form-text-muted);
   margin: 0;
 }
 
@@ -826,13 +843,13 @@ onMounted(() => {
 .lock-result :deep(.ant-result-title) {
   font-size: 20px;
   font-weight: 600;
-  color: #262626;
+  color: var(--login-form-text);
   margin-bottom: 8px;
 }
 
 .lock-result :deep(.ant-result-subtitle) {
   font-size: 14px;
-  color: #595959;
+  color: var(--login-form-text-secondary);
   line-height: 1.6;
 }
 
@@ -842,8 +859,25 @@ onMounted(() => {
 
 .lock-result :deep(.ant-statistic-title) {
   font-size: 12px;
-  color: #8c8c8c;
+  color: var(--login-form-text-muted);
   margin-bottom: 4px;
+}
+
+.lock-avatar {
+  background-color: color-mix(in srgb, var(--arco-danger) 12%, var(--login-form-bg));
+  color: var(--arco-danger);
+}
+
+.lock-avatar-icon {
+  font-size: 32px;
+}
+
+.lock-actions {
+  width: 100%;
+}
+
+.lock-confirm-btn {
+  margin-top: 16px;
 }
 
 /* 验证码图片样式 */
@@ -855,12 +889,12 @@ onMounted(() => {
   background-repeat: no-repeat;
   border-radius: 8px;
   cursor: pointer;
-  border: 1px solid #d9d9d9;
+  border: 1px solid var(--login-form-border);
   transition: all 0.3s ease;
 }
 
 .captcha-image:hover {
-  border-color: #1890ff;
-  box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.2);
+  border-color: var(--app-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--app-accent) 20%, transparent);
 }
 </style>

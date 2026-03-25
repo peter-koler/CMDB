@@ -1,6 +1,7 @@
 <template>
-  <a-card :bordered="false">
-    <a-space direction="vertical" style="width: 100%" :size="16">
+  <div class="app-page alert-setting-page">
+    <a-card :bordered="false" class="app-surface-card">
+      <a-space direction="vertical" style="width: 100%" :size="16">
       <!-- 工具栏 -->
       <a-row justify="space-between" align="middle">
         <a-space>
@@ -160,7 +161,7 @@
           </template>
         </template>
       </a-table>
-    </a-space>
+      </a-space>
 
     <!-- 规则编辑弹窗 -->
     <a-modal
@@ -417,7 +418,8 @@
         </a-collapse>
       </a-form>
     </a-modal>
-  </a-card>
+    </a-card>
+  </div>
 </template>
 
 <script setup lang="ts">

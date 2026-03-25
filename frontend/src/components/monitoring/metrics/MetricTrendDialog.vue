@@ -120,6 +120,12 @@ const stringPoints = ref<Array<{ timestamp: number; text: string }>>([])
 const chartRef = ref<HTMLDivElement | null>(null)
 let chart: EChartsType | null = null
 
+function getThemeColor(name: string, fallback: string) {
+  if (typeof window === 'undefined') return fallback
+  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+  return value || fallback
+}
+
 const isStringMetric = computed(() => props.metricType === 'string')
 
 const rangeOptions = [
@@ -217,9 +223,11 @@ function buildChartOption(): ECOption {
   const xData = sorted.map((point) => dayjs(point.timestamp).format('MM-DD HH:mm'))
   const yData = sorted.map((point) => point.value)
   const isBar = chartType.value === 'bar'
+  const accentColor = getThemeColor('--app-accent', '#1677ff')
+  const borderColor = getThemeColor('--app-border', '#f0f0f0')
   return {
     animationDuration: 260,
-    color: ['#1677ff'],
+    color: [accentColor],
     grid: {
       left: 56,
       right: 18,
@@ -251,7 +259,7 @@ function buildChartOption(): ECOption {
         formatter: (value: number) => formatMetricValue(value)
       },
       splitLine: {
-        lineStyle: { color: '#f0f0f0' }
+        lineStyle: { color: borderColor }
       }
     },
     series: [
@@ -467,8 +475,9 @@ onBeforeUnmount(() => {
 <style scoped>
 .echart-wrap {
   width: 100%;
-  border: 1px solid #f0f0f0;
+  border: 1px solid var(--app-border);
   border-radius: 8px;
   height: 280px;
+  background: var(--app-surface-card);
 }
 </style>

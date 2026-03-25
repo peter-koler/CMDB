@@ -1,6 +1,6 @@
 <template>
-  <div class="monitoring-visual-page">
-    <a-card :bordered="false" class="toolbar-card">
+  <div class="app-page monitoring-visual-page">
+    <a-card :bordered="false" class="toolbar-card app-surface-card">
       <div class="toolbar-inner">
         <a-space wrap>
           <a-select v-model:value="refreshSeconds" style="width: 160px">
@@ -18,25 +18,25 @@
 
     <a-row :gutter="[14, 14]" class="section">
       <a-col :xs="24" :sm="12" :xl="6">
-        <a-card :bordered="false" class="mini-card">
+        <a-card :bordered="false" class="mini-card app-surface-card">
           <div class="mini-title">监控健康率</div>
           <div ref="ringHealthRef" class="mini-host" />
         </a-card>
       </a-col>
       <a-col :xs="24" :sm="12" :xl="6">
-        <a-card :bordered="false" class="mini-card">
+        <a-card :bordered="false" class="mini-card app-surface-card">
           <div class="mini-title">采集成功率</div>
           <div ref="ringSuccessRef" class="mini-host" />
         </a-card>
       </a-col>
       <a-col :xs="24" :sm="12" :xl="6">
-        <a-card :bordered="false" class="mini-card">
+        <a-card :bordered="false" class="mini-card app-surface-card">
           <div class="mini-title">异常监控占比</div>
           <div ref="ringAnomalyRef" class="mini-host" />
         </a-card>
       </a-col>
       <a-col :xs="24" :sm="12" :xl="6">
-        <a-card :bordered="false" class="mini-card">
+        <a-card :bordered="false" class="mini-card app-surface-card">
           <div class="mini-title">告警压力指数</div>
           <div ref="ringPressureRef" class="mini-host" />
         </a-card>
@@ -45,12 +45,12 @@
 
     <a-row :gutter="[14, 14]" class="section">
       <a-col :xs="24" :xl="16">
-        <a-card :bordered="false" title="24小时趋势：告警数 & 成功率" class="panel-card">
+        <a-card :bordered="false" title="24小时趋势：告警数 & 成功率" class="panel-card app-surface-card">
           <div ref="trendChartRef" class="panel-host panel-host-lg" />
         </a-card>
       </a-col>
       <a-col :xs="24" :xl="8">
-        <a-card :bordered="false" title="Top10风险监控对象" class="panel-card">
+        <a-card :bordered="false" title="Top10风险监控对象" class="panel-card app-surface-card">
           <div ref="topChartRef" class="panel-host panel-host-lg" />
         </a-card>
       </a-col>
@@ -58,17 +58,17 @@
 
     <a-row :gutter="[14, 14]" class="section">
       <a-col :xs="24" :lg="8">
-        <a-card :bordered="false" title="监控状态分布" class="panel-card">
+        <a-card :bordered="false" title="监控状态分布" class="panel-card app-surface-card">
           <div ref="statusChartRef" class="panel-host" />
         </a-card>
       </a-col>
       <a-col :xs="24" :lg="8">
-        <a-card :bordered="false" title="告警级别占比" class="panel-card">
+        <a-card :bordered="false" title="告警级别占比" class="panel-card app-surface-card">
           <div ref="levelChartRef" class="panel-host" />
         </a-card>
       </a-col>
       <a-col :xs="24" :lg="8">
-        <a-card :bordered="false" title="告警脉冲" class="panel-card">
+        <a-card :bordered="false" title="告警脉冲" class="panel-card app-surface-card">
           <div ref="pulseChartRef" class="panel-host" />
         </a-card>
       </a-col>
@@ -582,7 +582,6 @@ onBeforeUnmount(() => {
 .monitoring-visual-page {
   min-height: 100%;
   padding-bottom: 8px;
-  background: #f6f8fb;
 }
 
 .section {
@@ -592,9 +591,9 @@ onBeforeUnmount(() => {
 .toolbar-card,
 .panel-card,
 .mini-card {
-  border-radius: 12px;
-  border: 1px solid #e8edf5;
-  box-shadow: 0 4px 16px rgba(30, 42, 58, 0.04);
+  border-radius: var(--arco-radius-md);
+  border: 1px solid var(--arco-border);
+  box-shadow: none;
 }
 
 .toolbar-inner {
@@ -606,17 +605,17 @@ onBeforeUnmount(() => {
 }
 
 .update-time {
-  color: #728096;
+  color: var(--arco-text-secondary);
   font-size: 12px;
 }
 
 .mini-card {
-  background: #fff;
+  background: var(--arco-surface);
 }
 
 .mini-title {
   font-size: 13px;
-  color: #5f6f86;
+  color: var(--arco-text-secondary);
   margin-bottom: 8px;
   font-weight: 600;
 }

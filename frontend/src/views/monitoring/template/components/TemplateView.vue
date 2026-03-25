@@ -138,6 +138,7 @@ const getCategoryText = (category: string) => {
     font-weight: 500;
     margin-bottom: 16px;
     font-size: 16px;
+    color: var(--app-text-primary);
   }
 }
 </style>

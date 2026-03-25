@@ -1,6 +1,6 @@
 <template>
-  <div class="notification-detail-page">
-    <a-card :bordered="false">
+  <div class="app-page notification-detail-page">
+    <a-card :bordered="false" class="app-surface-card">
       <template #title>
         <div class="page-header">
           <a-button type="link" @click="goBack">
@@ -15,7 +15,7 @@
           <div class="detail-header">
             <h1 class="detail-title">{{ notificationData?.title }}</h1>
             <div class="detail-meta">
-              <a-tag :color="notificationData?.type?.color || '#1890ff'">
+              <a-tag :color="notificationData?.type?.color || 'var(--app-accent)'">
                 <component :is="getIconComponent(notificationData?.type?.icon)" />
                 {{ notificationData?.type?.name }}
               </a-tag>
@@ -242,7 +242,7 @@ onMounted(() => {
 
 <style scoped>
 .notification-detail-page {
-  padding: 16px;
+  padding: 0;
 }
 
 .page-header {
@@ -270,7 +270,7 @@ onMounted(() => {
   font-size: 24px;
   font-weight: 600;
   margin-bottom: 16px;
-  color: #262626;
+  color: var(--app-text-primary);
 }
 
 .detail-meta {
@@ -285,7 +285,7 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 4px;
-  color: #8c8c8c;
+  color: var(--app-text-muted);
 }
 
 .detail-body {
@@ -295,7 +295,7 @@ onMounted(() => {
 .content-html {
   font-size: 15px;
   line-height: 1.8;
-  color: #333;
+  color: var(--app-text-primary);
 }
 
 .content-html :deep(h1),
@@ -306,7 +306,7 @@ onMounted(() => {
 .content-html :deep(h6) {
   margin: 16px 0 8px;
   font-weight: 600;
-  color: #262626;
+  color: var(--app-text-primary);
 }
 
 .content-html :deep(p) {
@@ -322,9 +322,9 @@ onMounted(() => {
 .content-html :deep(blockquote) {
   margin: 8px 0;
   padding: 8px 16px;
-  border-left: 4px solid #1890ff;
-  background-color: #f6f8fa;
-  color: #666;
+  border-left: 4px solid var(--app-accent);
+  background-color: var(--app-surface-subtle);
+  color: var(--app-text-secondary);
 }
 
 .content-html :deep(img) {
@@ -342,32 +342,32 @@ onMounted(() => {
 
 .content-html :deep(th),
 .content-html :deep(td) {
-  border: 1px solid #e8e8e8;
+  border: 1px solid var(--app-border);
   padding: 8px 12px;
   text-align: left;
 }
 
 .content-html :deep(th) {
-  background-color: #fafafa;
+  background-color: var(--app-surface-subtle);
   font-weight: 600;
 }
 
 .content-html :deep(pre) {
-  background-color: #f6f8fa;
+  background-color: var(--app-surface-subtle);
   padding: 12px;
   border-radius: 4px;
   overflow-x: auto;
 }
 
 .content-html :deep(code) {
-  background-color: #f6f8fa;
+  background-color: var(--app-surface-subtle);
   padding: 2px 6px;
   border-radius: 3px;
   font-family: monospace;
 }
 
 .content-html :deep(a) {
-  color: #1890ff;
+  color: var(--app-accent);
   text-decoration: none;
 }
 
@@ -394,21 +394,21 @@ onMounted(() => {
   display: flex;
   align-items: center;
   padding: 12px 16px;
-  background-color: #fafafa;
-  border: 1px solid #e8e8e8;
+  background-color: var(--app-surface-subtle);
+  border: 1px solid var(--app-border);
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .attachment-item:hover {
-  background-color: #f0f0f0;
-  border-color: #1890ff;
+  background-color: var(--app-surface-hover);
+  border-color: var(--app-accent);
 }
 
 .file-icon {
   font-size: 24px;
-  color: #1890ff;
+  color: var(--app-accent);
   margin-right: 12px;
 }
 
@@ -421,21 +421,31 @@ onMounted(() => {
 
 .file-name {
   font-size: 14px;
-  color: #262626;
+  color: var(--app-text-primary);
 }
 
 .file-size {
   font-size: 12px;
-  color: #8c8c8c;
+  color: var(--app-text-muted);
 }
 
 .download-icon {
   font-size: 18px;
-  color: #1890ff;
+  color: var(--app-accent);
 }
 
 .detail-actions {
   display: flex;
   justify-content: center;
+}
+
+@media (max-width: 576px) {
+  .detail-title {
+    font-size: 20px;
+  }
+
+  .detail-meta {
+    gap: 10px;
+  }
 }
 </style>

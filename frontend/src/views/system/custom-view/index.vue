@@ -1,6 +1,6 @@
 <template>
-  <div class="custom-view-page">
-    <a-card :bordered="false">
+  <div class="app-page custom-view-page">
+    <a-card :bordered="false" class="app-surface-card">
       <div class="search-bar">
         <a-space>
           <a-input-search

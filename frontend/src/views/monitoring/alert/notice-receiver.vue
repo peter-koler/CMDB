@@ -1,6 +1,7 @@
 <template>
-  <a-card :bordered="false">
-    <a-space direction="vertical" style="width: 100%" :size="16">
+  <div class="app-page notice-receiver-page">
+    <a-card :bordered="false" class="app-surface-card">
+      <a-space direction="vertical" style="width: 100%" :size="16">
       <!-- 说明卡片 -->
       <a-alert type="info" show-icon>
         <template #message>通知渠道说明</template>
@@ -68,7 +69,7 @@
           </template>
         </template>
       </a-table>
-    </a-space>
+      </a-space>
 
     <!-- 新增/编辑模态框 -->
     <a-modal
@@ -391,7 +392,8 @@
         </template>
       </a-form>
     </a-modal>
-  </a-card>
+    </a-card>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -678,7 +680,7 @@ onMounted(loadData)
 }
 .form-help {
   margin-top: 4px;
-  color: #999;
+  color: var(--app-text-muted);
   font-size: 12px;
 }
 </style>

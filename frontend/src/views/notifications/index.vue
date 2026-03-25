@@ -1,6 +1,6 @@
 <template>
-  <div class="notification-page">
-    <a-card class="page-card" :bordered="false">
+  <div class="app-page notification-page">
+    <a-card class="page-card app-surface-card" :bordered="false">
       <template #title>
         <div class="page-header">
           <span class="page-title">{{ t('notifications.title') }}</span>
@@ -33,7 +33,7 @@
       </template>
 
       <!-- 搜索筛选 -->
-      <div class="search-bar">
+      <div class="search-bar app-toolbar">
         <a-form layout="inline">
           <a-form-item :label="t('notifications.search')">
             <a-input-search
@@ -92,7 +92,7 @@
         <template #bodyCell="{ column, record }">
           <!-- 类型 -->
           <template v-if="column.key === 'type'">
-            <a-tag :color="record.notification?.type?.color || '#1890ff'">
+            <a-tag :color="record.notification?.type?.color || 'var(--app-accent)'">
               <component :is="getIconComponent(record.notification?.type?.icon)" />
               {{ record.notification?.type?.name }}
             </a-tag>
@@ -167,7 +167,7 @@
     >
       <div class="notification-detail">
         <div class="detail-meta">
-          <a-tag :color="selectedNotification?.notification?.type?.color">
+          <a-tag :color="selectedNotification?.notification?.type?.color || 'var(--app-accent)'">
             {{ selectedNotification?.notification?.type?.name }}
           </a-tag>
           <span>{{ selectedNotification?.notification?.sender?.username }}</span>
@@ -420,11 +420,11 @@ const handleBatchDelete = () => {
 
 <style scoped>
 .notification-page {
-  padding: 16px;
+  min-height: 100%;
 }
 
 .page-card {
-  min-height: calc(100vh - 100px);
+  min-height: 100%;
 }
 
 .page-header {
@@ -434,20 +434,19 @@ const handleBatchDelete = () => {
 }
 
 .page-title {
+  color: var(--arco-text);
   font-size: 18px;
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .search-bar {
   margin-bottom: 16px;
   padding: 16px;
-  background: #fafafa;
-  border-radius: 4px;
 }
 
 .unread-text {
   font-weight: 600;
-  color: #262626;
+  color: var(--arco-text);
 }
 
 .content-preview {
@@ -471,14 +470,14 @@ const handleBatchDelete = () => {
   align-items: center;
   margin-bottom: 16px;
   padding-bottom: 16px;
-  border-bottom: 1px solid #f0f0f0;
-  color: #8c8c8c;
+  border-bottom: 1px solid var(--arco-border);
+  color: var(--arco-text-tertiary);
   font-size: 13px;
 }
 
 .detail-content {
   line-height: 1.8;
-  color: #262626;
+  color: var(--arco-text);
 }
 
 .detail-content :deep(p) {

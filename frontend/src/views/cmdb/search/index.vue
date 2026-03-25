@@ -1,6 +1,6 @@
 <template>
-  <div class="search-page">
-    <a-card :bordered="false">
+  <div class="app-page search-page">
+    <a-card :bordered="false" class="app-surface-card">
       <a-space direction="vertical" style="width: 100%" :size="16">
         <a-row :gutter="16">
           <a-col :xs="24" :sm="12" :md="8">
@@ -57,7 +57,7 @@
         >
           <template #bodyCell="{ column, record }">
             <template v-if="column.key === 'code'">
-              <a @click="handleView(record)" style="color: #1890ff; cursor: pointer;">
+              <a @click="handleView(record)" class="ci-link">
                 {{ record.code }}
               </a>
             </template>
@@ -243,5 +243,10 @@ const formatDateTime = (value: string) => {
 <style scoped>
 .search-page {
   padding: 16px;
+}
+
+.ci-link {
+  color: var(--app-accent);
+  cursor: pointer;
 }
 </style>

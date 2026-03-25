@@ -1,5 +1,5 @@
 <template>
-  <div class="dict-page">
+  <div class="app-page dict-page">
     <a-row :gutter="16" class="content-row">
       <a-col :xs="24" :lg="8">
         <a-card :bordered="false" class="table-card">

@@ -6,7 +6,7 @@
     <div class="notification-icon">
       <component
         :is="getIconComponent(notificationData?.type?.icon)"
-        :style="{ color: notificationData?.type?.color || '#1890ff' }"
+        :style="{ color: notificationData?.type?.color || 'var(--app-accent)' }"
       />
     </div>
     <div class="notification-content">
@@ -127,27 +127,28 @@ const handleDownload = (attachment: any) => {
   padding: 12px 16px;
   cursor: pointer;
   transition: background-color 0.2s;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--app-border);
   position: relative;
+  background: var(--app-surface-card);
 }
 
 .notification-item:hover {
-  background-color: #f5f5f5;
+  background-color: var(--app-surface-hover);
 }
 
 .notification-item.unread {
-  background-color: #e6f7ff;
+  background-color: color-mix(in srgb, var(--app-accent) 10%, var(--app-surface-card));
 }
 
 .notification-item.unread:hover {
-  background-color: #bae7ff;
+  background-color: color-mix(in srgb, var(--app-accent) 16%, var(--app-surface-card));
 }
 
 .notification-icon {
   width: 40px;
   height: 40px;
   border-radius: 50%;
-  background-color: #f0f0f0;
+  background-color: var(--app-surface-subtle);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -164,7 +165,7 @@ const handleDownload = (attachment: any) => {
 .notification-title {
   font-weight: 500;
   font-size: 14px;
-  color: #262626;
+  color: var(--app-text-primary);
   margin-bottom: 4px;
   white-space: nowrap;
   overflow: hidden;
@@ -177,7 +178,7 @@ const handleDownload = (attachment: any) => {
 
 .notification-body {
   font-size: 13px;
-  color: #595959;
+  color: var(--app-text-secondary);
   line-height: 1.5;
   margin-bottom: 8px;
   display: -webkit-box;
@@ -194,15 +195,15 @@ const handleDownload = (attachment: any) => {
   display: flex;
   gap: 12px;
   font-size: 12px;
-  color: #8c8c8c;
+  color: var(--app-text-muted);
 }
 
 .notification-time {
-  color: #bfbfbf;
+  color: var(--app-text-muted);
 }
 
 .notification-sender {
-  color: #8c8c8c;
+  color: var(--app-text-muted);
 }
 
 .notification-attachments {
@@ -211,7 +212,7 @@ const handleDownload = (attachment: any) => {
   gap: 8px;
   margin-bottom: 8px;
   font-size: 12px;
-  color: #1890ff;
+  color: var(--app-accent);
 }
 
 .attachment-link {
@@ -220,14 +221,14 @@ const handleDownload = (attachment: any) => {
 }
 
 .attachment-link:hover {
-  color: #40a9ff;
+  color: var(--app-accent);
 }
 
 .unread-indicator {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background-color: #1890ff;
+  background-color: var(--app-accent);
   position: absolute;
   top: 12px;
   right: 12px;

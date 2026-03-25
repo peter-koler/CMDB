@@ -1,6 +1,7 @@
 <template>
-  <a-card :bordered="false">
-    <a-space direction="vertical" style="width: 100%" :size="16">
+  <div class="app-page">
+    <a-card :bordered="false" class="app-surface-card">
+      <a-space direction="vertical" style="width: 100%" :size="16">
       <a-form layout="inline">
         <a-form-item label="关键字">
           <a-input v-model:value="keyword" placeholder="标签名/标签值" style="width: 220px" />
@@ -36,26 +37,27 @@
           </template>
         </template>
       </a-table>
-    </a-space>
+      </a-space>
 
-    <a-modal v-model:open="modalOpen" :title="editing?.id ? '编辑标签' : '新增标签'" @ok="saveLabel" :confirm-loading="saving">
-      <a-form layout="vertical" :model="formState">
-        <a-form-item label="标签名" required>
-          <a-input v-model:value="formState.name" />
-        </a-form-item>
-        <a-form-item label="标签值">
-          <a-input v-model:value="formState.value" />
-        </a-form-item>
-        <a-form-item label="颜色">
-          <a-select v-model:value="formState.color" allow-clear placeholder="选择颜色">
-            <a-select-option v-for="option in colorOptions" :key="option" :value="option">
-              <a-tag :color="option">{{ option }}</a-tag>
-            </a-select-option>
-          </a-select>
-        </a-form-item>
-      </a-form>
-    </a-modal>
-  </a-card>
+      <a-modal v-model:open="modalOpen" :title="editing?.id ? '编辑标签' : '新增标签'" @ok="saveLabel" :confirm-loading="saving">
+        <a-form layout="vertical" :model="formState">
+          <a-form-item label="标签名" required>
+            <a-input v-model:value="formState.name" />
+          </a-form-item>
+          <a-form-item label="标签值">
+            <a-input v-model:value="formState.value" />
+          </a-form-item>
+          <a-form-item label="颜色">
+            <a-select v-model:value="formState.color" allow-clear placeholder="选择颜色">
+              <a-select-option v-for="option in colorOptions" :key="option" :value="option">
+                <a-tag :color="option">{{ option }}</a-tag>
+              </a-select-option>
+            </a-select>
+          </a-form-item>
+        </a-form>
+      </a-modal>
+    </a-card>
+  </div>
 </template>
 
 <script setup lang="ts">

@@ -1,6 +1,6 @@
 <template>
-  <div class="view-designer-page">
-    <a-card :bordered="false" :body-style="{ padding: '16px' }">
+  <div class="app-page view-designer-page">
+    <a-card :bordered="false" class="app-surface-card" :body-style="{ padding: '16px' }">
       <div class="designer-header">
         <a-page-header :title="viewInfo.name" :sub-title="viewInfo.code" @back="goBack">
           <template #extra>
@@ -684,7 +684,7 @@ const goBack = () => {
 
 <style scoped>
 .view-designer-page {
-  height: 100vh;
+  height: calc(100vh - var(--app-content-padding) * 2);
   display: flex;
   flex-direction: column;
 }
@@ -694,18 +694,18 @@ const goBack = () => {
 }
 
 .designer-layout {
-  height: calc(100vh - 180px);
+  height: calc(100vh - 260px);
 }
 
 .tree-sider {
-  background: #fff;
-  border-right: 1px solid #f0f0f0;
+  background: var(--app-surface-card);
+  border-right: 1px solid var(--app-border);
   overflow: auto;
 }
 
 .tree-header {
   padding: 12px;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--app-border);
 }
 
 .tree-content {
@@ -732,7 +732,7 @@ const goBack = () => {
 .config-content {
   padding: 0;
   overflow: auto;
-  background: #fff;
+  background: var(--app-surface-card);
 }
 
 .node-config {

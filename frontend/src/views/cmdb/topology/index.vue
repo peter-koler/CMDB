@@ -1,5 +1,5 @@
 <template>
-  <div class="topology-page">
+  <div class="app-page topology-page">
     <a-card :bordered="false" class="search-card">
       <a-form layout="inline" class="search-form">
         <a-row :gutter="[12, 12]" class="topology-filter-row">
@@ -246,15 +246,21 @@ const getNodeIconUrl = (node: any) => {
   return modelMap.value[node?.model_id]?.icon_url || node?.model_icon_url || ''
 }
 
+const getThemeColor = (name: string, fallback: string) => {
+  if (typeof window === 'undefined') return fallback
+  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+  return value || fallback
+}
+
 const getNodeColor = (node: any) => {
   if (modelColorMap[node.model_id]) {
     return modelColorMap[node.model_id]
   }
   const colors = [
-    '#1890ff',
-    '#52c41a',
-    '#faad14',
-    '#f5222d',
+    getThemeColor('--app-accent', '#1677ff'),
+    getThemeColor('--arco-success', '#52c41a'),
+    getThemeColor('--arco-warning', '#faad14'),
+    getThemeColor('--arco-danger', '#f5222d'),
     '#722ed1',
     '#13c2c2',
     '#eb2f96',
@@ -276,7 +282,7 @@ const getAntdIconSvgMarkup = (iconName?: string) => {
       return h(iconComponent, {
         style: {
           fontSize: '24px',
-          color: '#1677ff'
+          color: getThemeColor('--app-accent', '#1677ff')
         }
       })
     }
@@ -292,7 +298,7 @@ const getAntdIconSvgMarkup = (iconName?: string) => {
   svg.setAttribute('height', '24')
   svg.setAttribute('viewBox', svg.getAttribute('viewBox') || '64 64 896 896')
   svg.setAttribute('fill', 'currentColor')
-  svg.style.color = '#1677ff'
+  svg.style.color = getThemeColor('--app-accent', '#1677ff')
   svg.style.display = 'block'
   const content = svg.outerHTML
   app.unmount()
@@ -379,11 +385,11 @@ const initGraph = () => {
       size: 40,
       style: {
         lineWidth: 2,
-        stroke: '#fff'
+        stroke: getThemeColor('--app-surface-card', '#ffffff')
       },
       labelCfg: {
         style: {
-          fill: '#000',
+          fill: getThemeColor('--app-text-primary', '#1f1f1f'),
           fontSize: 12
         },
         position: 'bottom'
@@ -392,7 +398,7 @@ const initGraph = () => {
     defaultEdge: {
       type: 'cubic-horizontal',
       style: {
-        stroke: '#91d5ff',
+        stroke: getThemeColor('--app-accent-soft', '#91d5ff'),
         lineWidth: 2,
         endArrow: true
       }
@@ -432,7 +438,7 @@ const renderGraph = () => {
       lineWidth: 0,
       labelText: getNodePrimaryText(node),
       labelPlacement: 'bottom',
-      labelFill: '#1f1f1f',
+      labelFill: getThemeColor('--app-text-primary', '#1f1f1f'),
       labelFontSize: 12
     },
     label: getNodePrimaryText(node)

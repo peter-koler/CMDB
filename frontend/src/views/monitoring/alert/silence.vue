@@ -1,6 +1,7 @@
 <template>
-  <a-card :bordered="false">
-    <a-space direction="vertical" style="width: 100%" :size="16">
+  <div class="app-page alert-silence-page">
+    <a-card :bordered="false" class="app-surface-card">
+      <a-space direction="vertical" style="width: 100%" :size="16">
       <!-- 说明卡片 -->
       <a-alert type="info" show-icon>
         <template #message>告警静默说明</template>
@@ -66,7 +67,7 @@
           </template>
         </template>
       </a-table>
-    </a-space>
+      </a-space>
 
     <a-modal v-model:open="modalOpen" :title="editing?.id ? '编辑告警静默' : '新增告警静默'" :confirm-loading="saving" width="750px" @ok="saveItem">
       <a-form layout="vertical" :model="formState">
@@ -192,7 +193,8 @@
         </a-form-item>
       </a-form>
     </a-modal>
-  </a-card>
+    </a-card>
+  </div>
 </template>
 
 <script setup lang="ts">

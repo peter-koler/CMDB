@@ -1,6 +1,7 @@
 <template>
-  <a-card :bordered="false">
-    <a-space direction="vertical" style="width: 100%" :size="16">
+  <div class="app-page">
+    <a-card :bordered="false" class="app-surface-card">
+      <a-space direction="vertical" style="width: 100%" :size="16">
       <a-row :gutter="[16, 16]">
         <a-col :xs="24" :sm="8">
           <a-card size="small"><a-statistic title="总采集器" :value="collectors.length" /></a-card>
@@ -61,62 +62,63 @@
           </template>
         </template>
       </a-table>
-    </a-space>
+      </a-space>
 
-    <!-- 采集器详情抽屉 -->
-    <a-drawer v-model:open="drawerOpen" title="采集器详情" width="480">
-      <a-descriptions :column="1" bordered size="small">
-        <a-descriptions-item label="Collector ID">{{ currentCollector?.id || '-' }}</a-descriptions-item>
-        <a-descriptions-item label="名称">{{ currentCollector?.name || '-' }}</a-descriptions-item>
-        <a-descriptions-item label="地址">{{ currentCollector?.ip || '-' }}</a-descriptions-item>
-        <a-descriptions-item label="状态">
-          <a-tag :color="statusColor(currentCollector?.status)">{{ formatStatus(currentCollector?.status) }}</a-tag>
-        </a-descriptions-item>
-        <a-descriptions-item label="版本">{{ currentCollector?.version || '-' }}</a-descriptions-item>
-        <a-descriptions-item label="心跳时间">{{ currentCollector?.updated_at || '-' }}</a-descriptions-item>
-        <a-descriptions-item label="任务数">{{ currentCollector?.task_count ?? 0 }}</a-descriptions-item>
-        <a-descriptions-item label="运行时长">{{ formatRuntime((currentCollector as any)?.uptime_seconds) ?? '-' }}</a-descriptions-item>
-        <a-descriptions-item label="系统负载">{{ (currentCollector as any)?.system_load ?? '-' }}</a-descriptions-item>
-        <a-descriptions-item label="内存使用">{{ formatMemory((currentCollector as any)?.memory_usage) ?? '-' }}</a-descriptions-item>
-      </a-descriptions>
-    </a-drawer>
+      <!-- 采集器详情抽屉 -->
+      <a-drawer v-model:open="drawerOpen" title="采集器详情" width="480">
+        <a-descriptions :column="1" bordered size="small">
+          <a-descriptions-item label="Collector ID">{{ currentCollector?.id || '-' }}</a-descriptions-item>
+          <a-descriptions-item label="名称">{{ currentCollector?.name || '-' }}</a-descriptions-item>
+          <a-descriptions-item label="地址">{{ currentCollector?.ip || '-' }}</a-descriptions-item>
+          <a-descriptions-item label="状态">
+            <a-tag :color="statusColor(currentCollector?.status)">{{ formatStatus(currentCollector?.status) }}</a-tag>
+          </a-descriptions-item>
+          <a-descriptions-item label="版本">{{ currentCollector?.version || '-' }}</a-descriptions-item>
+          <a-descriptions-item label="心跳时间">{{ currentCollector?.updated_at || '-' }}</a-descriptions-item>
+          <a-descriptions-item label="任务数">{{ currentCollector?.task_count ?? 0 }}</a-descriptions-item>
+          <a-descriptions-item label="运行时长">{{ formatRuntime((currentCollector as any)?.uptime_seconds) ?? '-' }}</a-descriptions-item>
+          <a-descriptions-item label="系统负载">{{ (currentCollector as any)?.system_load ?? '-' }}</a-descriptions-item>
+          <a-descriptions-item label="内存使用">{{ formatMemory((currentCollector as any)?.memory_usage) ?? '-' }}</a-descriptions-item>
+        </a-descriptions>
+      </a-drawer>
 
-    <!-- 查看任务抽屉 -->
-    <a-drawer v-model:open="monitorsDrawerOpen" title="采集器任务列表" width="640">
-      <a-descriptions :column="1" bordered size="small" class="mb-4">
-        <a-descriptions-item label="Collector">{{ currentCollector?.name || currentCollector?.id }}</a-descriptions-item>
-        <a-descriptions-item label="状态">
-          <a-tag :color="statusColor(currentCollector?.status)">{{ formatStatus(currentCollector?.status) }}</a-tag>
-        </a-descriptions-item>
-        <a-descriptions-item label="绑定任务数">{{ collectorMonitors.length }}</a-descriptions-item>
-      </a-descriptions>
+      <!-- 查看任务抽屉 -->
+      <a-drawer v-model:open="monitorsDrawerOpen" title="采集器任务列表" width="640">
+        <a-descriptions :column="1" bordered size="small" class="mb-4">
+          <a-descriptions-item label="Collector">{{ currentCollector?.name || currentCollector?.id }}</a-descriptions-item>
+          <a-descriptions-item label="状态">
+            <a-tag :color="statusColor(currentCollector?.status)">{{ formatStatus(currentCollector?.status) }}</a-tag>
+          </a-descriptions-item>
+          <a-descriptions-item label="绑定任务数">{{ collectorMonitors.length }}</a-descriptions-item>
+        </a-descriptions>
 
-      <a-table
-        :loading="monitorsLoading"
-        :columns="monitorColumns"
-        :data-source="collectorMonitors"
-        size="small"
-        :pagination="{ pageSize: 10 }"
-        row-key="monitor_id"
-      >
-        <template #bodyCell="{ column, record }">
-          <template v-if="column.key === 'status'">
-            <a-tag :color="record.status === 1 ? 'green' : record.status === 2 ? 'red' : 'default'">
-              {{ record.status === 1 ? '运行中' : record.status === 2 ? '异常' : '暂停' }}
-            </a-tag>
+        <a-table
+          :loading="monitorsLoading"
+          :columns="monitorColumns"
+          :data-source="collectorMonitors"
+          size="small"
+          :pagination="{ pageSize: 10 }"
+          row-key="monitor_id"
+        >
+          <template #bodyCell="{ column, record }">
+            <template v-if="column.key === 'status'">
+              <a-tag :color="record.status === 1 ? 'green' : record.status === 2 ? 'red' : 'default'">
+                {{ record.status === 1 ? '运行中' : record.status === 2 ? '异常' : '暂停' }}
+              </a-tag>
+            </template>
+            <template v-if="column.key === 'pinned'">
+              <a-tag :color="record.pinned ? 'blue' : 'default'">
+                {{ record.pinned ? '固定分配' : '自动分配' }}
+              </a-tag>
+            </template>
           </template>
-          <template v-if="column.key === 'pinned'">
-            <a-tag :color="record.pinned ? 'blue' : 'default'">
-              {{ record.pinned ? '固定分配' : '自动分配' }}
-            </a-tag>
+          <template #empty>
+            <a-empty description="暂无绑定的监控任务" />
           </template>
-        </template>
-        <template #empty>
-          <a-empty description="暂无绑定的监控任务" />
-        </template>
-      </a-table>
-    </a-drawer>
-  </a-card>
+        </a-table>
+      </a-drawer>
+    </a-card>
+  </div>
 </template>
 
 <script setup lang="ts">

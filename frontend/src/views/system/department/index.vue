@@ -1,5 +1,5 @@
 <template>
-  <div class="department-page">
+  <div class="app-page department-page">
     <a-row :gutter="16" class="full-height">
       <!-- 左侧部门树 -->
       <a-col :xs="24" :sm="8" :md="6" :lg="5" class="tree-col">

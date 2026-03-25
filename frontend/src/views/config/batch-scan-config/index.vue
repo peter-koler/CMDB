@@ -1,5 +1,5 @@
 <template>
-  <div class="batch-scan-config-page">
+  <div class="app-page batch-scan-config-page">
     <a-card :bordered="false" class="search-card">
       <a-form layout="inline" class="search-form">
         <a-row :gutter="[16, 16]" style="width: 100%">

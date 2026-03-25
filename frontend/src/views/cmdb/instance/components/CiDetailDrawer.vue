@@ -85,7 +85,7 @@
                 <div class="attribute-line">
                   <span class="attribute-line-label">
                     <span v-if="isKeyField(field.code)" class="key-field-star">*</span>
-                    {{ field.name }}<span v-if="field.required" style="color:#f5222d;">*</span>：
+                    {{ field.name }}<span v-if="field.required" class="required-star">*</span>：
                   </span>
                   <div class="attribute-line-value-box">
                     <template v-if="field.field_type === 'boolean'">
@@ -146,11 +146,11 @@
             </template>
             <template v-else-if="column.key === 'change'">
               <div v-if="record.old_value || record.new_value">
-                <span v-if="record.old_value" style="color: #cf132d; text-decoration: line-through;">
+                <span v-if="record.old_value" class="history-old-value">
                   {{ truncate(record.old_value, 50) }}
                 </span>
                 <span v-if="record.old_value && record.new_value"> → </span>
-                <span v-if="record.new_value" style="color: #3f8600;">
+                <span v-if="record.new_value" class="history-new-value">
                   {{ truncate(record.new_value, 50) }}
                 </span>
               </div>
@@ -404,15 +404,22 @@ const iconComponentMap: Record<string, any> = {
 
 const builtinIconDataUrlCache: Record<string, string> = {}
 
+const getThemeColor = (name: string, fallback: string) => {
+  if (typeof window === 'undefined') return fallback
+  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+  return value || fallback
+}
+
 const getAntdIconSvgMarkup = (iconName?: string) => {
   const iconComponent = iconComponentMap[iconName || ''] || AppstoreOutlined
+  const accentColor = getThemeColor('--app-accent', '#1677ff')
   const container = document.createElement('div')
   const app = createApp({
     render() {
       return h(iconComponent, {
         style: {
           fontSize: '24px',
-          color: '#1677ff'
+          color: accentColor
         }
       })
     }
@@ -428,7 +435,7 @@ const getAntdIconSvgMarkup = (iconName?: string) => {
   svg.setAttribute('height', '24')
   svg.setAttribute('viewBox', svg.getAttribute('viewBox') || '64 64 896 896')
   svg.setAttribute('fill', 'currentColor')
-  svg.style.color = '#1677ff'
+  svg.style.color = accentColor
   svg.style.display = 'block'
   const content = svg.outerHTML
   app.unmount()
@@ -482,6 +489,8 @@ const applyGraphData = (data: { nodes: any[]; edges: any[] }) => {
 
 const initGraph = () => {
   if (!graphContainer.value) return
+  const textColor = getThemeColor('--app-text-primary', '#1f1f1f')
+  const edgeColor = getThemeColor('--app-border', '#91d5ff')
 
   graph = new Graph({
     container: graphContainer.value,
@@ -495,7 +504,7 @@ const initGraph = () => {
       },
       labelCfg: {
         style: {
-          fill: '#1f1f1f',
+          fill: textColor,
           fontSize: 12
         },
         position: 'bottom'
@@ -504,7 +513,7 @@ const initGraph = () => {
     defaultEdge: {
       type: 'cubic-horizontal',
       style: {
-        stroke: '#91d5ff',
+        stroke: edgeColor,
         lineWidth: 2,
         endArrow: true
       }
@@ -540,6 +549,9 @@ const initGraph = () => {
 
 const renderGraph = () => {
   if (!graph) return
+  const textColor = getThemeColor('--app-text-primary', '#1f1f1f')
+  const edgeColor = getThemeColor('--app-border', '#91d5ff')
+  const successColor = getThemeColor('--arco-success', '#52c41a')
 
   const nodes = graphNodes.value.map((node) => ({
     id: String(node.id),
@@ -553,7 +565,7 @@ const renderGraph = () => {
       lineWidth: 0,
       labelText: getNodeDisplayText(node),
       labelPlacement: 'bottom',
-      labelFill: '#1f1f1f',
+      labelFill: textColor,
       labelFontSize: 12
     },
     label: getNodeDisplayText(node)
@@ -564,7 +576,7 @@ const renderGraph = () => {
     source: String(edge.source),
     target: String(edge.target),
     style: {
-      stroke: edge.direction === 'bidirectional' ? '#52c41a' : '#91d5ff',
+      stroke: edge.direction === 'bidirectional' ? successColor : edgeColor,
       lineDash: edge.source_type === 'reference' ? [5, 5] : undefined,
       endArrow: edge.direction === 'directed',
       labelText: edge.relation_type_name || ''
@@ -1366,7 +1378,7 @@ onMounted(() => {
 .attributes-empty {
   padding: 24px;
   text-align: center;
-  color: #999;
+  color: var(--app-text-muted);
 }
 
 .attributes-layout {
@@ -1376,16 +1388,16 @@ onMounted(() => {
 }
 
 .attributes-section-simple {
-  border: 1px solid #eef3fb;
+  border: 1px solid var(--app-border);
   border-radius: 8px;
   padding: 10px;
-  background: #fff;
+  background: var(--app-surface-card);
 }
 
 .attributes-section-title {
   font-size: 13px;
   font-weight: 600;
-  color: #1f1f1f;
+  color: var(--app-text-primary);
   margin-bottom: 10px;
   cursor: pointer;
   user-select: none;
@@ -1409,13 +1421,17 @@ onMounted(() => {
   line-height: 34px;
   font-size: 13px;
   font-weight: 600;
-  color: #262626;
+  color: var(--app-text-primary);
 }
 
 .key-field-star {
-  color: #f5222d;
+  color: var(--arco-danger);
   margin-right: 2px;
   font-weight: 700;
+}
+
+.required-star {
+  color: var(--arco-danger);
 }
 
 .attribute-line-value-box {
@@ -1424,10 +1440,10 @@ onMounted(() => {
   line-height: 34px;
   padding: 0 10px;
   border-radius: 6px;
-  background: #eaf4ff;
-  border: 1px solid #cfe3ff;
+  background: color-mix(in srgb, var(--app-accent) 10%, var(--app-surface-card));
+  border: 1px solid color-mix(in srgb, var(--app-accent) 22%, var(--app-border));
   font-size: 13px;
-  color: #1d4e89;
+  color: var(--app-text-primary);
   word-break: break-word;
 }
 
@@ -1441,7 +1457,7 @@ onMounted(() => {
 }
 
 .empty-value {
-  color: #999;
+  color: var(--app-text-muted);
 }
 
 .image-thumb-list {
@@ -1456,10 +1472,10 @@ onMounted(() => {
   width: 56px;
   height: 56px;
   border-radius: 6px;
-  border: 1px solid #d9e9ff;
+  border: 1px solid color-mix(in srgb, var(--app-accent) 18%, var(--app-border));
   object-fit: cover;
   cursor: pointer;
-  background: #fff;
+  background: var(--app-surface-card);
 }
 
 .file-entry-list {
@@ -1471,22 +1487,31 @@ onMounted(() => {
 }
 
 .file-entry-link {
-  color: #1677ff;
+  color: var(--app-accent);
   text-decoration: none;
   cursor: pointer;
 }
 
 .file-entry-link:hover {
-  color: #4096ff;
+  color: var(--arco-primary-hover);
   text-decoration: underline;
+}
+
+.history-old-value {
+  color: var(--arco-danger);
+  text-decoration: line-through;
+}
+
+.history-new-value {
+  color: var(--arco-success);
 }
 
 .ci-graph-container {
   width: 100%;
   height: 400px;
-  border: 1px solid #e8e8e8;
+  border: 1px solid var(--app-border);
   border-radius: 4px;
-  background: #fafafa;
+  background: var(--app-surface-subtle);
 }
 
 .topology-node-panel {

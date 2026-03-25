@@ -1,5 +1,5 @@
 <template>
-  <div class="user-page">
+  <div class="app-page user-page">
     <div class="page-header">
       <h2>用户管理</h2>
     </div>
@@ -56,7 +56,7 @@
       <template #bodyCell="{ column, record }">
         <template v-if="column.key === 'username'">
           <a-space>
-            <a-avatar size="small" style="background-color: #1890ff">
+            <a-avatar size="small" :style="{ backgroundColor: 'var(--app-accent)' }">
               {{ record.username?.charAt(0)?.toUpperCase() }}
             </a-avatar>
             <span>{{ record.username }}</span>
@@ -104,7 +104,7 @@
               title="确定解锁该用户吗？"
               @confirm="handleUnlock(record)"
             >
-              <a-button type="link" size="small" style="color: #faad14">解锁</a-button>
+              <a-button type="link" size="small" :style="{ color: 'var(--arco-warning)' }">解锁</a-button>
             </a-popconfirm>
             <a-popconfirm
               v-if="record.username !== 'admin'"
@@ -564,20 +564,19 @@ const handleUnlock = async (record: any) => {
 
 <style scoped>
 .user-page {
-  height: 100%;
+  min-height: 100%;
 }
 
 .page-header {
-  margin-bottom: 16px;
+  margin-bottom: 0;
 }
 
 .page-header h2 {
   margin: 0;
+  color: var(--arco-text);
 }
 
 .search-bar {
-  display: flex;
-  justify-content: space-between;
   margin-bottom: 16px;
 }
 </style>

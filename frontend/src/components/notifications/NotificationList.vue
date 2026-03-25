@@ -62,14 +62,18 @@ defineEmits<{
 
 .empty-state {
   padding: 40px 0;
+  background: var(--app-surface-card);
 }
 
 .list-container {
   min-height: 100px;
+  background: var(--app-surface-card);
 }
 
 .load-more {
   text-align: center;
   padding: 12px;
+  border-top: 1px solid var(--app-border);
+  background: var(--app-surface-subtle);
 }
 </style>

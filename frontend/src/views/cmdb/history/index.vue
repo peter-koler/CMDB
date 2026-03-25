@@ -1,6 +1,6 @@
 <template>
-  <div class="history-page">
-    <a-card :bordered="false">
+  <div class="app-page history-page">
+    <a-card :bordered="false" class="app-surface-card">
       <a-space direction="vertical" style="width: 100%" :size="16">
         <a-row :gutter="16">
           <a-col :xs="24" :sm="12" :md="6">
@@ -47,7 +47,7 @@
         >
           <template #bodyCell="{ column, record }">
             <template v-if="column.key === 'ci'">
-              <a @click="viewCi(record)" style="color: #1890ff; cursor: pointer;">
+              <a @click="viewCi(record)" class="ci-link">
                 {{ record.ci?.name || record.ci_id }}
               </a>
             </template>
@@ -58,14 +58,14 @@
             </template>
             <template v-else-if="column.key === 'change'">
               <div v-if="record.old_value || record.new_value">
-                <div v-if="record.attribute_name" style="font-weight: 500; margin-bottom: 4px;">
+                <div v-if="record.attribute_name" class="history-attr-name">
                   {{ record.attribute_name }}
                 </div>
-                <span v-if="record.old_value" style="color: #cf132d; text-decoration: line-through;">
+                <span v-if="record.old_value" class="history-old-value">
                   {{ truncate(record.old_value, 30) }}
                 </span>
                 <span v-if="record.old_value && record.new_value"> → </span>
-                <span v-if="record.new_value" style="color: #3f8600;">
+                <span v-if="record.new_value" class="history-new-value">
                   {{ truncate(record.new_value, 30) }}
                 </span>
               </div>
@@ -211,5 +211,25 @@ const truncate = (str: string, maxLen: number) => {
 <style scoped>
 .history-page {
   padding: 16px;
+}
+
+.ci-link {
+  color: var(--app-accent);
+  cursor: pointer;
+}
+
+.history-attr-name {
+  font-weight: 500;
+  margin-bottom: 4px;
+  color: var(--app-text-primary);
+}
+
+.history-old-value {
+  color: var(--arco-danger);
+  text-decoration: line-through;
+}
+
+.history-new-value {
+  color: var(--arco-success);
 }
 </style>

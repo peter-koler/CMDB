@@ -1,6 +1,7 @@
 <template>
-  <a-card :bordered="false">
-    <a-space direction="vertical" style="width: 100%" :size="16">
+  <div class="app-page alert-detail-page">
+    <a-card :bordered="false" class="app-surface-card">
+      <a-space direction="vertical" style="width: 100%" :size="16">
       <div class="alert-detail-header">
         <div>
           <div class="alert-title">{{ alertDetail?.name || '告警明细' }}</div>
@@ -257,8 +258,9 @@
           <a-empty v-if="!noticesLoading && !alertNotifications.length" description="暂无告警通知记录" />
         </a-tab-pane>
       </a-tabs>
-    </a-space>
-  </a-card>
+      </a-space>
+    </a-card>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -885,7 +887,7 @@ watch(
 }
 
 .alert-time {
-  color: #8c8c8c;
+  color: var(--app-text-muted);
   font-size: 12px;
   margin-top: 4px;
 }
@@ -902,8 +904,8 @@ watch(
 }
 
 .alert-chip-group :deep(.alert-chip--neutral) {
-  border: 1px solid #e6e8eb;
-  background: #f6f8fb;
-  color: #1f1f1f;
+  border: 1px solid var(--app-border);
+  background: var(--app-surface-subtle);
+  color: var(--app-text-primary);
 }
 </style>

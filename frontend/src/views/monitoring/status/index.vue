@@ -1,6 +1,7 @@
 <template>
-  <a-card :bordered="false">
-    <a-space direction="vertical" style="width: 100%" :size="16">
+  <div class="app-page">
+    <a-card :bordered="false" class="app-surface-card">
+      <a-space direction="vertical" style="width: 100%" :size="16">
       <a-form layout="inline">
         <a-form-item label="关键字">
           <a-input v-model:value="keyword" placeholder="状态页名称/slug" style="width: 240px" />
@@ -54,40 +55,41 @@
           </template>
         </template>
       </a-table>
-    </a-space>
+      </a-space>
 
-    <a-modal v-model:open="modalOpen" :title="editing?.id ? '编辑状态页' : '新增状态页'" @ok="saveStatusPage" :confirm-loading="saving">
-      <a-form layout="vertical" :model="formState">
-        <a-form-item label="名称" required>
-          <a-input v-model:value="formState.name" />
-        </a-form-item>
-        <a-form-item label="Slug">
-          <a-input v-model:value="formState.slug" />
-        </a-form-item>
-        <a-form-item label="状态">
-          <a-input v-model:value="formState.status" placeholder="active / maintenance" />
-        </a-form-item>
-        <a-form-item label="页面标题">
-          <a-input v-model:value="formState.title" placeholder="用于状态页展示标题" />
-        </a-form-item>
-        <a-form-item label="Logo URL">
-          <a-input v-model:value="formState.logo" placeholder="https://..." />
-        </a-form-item>
-        <a-form-item label="主题色">
-          <a-input v-model:value="formState.theme_color" placeholder="#1677ff" />
-        </a-form-item>
-        <a-form-item label="展示监控ID">
-          <a-input v-model:value="formState.monitor_ids" placeholder="逗号分隔，如 1,2,3" />
-        </a-form-item>
-        <a-form-item label="订阅对象">
-          <a-input v-model:value="formState.subscribers" placeholder="邮箱/用户ID，逗号分隔" />
-        </a-form-item>
-        <a-form-item label="公开访问">
-          <a-switch v-model:checked="formState.is_public" />
-        </a-form-item>
-      </a-form>
-    </a-modal>
-  </a-card>
+      <a-modal v-model:open="modalOpen" :title="editing?.id ? '编辑状态页' : '新增状态页'" @ok="saveStatusPage" :confirm-loading="saving">
+        <a-form layout="vertical" :model="formState">
+          <a-form-item label="名称" required>
+            <a-input v-model:value="formState.name" />
+          </a-form-item>
+          <a-form-item label="Slug">
+            <a-input v-model:value="formState.slug" />
+          </a-form-item>
+          <a-form-item label="状态">
+            <a-input v-model:value="formState.status" placeholder="active / maintenance" />
+          </a-form-item>
+          <a-form-item label="页面标题">
+            <a-input v-model:value="formState.title" placeholder="用于状态页展示标题" />
+          </a-form-item>
+          <a-form-item label="Logo URL">
+            <a-input v-model:value="formState.logo" placeholder="https://..." />
+          </a-form-item>
+          <a-form-item label="主题色">
+            <a-input v-model:value="formState.theme_color" placeholder="#1677ff" />
+          </a-form-item>
+          <a-form-item label="展示监控ID">
+            <a-input v-model:value="formState.monitor_ids" placeholder="逗号分隔，如 1,2,3" />
+          </a-form-item>
+          <a-form-item label="订阅对象">
+            <a-input v-model:value="formState.subscribers" placeholder="邮箱/用户ID，逗号分隔" />
+          </a-form-item>
+          <a-form-item label="公开访问">
+            <a-switch v-model:checked="formState.is_public" />
+          </a-form-item>
+        </a-form>
+      </a-modal>
+    </a-card>
+  </div>
 </template>
 
 <script setup lang="ts">

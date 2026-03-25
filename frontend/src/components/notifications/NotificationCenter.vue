@@ -171,12 +171,14 @@ const goToNotificationPage = () => {
   justify-content: space-between;
   align-items: center;
   padding: 12px 16px;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--app-border);
+  background: var(--app-surface-card);
 }
 
 .header-title {
   font-size: 16px;
   font-weight: 500;
+  color: var(--app-text-primary);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -198,7 +200,8 @@ const goToNotificationPage = () => {
 
 .notification-footer {
   padding: 8px 16px;
-  border-top: 1px solid #f0f0f0;
+  border-top: 1px solid var(--app-border);
+  background: var(--app-surface-card);
   text-align: center;
 }
 </style>

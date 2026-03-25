@@ -61,7 +61,7 @@
             @drop="handleDrop"
           >
             <div v-if="canvasItems.length === 0" class="canvas-empty">
-              <InboxOutlined style="font-size: 48px; color: #ccc;" />
+              <InboxOutlined class="empty-state-icon empty-state-icon-lg" />
               <p>拖拽控件到此处</p>
             </div>
             
@@ -581,7 +581,7 @@
               </a-form>
             </template>
             <div v-else class="empty-property">
-              <InboxOutlined style="font-size: 32px; color: #ccc;" />
+              <InboxOutlined class="empty-state-icon" />
               <p>请选择画布中的控件</p>
             </div>
           </div>
@@ -1535,23 +1535,23 @@ const handleSave = async () => {
   height: 100%;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid #f0f0f0;
+  border-right: 1px solid var(--app-border);
 }
 
 .left-panel {
-  background: #fafafa;
+  background: var(--app-surface-subtle);
 }
 
 .right-panel {
   border-right: none;
-  background: #fafafa;
+  background: var(--app-surface-subtle);
 }
 
 .panel-title {
   padding: 12px 16px;
   font-weight: 600;
-  border-bottom: 1px solid #f0f0f0;
-  background: #fff;
+  border-bottom: 1px solid var(--app-border);
+  background: var(--app-surface-card);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -1585,16 +1585,16 @@ const handleSave = async () => {
   gap: 6px;
   min-height: 84px;
   padding: 10px 8px;
-  background: #fff;
-  border: 1px solid #e8e8e8;
+  background: var(--app-surface-card);
+  border: 1px solid var(--app-border);
   border-radius: 4px;
   cursor: grab;
   transition: all 0.2s;
 }
 
 .control-item:hover {
-  border-color: #1890ff;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  border-color: var(--app-accent);
+  box-shadow: var(--app-shadow-sm);
 }
 
 .control-item:active {
@@ -1607,7 +1607,7 @@ const handleSave = async () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #e6f7ff;
+  background: var(--app-accent-soft);
   border-radius: 4px;
   font-size: 12px;
 }
@@ -1615,17 +1615,18 @@ const handleSave = async () => {
 .control-name {
   text-align: center;
   font-size: 13px;
+  color: var(--app-text-primary);
 }
 
 .center-panel {
-  background: #f5f5f5;
+  background: var(--arco-fill);
 }
 
 .canvas-area {
   flex: 1;
   padding: 16px;
   overflow: auto;
-  background: #fff;
+  background: var(--app-surface-card);
   min-height: 400px;
 }
 
@@ -1635,9 +1636,18 @@ const handleSave = async () => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  color: #999;
-  border: 2px dashed #ddd;
+  color: var(--app-text-muted);
+  border: 2px dashed var(--app-border);
   border-radius: 8px;
+}
+
+.empty-state-icon {
+  font-size: 32px;
+  color: var(--app-text-muted);
+}
+
+.empty-state-icon-lg {
+  font-size: 48px;
 }
 
 .canvas-items {
@@ -1654,23 +1664,23 @@ const handleSave = async () => {
 }
 
 .canvas-field:hover {
-  border-color: #d9d9d9;
+  border-color: var(--app-border);
 }
 
 .canvas-field.selected {
-  border-color: #1890ff;
-  background: #e6f7ff;
+  border-color: var(--app-accent);
+  background: var(--app-accent-soft);
 }
 
 .canvas-field.drag-over {
-  border-color: #1890ff;
-  background: #e6f7ff;
+  border-color: var(--app-accent);
+  background: var(--app-accent-soft);
   transform: scale(1.02);
 }
 
 .canvas-group.drag-over {
-  border-color: #1890ff;
-  background: #e6f7ff;
+  border-color: var(--app-accent);
+  background: var(--app-accent-soft);
 }
 
 .field-label {
@@ -1680,7 +1690,7 @@ const handleSave = async () => {
 }
 
 .required-mark {
-  color: #ff4d4f;
+  color: var(--arco-danger);
   margin-left: 4px;
 }
 
@@ -1701,20 +1711,20 @@ const handleSave = async () => {
 
 .canvas-group {
   margin-bottom: 16px;
-  border: 1px solid #e8e8e8;
+  border: 1px solid var(--app-border);
   border-radius: 4px;
   overflow: visible;
   height: auto;
 }
 
 .canvas-group.selected {
-  border-color: #1890ff;
+  border-color: var(--app-accent);
 }
 
 .group-header {
   padding: 8px 12px;
-  background: #fafafa;
-  border-bottom: 1px solid #e8e8e8;
+  background: var(--app-surface-subtle);
+  border-bottom: 1px solid var(--app-border);
   font-weight: 600;
   display: flex;
   justify-content: space-between;
@@ -1739,8 +1749,8 @@ const handleSave = async () => {
 .group-code-tag {
   margin-left: 8px;
   font-size: 12px;
-  color: #1677ff;
-  background: #e6f4ff;
+  color: var(--app-accent);
+  background: var(--app-accent-soft);
   border-radius: 10px;
   padding: 1px 8px;
 }
@@ -1757,9 +1767,9 @@ const handleSave = async () => {
 .drop-hint {
   padding: 16px;
   text-align: center;
-  border: 1px dashed #ddd;
+  border: 1px dashed var(--app-border);
   border-radius: 4px;
-  color: #999;
+  color: var(--app-text-muted);
   margin-top: 8px;
 }
 
@@ -1775,18 +1785,18 @@ const handleSave = async () => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  color: #999;
+  color: var(--app-text-muted);
 }
 
 .options-editor {
   padding: 8px;
-  background: #fafafa;
+  background: var(--app-surface-subtle);
   border-radius: 4px;
 }
 
 .table-columns-editor {
   padding: 8px;
-  background: #fafafa;
+  background: var(--app-surface-subtle);
   border-radius: 4px;
 }
 
@@ -1806,7 +1816,7 @@ const handleSave = async () => {
 
 .preview-group {
   padding: 16px;
-  background: #fafafa;
+  background: var(--app-surface-subtle);
   border-radius: 4px;
   margin-bottom: 16px;
 }
@@ -1815,18 +1825,18 @@ const handleSave = async () => {
   font-weight: 600;
   margin-bottom: 16px;
   padding-bottom: 8px;
-  border-bottom: 1px solid #e8e8e8;
+  border-bottom: 1px solid var(--app-border);
 }
 
 .group-collapsed-tip {
-  color: #8c8c8c;
+  color: var(--app-text-secondary);
   font-size: 12px;
   margin-bottom: 8px;
 }
 
 .help-text {
   font-size: 12px;
-  color: #999;
+  color: var(--app-text-muted);
   margin-top: 4px;
 }
 

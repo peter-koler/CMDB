@@ -1,6 +1,7 @@
 <template>
-  <a-card :bordered="false">
-    <a-space direction="vertical" style="width: 100%" :size="16">
+  <div class="app-page">
+    <a-card :bordered="false" class="app-surface-card">
+      <a-space direction="vertical" style="width: 100%" :size="16">
       <a-row :gutter="[16, 16]">
         <a-col :xs="24" :sm="12" :lg="6">
           <a-card size="small"><a-statistic title="监控总数" :value="overview.total_monitors" /></a-card>
@@ -23,8 +24,9 @@
       </a-space>
 
       <a-table :loading="loading" :columns="columns" :data-source="topAlertMonitors" row-key="name" :pagination="false" />
-    </a-space>
-  </a-card>
+      </a-space>
+    </a-card>
+  </div>
 </template>
 
 <script setup lang="ts">

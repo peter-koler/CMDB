@@ -1,6 +1,6 @@
 <template>
-  <div class="send-notification-page">
-    <a-card :bordered="false">
+  <div class="app-page send-notification-page">
+    <a-card :bordered="false" class="app-surface-card">
       <template #title>
         <div class="page-header">
           <a-button type="link" @click="goBack">
@@ -372,7 +372,7 @@ const goBack = () => {
 
 <style scoped>
 .send-notification-page {
-  padding: 16px;
+  padding: 0;
 }
 
 .page-header {
@@ -388,17 +388,17 @@ const goBack = () => {
 
 .form-hint {
   margin-top: 4px;
-  color: #8c8c8c;
+  color: var(--app-text-muted);
   font-size: 12px;
 }
 
 .preview-card {
-  background: #fafafa;
+  background: var(--app-surface-subtle);
 }
 
 .preview-header {
   padding-bottom: 12px;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--app-border);
   margin-bottom: 12px;
 }
 
@@ -409,7 +409,7 @@ const goBack = () => {
 
 .preview-content {
   line-height: 1.8;
-  color: #262626;
+  color: var(--app-text-primary);
 }
 
 .preview-content :deep(p) {

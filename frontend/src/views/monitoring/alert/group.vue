@@ -1,6 +1,7 @@
 <template>
-  <a-card :bordered="false">
-    <a-space direction="vertical" style="width: 100%" :size="16">
+  <div class="app-page">
+    <a-card :bordered="false" class="app-surface-card">
+      <a-space direction="vertical" style="width: 100%" :size="16">
       <!-- 说明卡片 -->
       <a-alert type="info" show-icon>
         <template #message>告警分组说明</template>
@@ -51,71 +52,72 @@
           </template>
         </template>
       </a-table>
-    </a-space>
+      </a-space>
 
-    <a-modal v-model:open="modalOpen" :title="editing?.id ? '编辑告警分组' : '新增告警分组'" :confirm-loading="saving" width="700px" @ok="saveItem">
-      <a-form layout="vertical" :model="formState" :rules="formRules">
-        <a-row :gutter="16">
-          <a-col :span="12">
-            <a-form-item label="名称" name="name" required>
-              <a-input v-model:value="formState.name" placeholder="如：instance-group" />
-            </a-form-item>
-          </a-col>
-          <a-col :span="12">
-            <a-form-item label="分组键" name="group_key" required>
-              <a-input v-model:value="formState.group_key" placeholder="唯一标识，如：group-by-instance" />
-            </a-form-item>
-          </a-col>
-        </a-row>
+      <a-modal v-model:open="modalOpen" :title="editing?.id ? '编辑告警分组' : '新增告警分组'" :confirm-loading="saving" width="700px" @ok="saveItem">
+        <a-form layout="vertical" :model="formState" :rules="formRules">
+          <a-row :gutter="16">
+            <a-col :span="12">
+              <a-form-item label="名称" name="name" required>
+                <a-input v-model:value="formState.name" placeholder="如：instance-group" />
+              </a-form-item>
+            </a-col>
+            <a-col :span="12">
+              <a-form-item label="分组键" name="group_key" required>
+                <a-input v-model:value="formState.group_key" placeholder="唯一标识，如：group-by-instance" />
+              </a-form-item>
+            </a-col>
+          </a-row>
 
-        <a-form-item label="匹配类型">
-          <a-radio-group v-model:value="formState.match_type">
-            <a-radio :value="0">匹配所有告警</a-radio>
-            <a-radio :value="1">按标签匹配</a-radio>
-          </a-radio-group>
-        </a-form-item>
+          <a-form-item label="匹配类型">
+            <a-radio-group v-model:value="formState.match_type">
+              <a-radio :value="0">匹配所有告警</a-radio>
+              <a-radio :value="1">按标签匹配</a-radio>
+            </a-radio-group>
+          </a-form-item>
 
-        <a-form-item v-if="formState.match_type === 1" label="分组标签">
-          <a-select
-            v-model:value="formState.group_labels"
-            mode="tags"
-            placeholder="输入标签键，如：instance, alertname"
-            style="width: 100%"
-          />
-          <div style="margin-top: 4px; color: #999; font-size: 12px;">
-            按这些标签的值进行分组，相同值的告警会被分到同一组
-          </div>
-        </a-form-item>
+          <a-form-item v-if="formState.match_type === 1" label="分组标签">
+            <a-select
+              v-model:value="formState.group_labels"
+              mode="tags"
+              placeholder="输入标签键，如：instance, alertname"
+              style="width: 100%"
+            />
+            <div style="margin-top: 4px; color: #999; font-size: 12px;">
+              按这些标签的值进行分组，相同值的告警会被分到同一组
+            </div>
+          </a-form-item>
 
-        <a-divider orientation="left">分组时间配置</a-divider>
+          <a-divider orientation="left">分组时间配置</a-divider>
 
-        <a-row :gutter="16">
-          <a-col :span="8">
-            <a-form-item label="分组等待 (group_wait)">
-              <a-input-number v-model:value="formState.group_wait" :min="0" :step="5" style="width: 100%" addon-after="秒" />
-              <div style="color: #999; font-size: 12px;">首次告警后等待时间</div>
-            </a-form-item>
-          </a-col>
-          <a-col :span="8">
-            <a-form-item label="分组间隔 (group_interval)">
-              <a-input-number v-model:value="formState.group_interval" :min="0" :step="60" style="width: 100%" addon-after="秒" />
-              <div style="color: #999; font-size: 12px;">同组告警发送间隔</div>
-            </a-form-item>
-          </a-col>
-          <a-col :span="8">
-            <a-form-item label="重复间隔 (repeat_interval)">
-              <a-input-number v-model:value="formState.repeat_interval" :min="0" :step="300" style="width: 100%" addon-after="秒" />
-              <div style="color: #999; font-size: 12px;">相同告警重复间隔</div>
-            </a-form-item>
-          </a-col>
-        </a-row>
+          <a-row :gutter="16">
+            <a-col :span="8">
+              <a-form-item label="分组等待 (group_wait)">
+                <a-input-number v-model:value="formState.group_wait" :min="0" :step="5" style="width: 100%" addon-after="秒" />
+                <div style="margin-top: 4px; color: var(--app-text-muted); font-size: 12px;">首次告警后等待时间</div>
+              </a-form-item>
+            </a-col>
+            <a-col :span="8">
+              <a-form-item label="分组间隔 (group_interval)">
+                <a-input-number v-model:value="formState.group_interval" :min="0" :step="60" style="width: 100%" addon-after="秒" />
+                <div style="margin-top: 4px; color: var(--app-text-muted); font-size: 12px;">同组告警发送间隔</div>
+              </a-form-item>
+            </a-col>
+            <a-col :span="8">
+              <a-form-item label="重复间隔 (repeat_interval)">
+                <a-input-number v-model:value="formState.repeat_interval" :min="0" :step="300" style="width: 100%" addon-after="秒" />
+                <div style="margin-top: 4px; color: var(--app-text-muted); font-size: 12px;">相同告警重复间隔</div>
+              </a-form-item>
+            </a-col>
+          </a-row>
 
-        <a-form-item label="启用">
-          <a-switch v-model:checked="formState.enabled" />
-        </a-form-item>
-      </a-form>
-    </a-modal>
-  </a-card>
+          <a-form-item label="启用">
+            <a-switch v-model:checked="formState.enabled" />
+          </a-form-item>
+        </a-form>
+      </a-modal>
+    </a-card>
+  </div>
 </template>
 
 <script setup lang="ts">

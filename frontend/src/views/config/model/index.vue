@@ -1,5 +1,5 @@
 <template>
-  <div class="model-page">
+  <div class="app-page model-page">
     <a-row :gutter="16" class="full-height">
       <!-- 左侧目录树 -->
       <a-col :xs="24" :sm="8" :md="6" :lg="5" class="tree-col">
@@ -240,7 +240,7 @@
               </a-button>
             </a-upload>
             <a-space align="center">
-              <span style="color: #999;">当前生效图标：</span>
+              <span class="model-form-hint">当前生效图标：</span>
               <img v-if="iconSelectionMode === 'custom' && hasUploadedIcon" :src="modelForm.icon_url" style="width: 20px; height: 20px; object-fit: contain;" />
               <component v-else :is="iconComponentMap[modelForm.icon] || AppstoreOutlined" />
             </a-space>
@@ -255,7 +255,7 @@
             :options="keyFieldOptions"
             :disabled="keyFieldOptions.length === 0"
           />
-          <div style="color: #999; margin-top: 4px;">
+          <div class="model-form-hint model-form-hint-block">
             {{ keyFieldOptions.length === 0 ? '当前模型暂无可用字段，请先在模型设计中配置文本/数字/枚举/日期类字段。' : '按选择顺序展示，空值将自动跳过。' }}
           </div>
         </a-form-item>
@@ -356,7 +356,7 @@ const columns = [
     customRender: ({ record }: { record: any }) => {
       return h('a', {
         onClick: () => openDesigner(record),
-        style: { cursor: 'pointer', color: '#1890ff' }
+        style: { cursor: 'pointer', color: 'var(--app-accent)' }
       }, record.name)
     }
   },
@@ -966,10 +966,10 @@ const handleDesignerSave = async (data: any) => {
 .icon-picker-item {
   width: 44px;
   height: 44px;
-  border: 1px solid #d9d9d9;
+  border: 1px solid var(--app-border);
   border-radius: 8px;
-  background: #fff;
-  color: #595959;
+  background: var(--app-surface-card);
+  color: var(--app-text-secondary);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -985,13 +985,21 @@ const handleDesignerSave = async (data: any) => {
 }
 
 .icon-picker-item:hover {
-  border-color: #40a9ff;
-  color: #1677ff;
+  border-color: var(--app-accent);
+  color: var(--app-accent);
 }
 
 .icon-picker-item-selected {
-  border-color: #1677ff;
-  background: #e6f4ff;
-  color: #1677ff;
+  border-color: var(--app-accent);
+  background: var(--app-accent-soft);
+  color: var(--app-accent);
+}
+
+.model-form-hint {
+  color: var(--app-text-muted);
+}
+
+.model-form-hint-block {
+  margin-top: 4px;
 }
 </style>

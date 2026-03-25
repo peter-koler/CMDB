@@ -1,6 +1,6 @@
 <template>
-  <div class="ops-dashboard">
-    <a-card :bordered="false" class="hero-card">
+  <div class="app-page ops-dashboard">
+    <a-card :bordered="false" class="hero-card app-surface-card">
       <div class="hero-top">
         <div class="hero-title-wrap">
           <div class="hero-kicker">Operations Overview</div>
@@ -26,23 +26,23 @@
 
     <a-row :gutter="[14, 14]" class="section">
       <a-col :xs="24" :sm="12" :lg="8" :xl="4">
-        <a-card :bordered="false" class="kpi-card">
+        <a-card :bordered="false" class="kpi-card app-surface-card">
           <a-statistic title="监控目标" :value="overview.total_monitors" />
         </a-card>
       </a-col>
       <a-col :xs="24" :sm="12" :lg="8" :xl="4">
-        <a-card :bordered="false" class="kpi-card">
-          <a-statistic title="健康目标" :value="overview.healthy_monitors" :value-style="{ color: '#1677ff' }" />
+        <a-card :bordered="false" class="kpi-card app-surface-card">
+          <a-statistic title="健康目标" :value="overview.healthy_monitors" :value-style="{ color: 'var(--app-accent)' }" />
         </a-card>
       </a-col>
       <a-col :xs="24" :sm="12" :lg="8" :xl="4">
-        <a-card :bordered="false" class="kpi-card">
-          <a-statistic title="异常目标" :value="overview.unhealthy_monitors" :value-style="{ color: '#fa8c16' }" />
+        <a-card :bordered="false" class="kpi-card app-surface-card">
+          <a-statistic title="异常目标" :value="overview.unhealthy_monitors" :value-style="{ color: 'var(--arco-warning)' }" />
         </a-card>
       </a-col>
       <a-col :xs="24" :sm="12" :lg="8" :xl="4">
-        <a-card :bordered="false" class="kpi-card">
-          <a-statistic title="当前告警" :value="overview.open_alerts" :value-style="{ color: '#cf1322' }" />
+        <a-card :bordered="false" class="kpi-card app-surface-card">
+          <a-statistic title="当前告警" :value="overview.open_alerts" :value-style="{ color: 'var(--arco-danger)' }" />
         </a-card>
       </a-col>
       <a-col :xs="24" :sm="12" :lg="8" :xl="4">
@@ -62,19 +62,19 @@
     <a-row :gutter="[14, 14]" class="section">
       <a-col :xs="24" :sm="8">
         <a-card :bordered="false" class="kpi-card">
-          <a-statistic title="值班待认领" :value="onDuty.unassignedOpen" :value-style="{ color: '#fa8c16' }" />
+          <a-statistic title="值班待认领" :value="onDuty.unassignedOpen" :value-style="{ color: 'var(--arco-warning)' }" />
           <div class="kpi-tip">未分派且未关闭告警</div>
         </a-card>
       </a-col>
       <a-col :xs="24" :sm="8">
         <a-card :bordered="false" class="kpi-card">
-          <a-statistic title="升级中告警" :value="onDuty.escalatingOpen" :value-style="{ color: '#cf1322' }" />
+          <a-statistic title="升级中告警" :value="onDuty.escalatingOpen" :value-style="{ color: 'var(--arco-danger)' }" />
           <div class="kpi-tip">`escalation_level > 0`</div>
         </a-card>
       </a-col>
       <a-col :xs="24" :sm="8">
         <a-card :bordered="false" class="kpi-card">
-          <a-statistic title="高危未关闭" :value="onDuty.criticalOpen" :value-style="{ color: '#cf1322' }" />
+          <a-statistic title="高危未关闭" :value="onDuty.criticalOpen" :value-style="{ color: 'var(--arco-danger)' }" />
           <div class="kpi-tip">critical 且 open</div>
         </a-card>
       </a-col>
@@ -83,13 +83,13 @@
     <a-row :gutter="[14, 14]" class="section">
       <a-col :xs="24" :sm="8">
         <a-card :bordered="false" class="kpi-card">
-          <a-statistic title="SLA 逼近" :value="slaProxy.nearBreach" :value-style="{ color: '#fa8c16' }" />
+          <a-statistic title="SLA 逼近" :value="slaProxy.nearBreach" :value-style="{ color: 'var(--arco-warning)' }" />
           <div class="kpi-tip">持续 15-30 分钟(open)</div>
         </a-card>
       </a-col>
       <a-col :xs="24" :sm="8">
         <a-card :bordered="false" class="kpi-card">
-          <a-statistic title="SLA 超时代理" :value="slaProxy.breached" :value-style="{ color: '#cf1322' }" />
+          <a-statistic title="SLA 超时代理" :value="slaProxy.breached" :value-style="{ color: 'var(--arco-danger)' }" />
           <div class="kpi-tip">持续超过 30 分钟(open)</div>
         </a-card>
       </a-col>
@@ -120,7 +120,7 @@
       </a-col>
       <a-col :xs="24" :sm="12" :lg="6">
         <a-card :bordered="false" class="kpi-card">
-          <a-statistic title="24h CI变更" :value="cmdbOverview.ciChanged24h" :value-style="{ color: '#1677ff' }" />
+          <a-statistic title="24h CI变更" :value="cmdbOverview.ciChanged24h" :value-style="{ color: 'var(--app-accent)' }" />
         </a-card>
       </a-col>
     </a-row>
@@ -913,8 +913,8 @@ onBeforeUnmount(() => {
 <style scoped>
 .ops-dashboard {
   min-height: 100%;
-  background: #f5f7fb;
-  padding-bottom: 12px;
+  gap: 14px;
+  padding-bottom: 8px;
 }
 
 .section {
@@ -924,13 +924,15 @@ onBeforeUnmount(() => {
 .hero-card,
 .kpi-card,
 .panel-card {
-  border-radius: 12px;
-  border: 1px solid #e9edf5;
-  box-shadow: 0 6px 16px rgba(10, 26, 47, 0.04);
+  border-radius: var(--arco-radius-md);
+  border: 1px solid var(--arco-border);
+  box-shadow: none;
 }
 
 .hero-card {
-  background: linear-gradient(135deg, #f7faff 0%, #ffffff 48%, #f2f7ff 100%);
+  background:
+    radial-gradient(circle at top right, rgba(9, 96, 189, 0.08), transparent 28%),
+    var(--arco-surface);
 }
 
 .hero-top {
@@ -942,7 +944,7 @@ onBeforeUnmount(() => {
 }
 
 .hero-kicker {
-  color: #5b6d85;
+  color: var(--arco-text-tertiary);
   letter-spacing: 0.08em;
   font-size: 11px;
   text-transform: uppercase;
@@ -952,11 +954,11 @@ onBeforeUnmount(() => {
   margin: 2px 0 4px;
   font-size: 28px;
   line-height: 1.2;
-  color: #10233d;
+  color: var(--arco-text);
 }
 
 .hero-subtitle {
-  color: #6a7f9d;
+  color: var(--arco-text-secondary);
   font-size: 13px;
 }
 
@@ -964,14 +966,14 @@ onBeforeUnmount(() => {
   display: flex;
   gap: 18px;
   margin-top: 12px;
-  color: #5f6f86;
+  color: var(--arco-text-secondary);
   font-size: 12px;
   flex-wrap: wrap;
 }
 
 .kpi-tip {
   margin-top: 6px;
-  color: #7a8aa3;
+  color: var(--arco-text-tertiary);
   font-size: 12px;
 }
 
@@ -986,7 +988,7 @@ onBeforeUnmount(() => {
 
 .risk-count {
   font-weight: 700;
-  color: #cf1322;
+  color: var(--arco-danger);
 }
 
 @media (max-width: 992px) {

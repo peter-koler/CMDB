@@ -1,5 +1,5 @@
 <template>
-  <div class="topology-render-page">
+  <div class="app-page topology-render-page">
     <a-card :bordered="false" class="main-card">
       <template #title>
         <span class="page-title">拓扑动态视图</span>
@@ -440,39 +440,39 @@ const goTemplateEdit = () => router.push(`/cmdb/topology-template/edit/${selecte
 </script>
 
 <style scoped>
-.topology-render-page { background: #f0f2f5; min-height: calc(100vh - 120px); padding: 16px; }
+.topology-render-page { background: transparent; min-height: calc(100vh - 120px); padding: 0; }
 .main-card :deep(.ant-card-head) { border-bottom: none; padding-top: 8px; }
-.page-title { font-size: 18px; font-weight: 600; color: #1f1f1f; }
+.page-title { font-size: 18px; font-weight: 600; color: var(--app-text-primary); }
 
-.graph-wrapper { border: 1px solid #e8e8e8; border-radius: 8px; background: #fff; overflow: hidden; }
+.graph-wrapper { border: 1px solid var(--app-border); border-radius: 8px; background: var(--app-surface-card); overflow: hidden; }
 .graph-toolbar {
   display: flex; justify-content: space-between; align-items: center;
-  padding: 10px 16px; background: #fafafa; border-bottom: 1px solid #e8e8e8;
+  padding: 10px 16px; background: var(--app-surface-subtle); border-bottom: 1px solid var(--app-border);
 }
-.graph-stats { color: #8c8c8c; font-size: 12px; }
+.graph-stats { color: var(--app-text-muted); font-size: 12px; }
 .layer-preview {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: 8px;
   padding: 8px 12px;
-  background: #fcfcfc;
-  border-bottom: 1px solid #f0f0f0;
+  background: var(--app-surface-subtle);
+  border-bottom: 1px solid var(--app-border);
 }
 .layer-chip {
-  border: 1px solid #e8e8e8;
+  border: 1px solid var(--app-border);
   border-radius: 6px;
-  background: #fff;
+  background: var(--app-surface-card);
   padding: 6px 8px;
 }
-.layer-chip-name { font-weight: 600; font-size: 12px; color: #1f1f1f; }
-.layer-chip-models { font-size: 12px; color: #595959; margin-top: 2px; }
-.layer-chip-count { font-size: 11px; color: #8c8c8c; margin-top: 3px; }
+.layer-chip-name { font-weight: 600; font-size: 12px; color: var(--app-text-primary); }
+.layer-chip-models { font-size: 12px; color: var(--app-text-secondary); margin-top: 2px; }
+.layer-chip-count { font-size: 11px; color: var(--app-text-muted); margin-top: 3px; }
 .graph-container {
   width: 100%; height: 720px;
   /* 辅助背景 */
   background-image: 
-    linear-gradient(#f9f9f9 1px, transparent 1px),
-    linear-gradient(90deg, #f9f9f9 1px, transparent 1px);
+    linear-gradient(var(--app-border) 1px, transparent 1px),
+    linear-gradient(90deg, var(--app-border) 1px, transparent 1px);
   background-size: 40px 40px;
 }
 .graph-stage {
@@ -493,9 +493,9 @@ const goTemplateEdit = () => router.push(`/cmdb/topology-template/edit/${selecte
 }
 .layer-band {
   position: relative;
-  border-right: 1px dashed rgba(22, 119, 255, 0.22);
-  border-bottom: 1px dashed rgba(22, 119, 255, 0.18);
-  background: rgba(22, 119, 255, 0.025);
+  border-right: 1px dashed color-mix(in srgb, var(--app-accent) 22%, transparent);
+  border-bottom: 1px dashed color-mix(in srgb, var(--app-accent) 18%, transparent);
+  background: color-mix(in srgb, var(--app-accent) 4%, transparent);
 }
 .overlay-horizontal .layer-band:last-child {
   border-right: none;
@@ -510,11 +510,11 @@ const goTemplateEdit = () => router.push(`/cmdb/topology-template/edit/${selecte
   top: 6px;
   padding: 3px 10px;
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.92);
-  border: 1px solid rgba(22, 119, 255, 0.18);
+  background: color-mix(in srgb, var(--app-surface-card) 92%, transparent);
+  border: 1px solid color-mix(in srgb, var(--app-accent) 18%, transparent);
   font-size: 12px;
   font-weight: 600;
-  color: #1f1f1f;
+  color: var(--app-text-primary);
 }
 
 .ci-header { display: flex; align-items: center; gap: 12px; }
@@ -522,9 +522,9 @@ const goTemplateEdit = () => router.push(`/cmdb/topology-template/edit/${selecte
   width: 36px; height: 36px; border-radius: 6px; color: #fff;
   display: flex; align-items: center; justify-content: center; font-weight: bold;
 }
-.ci-name { font-weight: 600; font-size: 15px; color: #262626; }
-.ci-type { font-size: 12px; color: #8c8c8c; }
-.info-card { border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
+.ci-name { font-weight: 600; font-size: 15px; color: var(--app-text-primary); }
+.ci-type { font-size: 12px; color: var(--app-text-muted); }
+.info-card { border-radius: 8px; box-shadow: var(--app-shadow-sm); }
 
-.loading-tag { font-size: 12px; color: #1677ff; }
+.loading-tag { font-size: 12px; color: var(--app-accent); }
 </style>

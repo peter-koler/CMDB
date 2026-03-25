@@ -1,8 +1,8 @@
 <template>
-  <div class="trigger-config-page">
+  <div class="app-page trigger-config-page">
     <a-row :gutter="16">
       <a-col :xs="24" :sm="8">
-        <a-card :bordered="false" title="选择模型">
+        <a-card :bordered="false" title="选择模型" class="app-surface-card">
           <a-form layout="vertical">
             <a-form-item label="选择模型">
               <a-select
@@ -20,7 +20,7 @@
         </a-card>
       </a-col>
       <a-col :xs="24" :sm="16">
-        <a-card :bordered="false" title="Cron 表达式示例">
+        <a-card :bordered="false" title="Cron 表达式示例" class="app-surface-card">
           <a-descriptions :column="2" size="small">
             <a-descriptions-item label="每天凌晨2点">0 2 * * *</a-descriptions-item>
             <a-descriptions-item label="每天早上6点">0 6 * * *</a-descriptions-item>
@@ -32,11 +32,11 @@
     </a-row>
 
     <template v-if="selectedModelId">
-      <a-card :bordered="false" class="config-card">
+      <a-card :bordered="false" class="config-card app-surface-card">
         <template #title>
           <a-space>
             <span>触发器规则</span>
-            <a-badge :count="triggers.length" :number-style="{ backgroundColor: '#52c41a' }" />
+            <a-badge :count="triggers.length" :number-style="{ backgroundColor: 'var(--arco-success)' }" />
           </a-space>
         </template>
         <template #extra>
@@ -84,7 +84,7 @@
         </a-table>
       </a-card>
 
-      <a-card :bordered="false" class="config-card">
+      <a-card :bordered="false" class="config-card app-surface-card">
         <template #title>
           <a-space>
             <span>批量扫描配置</span>
@@ -643,7 +643,7 @@ onMounted(() => {
 
 <style scoped>
 .trigger-config-page {
-  padding: 16px;
+  padding: 0;
 }
 
 .config-card {
@@ -652,8 +652,9 @@ onMounted(() => {
 
 .condition-text {
   font-family: monospace;
-  background: #f5f5f5;
+  background: var(--app-surface-subtle);
   padding: 2px 6px;
   border-radius: 4px;
+  color: var(--app-text-secondary);
 }
 </style>

@@ -1,6 +1,6 @@
 <template>
-  <div class="template-list-page">
-    <a-card :bordered="false" title="拓扑模板列表">
+  <div class="app-page template-list-page">
+    <a-card :bordered="false" title="拓扑模板列表" class="app-surface-card">
       <template #extra>
         <a-space>
           <a-button @click="loadTemplates">刷新</a-button>
