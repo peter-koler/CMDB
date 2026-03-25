@@ -75,6 +75,48 @@ params:
     # default value
     defaultValue: 6000
   # field-param field key
+  - field: bundleScript
+    name:
+      zh-CN: 统一快照脚本
+      en-US: Bundle Snapshot Script
+      ja-JP: バンドルスナップショットスクリプト
+    type: textarea
+    required: true
+    hide: true
+    defaultValue: |-
+      set +e
+      
+      echo "__ARCO_SECTION_BEGIN__basic"
+      printf 'version hostname uptime\n'; version=$(uname -r 2>/dev/null || echo unknown); hostname_v=$(hostname 2>/dev/null || uname -n 2>/dev/null || echo unknown); uptime_v=$(uptime -p 2>/dev/null | tr ' ' '_'); [ -z "$uptime_v" ] && uptime_v=$(awk '{print "up_"int($1)"s"}' /proc/uptime 2>/dev/null); [ -z "$uptime_v" ] && uptime_v=up_unknown; printf '%s %s %s\n' "$version" "$hostname_v" "$uptime_v"
+      echo "__ARCO_SECTION_END__basic"
+      
+      echo "__ARCO_SECTION_BEGIN__cpu"
+      "LANG=C lscpu | awk -F: '$1==\"Model name\" {print $2}';awk '/processor/{core++} END{print core}' /proc/cpuinfo;uptime | sed 's/,/ /g' | awk '{for(i=NF-2;i<=NF;i++)print $i }' | xargs;vmstat 1 1 | awk 'NR==3{print $11}';vmstat 1 1 | awk 'NR==3{print $12}';vmstat 1 2 | awk 'NR==4{print $15}'"
+      echo "__ARCO_SECTION_END__cpu"
+      
+      echo "__ARCO_SECTION_BEGIN__memory"
+      printf 'total used free buff_cache available\n'; if command -v free >/dev/null 2>&1; then free -m 2>/dev/null | awk 'NR==2{print $2,$3,$4,$6,$7}'; else total=$(awk '/MemTotal/{print int($2/1024)}' /proc/meminfo 2>/dev/null); freev=$(awk '/MemFree/{print int($2/1024)}' /proc/meminfo 2>/dev/null); buffers=$(awk '/^Buffers:/{print int($2/1024)}' /proc/meminfo 2>/dev/null); cached=$(awk '/^Cached:/{print int($2/1024)}' /proc/meminfo 2>/dev/null); available=$(awk '/MemAvailable/{print int($2/1024)}' /proc/meminfo 2>/dev/null); [ -z "$total" ] && total=0; [ -z "$freev" ] && freev=0; [ -z "$buffers" ] && buffers=0; [ -z "$cached" ] && cached=0; [ -z "$available" ] && available=$freev; buff_cache=$((buffers+cached)); used=$((total-freev-buff_cache)); [ "$used" -lt 0 ] && used=0; printf '%s %s %s %s %s\n' "$total" "$used" "$freev" "$buff_cache" "$available"; fi
+      echo "__ARCO_SECTION_END__memory"
+      
+      echo "__ARCO_SECTION_BEGIN__disk"
+      vmstat -D | awk 'NR==1{print $1}';vmstat -D | awk 'NR==2{print $1}';vmstat 1 1 | awk 'NR==3{print $10}';vmstat 1 1 | awk 'NR==3{print $9}';vmstat 1 1 | awk 'NR==3{print $16}'
+      echo "__ARCO_SECTION_END__disk"
+      
+      echo "__ARCO_SECTION_BEGIN__interface"
+      echo "interface_name ip_address mac_address receive_bytes transmit_bytes"; tail -n +3 /proc/net/dev 2>/dev/null | while read -r iface rest; do iface=${iface%:}; [ -z "$iface" ] && continue; set -- $rest; rx=$1; tx=$9; ip=$(ip -o -4 addr show dev "$iface" 2>/dev/null | awk '{print $4}' | head -n 1 | cut -d/ -f1); [ -z "$ip" ] && ip=$(ifconfig "$iface" 2>/dev/null | awk '/inet /{for(i=1;i<=NF;i++){if($i=="inet"){print $(i+1);exit} if(index($i,"addr:")==1){sub("addr:","",$i);print $i;exit}}}' | head -n 1); [ -z "$ip" ] && ip=-; mac=$(cat /sys/class/net/"$iface"/address 2>/dev/null | tr 'A-Z' 'a-z'); [ -z "$mac" ] && mac=$(ifconfig "$iface" 2>/dev/null | awk '/(ether|HWaddr)/{for(i=1;i<=NF;i++){if($i=="ether"||$i=="HWaddr"){print $(i+1);exit}}}' | tr 'A-Z' 'a-z' | head -n 1); [ -z "$mac" ] && mac=-; [ -z "$rx" ] && rx=0; [ -z "$tx" ] && tx=0; echo "$iface $ip $mac $rx $tx"; done
+      echo "__ARCO_SECTION_END__interface"
+      
+      echo "__ARCO_SECTION_BEGIN__disk_free"
+      df -mP | tail -n +2 | awk 'BEGIN{ print "filesystem used available usage mounted"} {print $1,$3,$4,$5,$6}'
+      echo "__ARCO_SECTION_END__disk_free"
+      
+      echo "__ARCO_SECTION_BEGIN__top_cpu_process"
+      ps --no-headers -eo pid,%cpu,%mem,cmd --sort=-%cpu | head -n 10 | awk 'BEGIN {print "pid cpu_usage mem_usage command"} {print $1, $2, $3, $4}'
+      echo "__ARCO_SECTION_END__top_cpu_process"
+      
+      echo "__ARCO_SECTION_BEGIN__top_mem_process"
+      ps --no-headers -eo pid,%cpu,%mem,cmd --sort=-%mem | head -n 10 | awk 'BEGIN {print "pid cpu_usage mem_usage command"} {print $1, $2, $3, $4}'
+      echo "__ARCO_SECTION_END__top_mem_process"
   - field: reuseConnection
     # name-param field display i18n name
     name:
@@ -269,6 +311,8 @@ metrics:
       # ssh private key passphrase
       privateKeyPassphrase: ^_^privateKeyPassphrase^_^
       timeout: ^_^timeout^_^
+      bundleScript: ^_^bundleScript^_^
+      bundleSection: basic
       reuseConnection: ^_^reuseConnection^_^
       # whether to use proxy server for ssh connection
       useProxy: ^_^useProxy^_^
@@ -283,7 +327,6 @@ metrics:
       # ssh proxy private key
       proxyPrivateKey: ^_^proxyPrivateKey^_^
       # ssh run collect script
-      script: printf 'version hostname uptime\n'; version=$(uname -r 2>/dev/null || echo unknown); hostname_v=$(hostname 2>/dev/null || uname -n 2>/dev/null || echo unknown); uptime_v=$(uptime -p 2>/dev/null | tr ' ' '_'); [ -z "$uptime_v" ] && uptime_v=$(awk '{print "up_"int($1)"s"}' /proc/uptime 2>/dev/null); [ -z "$uptime_v" ] && uptime_v=up_unknown; printf '%s %s %s\n' "$version" "$hostname_v" "$uptime_v"
       # ssh response data parse type: oneRow, multiRow
       parseType: multiRow
 
@@ -357,6 +400,8 @@ metrics:
       privateKey: ^_^privateKey^_^
       privateKeyPassphrase: ^_^privateKeyPassphrase^_^
       timeout: ^_^timeout^_^
+      bundleScript: ^_^bundleScript^_^
+      bundleSection: cpu
       reuseConnection: ^_^reuseConnection^_^
       # whether to use proxy server for ssh connection
       useProxy: ^_^useProxy^_^
@@ -370,7 +415,6 @@ metrics:
       proxyPassword: ^_^proxyPassword^_^
       # ssh proxy private key
       proxyPrivateKey: ^_^proxyPrivateKey^_^
-      script: printf 'cores load interrupt context_switch idle info\n'; cores=$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || awk '/^processor/{c++} END{print c+0}' /proc/cpuinfo 2>/dev/null); load=$(awk '{print $1}' /proc/loadavg 2>/dev/null); [ -z "$load" ] && load=$(uptime 2>/dev/null | sed 's/,/ /g' | awk '{print $(NF-2)}'); interrupt=$(awk '/^intr /{print $2; exit}' /proc/stat 2>/dev/null); context_switch=$(awk '/^ctxt /{print $2; exit}' /proc/stat 2>/dev/null); read _ a b c d e f g h i j < /proc/stat 2>/dev/null; total=$((a+b+c+d+e+f+g+h)); if [ "$total" -gt 0 ] 2>/dev/null; then idle=$(awk -v d="$d" -v t="$total" 'BEGIN{printf "%.2f", (d/t)*100}'); else idle=0; fi; info=$(LANG=C lscpu 2>/dev/null | sed -n 's/^Model name:[[:space:]]*//p' | head -n 1); [ -z "$info" ] && info=$(awk -F':' '/model name/{print $2; exit}' /proc/cpuinfo 2>/dev/null | sed 's/^[[:space:]]*//'); [ -z "$cores" ] && cores=0; [ -z "$load" ] && load=0; [ -z "$interrupt" ] && interrupt=0; [ -z "$context_switch" ] && context_switch=0; [ -z "$idle" ] && idle=0; [ -z "$info" ] && info=$(uname -m 2>/dev/null || echo unknown); printf '%s %s %s %s %s %s\n' "$cores" "$load" "$interrupt" "$context_switch" "$idle" "$info"
       parseType: oneRow
 
   - name: memory
@@ -444,6 +488,8 @@ metrics:
       privateKey: ^_^privateKey^_^
       privateKeyPassphrase: ^_^privateKeyPassphrase^_^
       timeout: ^_^timeout^_^
+      bundleScript: ^_^bundleScript^_^
+      bundleSection: memory
       reuseConnection: ^_^reuseConnection^_^
       # whether to use proxy server for ssh connection
       useProxy: ^_^useProxy^_^
@@ -457,7 +503,6 @@ metrics:
       proxyPassword: ^_^proxyPassword^_^
       # ssh proxy private key
       proxyPrivateKey: ^_^proxyPrivateKey^_^
-      script: printf 'total used free buff_cache available\n'; total=$(awk '/MemTotal/{print int($2/1024)}' /proc/meminfo 2>/dev/null); freev=$(awk '/MemFree/{print int($2/1024)}' /proc/meminfo 2>/dev/null); buffers=$(awk '/^Buffers:/{print int($2/1024)}' /proc/meminfo 2>/dev/null); cached=$(awk '/^Cached:/{print int($2/1024)}' /proc/meminfo 2>/dev/null); sreclaim=$(awk '/^SReclaimable:/{print int($2/1024)}' /proc/meminfo 2>/dev/null); available=$(awk '/MemAvailable/{print int($2/1024)}' /proc/meminfo 2>/dev/null); [ -z "$total" ] && total=0; [ -z "$freev" ] && freev=0; [ -z "$buffers" ] && buffers=0; [ -z "$cached" ] && cached=0; [ -z "$sreclaim" ] && sreclaim=0; [ -z "$available" ] && available=$((freev+buffers+cached+sreclaim)); buff_cache=$((buffers+cached+sreclaim)); used=$((total-freev-buff_cache)); [ "$used" -lt 0 ] && used=0; printf '%s %s %s %s %s\n' "$total" "$used" "$freev" "$buff_cache" "$available"
       parseType: multiRow
 
   - name: disk
@@ -507,6 +552,8 @@ metrics:
       privateKey: ^_^privateKey^_^
       privateKeyPassphrase: ^_^privateKeyPassphrase^_^
       timeout: ^_^timeout^_^
+      bundleScript: ^_^bundleScript^_^
+      bundleSection: disk
       reuseConnection: ^_^reuseConnection^_^
       # whether to use proxy server for ssh connection
       useProxy: ^_^useProxy^_^
@@ -520,7 +567,6 @@ metrics:
       proxyPassword: ^_^proxyPassword^_^
       # ssh proxy private key
       proxyPrivateKey: ^_^proxyPrivateKey^_^
-      script: printf 'disk_num partition_num block_write block_read write_rate\n'; disk_num=$(lsblk -dn -o TYPE 2>/dev/null | awk '$1=="disk"{c++} END{print c+0}'); partition_num=$(lsblk -dn -o TYPE 2>/dev/null | awk '$1=="part"{c++} END{print c+0}'); [ -z "$disk_num" ] && disk_num=$(ls -1 /sys/block 2>/dev/null | grep -Ev '^(loop|ram|fd)$' | wc -l | tr -d ' '); [ -z "$partition_num" ] && partition_num=0; block_read=$(awk '/^pgpgin /{print $2; exit}' /proc/vmstat 2>/dev/null); block_write=$(awk '/^pgpgout /{print $2; exit}' /proc/vmstat 2>/dev/null); if [ -z "$block_read" ] || [ -z "$block_write" ]; then set -- $(awk 'BEGIN{r=0;w=0} $3 ~ /^(sd|vd|xvd|nvme|hd)/ {r+=$6; w+=$10} END{print r+0, w+0}' /proc/diskstats 2>/dev/null); [ -z "$block_read" ] && block_read=$1; [ -z "$block_write" ] && block_write=$2; fi; [ -z "$block_read" ] && block_read=0; [ -z "$block_write" ] && block_write=0; [ -z "$disk_num" ] && disk_num=0; write_rate=$block_write; printf '%s %s %s %s %s\n' "$disk_num" "$partition_num" "$block_write" "$block_read" "$write_rate"
       parseType: oneRow
 
   - name: interface
@@ -575,6 +621,8 @@ metrics:
       privateKey: ^_^privateKey^_^
       privateKeyPassphrase: ^_^privateKeyPassphrase^_^
       timeout: ^_^timeout^_^
+      bundleScript: ^_^bundleScript^_^
+      bundleSection: interface
       reuseConnection: ^_^reuseConnection^_^
       # whether to use proxy server for ssh connection
       useProxy: ^_^useProxy^_^
@@ -588,7 +636,6 @@ metrics:
       proxyPassword: ^_^proxyPassword^_^
       # ssh proxy private key
       proxyPrivateKey: ^_^proxyPrivateKey^_^
-      script: printf 'interface_name ip_address mac_address receive_bytes transmit_bytes\n'; tail -n +3 /proc/net/dev 2>/dev/null | while read -r iface rest; do iface=${iface%:}; [ -z "$iface" ] && continue; set -- $rest; rx=$1; tx=$9; ip=$(ip -o -4 addr show dev "$iface" 2>/dev/null | awk '{print $4}' | head -n 1 | cut -d/ -f1); [ -z "$ip" ] && ip=$(ifconfig "$iface" 2>/dev/null | awk '/inet /{for(i=1;i<=NF;i++){if($i=="inet"){print $(i+1);exit} if(index($i,"addr:")==1){sub("addr:","",$i);print $i;exit}}}' | head -n 1); [ -z "$ip" ] && ip=-; mac=$(cat /sys/class/net/"$iface"/address 2>/dev/null | tr 'A-Z' 'a-z'); [ -z "$mac" ] && mac=$(ifconfig "$iface" 2>/dev/null | awk '/(ether|HWaddr)/{for(i=1;i<=NF;i++){if($i=="ether"||$i=="HWaddr"){print $(i+1);exit}}}' | tr 'A-Z' 'a-z' | head -n 1); [ -z "$mac" ] && mac=-; [ -z "$rx" ] && rx=0; [ -z "$tx" ] && tx=0; printf '%s %s %s %s %s\n' "$iface" "$ip" "$mac" "$rx" "$tx"; done
       parseType: multiRow
 
   - name: disk_free
@@ -641,6 +688,8 @@ metrics:
       privateKey: ^_^privateKey^_^
       privateKeyPassphrase: ^_^privateKeyPassphrase^_^
       timeout: ^_^timeout^_^
+      bundleScript: ^_^bundleScript^_^
+      bundleSection: disk_free
       reuseConnection: ^_^reuseConnection^_^
       # whether to use proxy server for ssh connection
       useProxy: ^_^useProxy^_^
@@ -654,7 +703,6 @@ metrics:
       proxyPassword: ^_^proxyPassword^_^
       # ssh proxy private key
       proxyPrivateKey: ^_^proxyPrivateKey^_^
-      script: df -mP | tail -n +2 | awk 'BEGIN{ print "filesystem used available usage mounted"} {print $1,$3,$4,$5,$6}'
       parseType: multiRow
 
   - name: top_cpu_process
@@ -700,6 +748,8 @@ metrics:
       privateKey: ^_^privateKey^_^
       privateKeyPassphrase: ^_^privateKeyPassphrase^_^
       timeout: ^_^timeout^_^
+      bundleScript: ^_^bundleScript^_^
+      bundleSection: top_cpu_process
       reuseConnection: ^_^reuseConnection^_^
       # whether to use proxy server for ssh connection
       useProxy: ^_^useProxy^_^
@@ -713,7 +763,6 @@ metrics:
       proxyPassword: ^_^proxyPassword^_^
       # ssh proxy private key
       proxyPrivateKey: ^_^proxyPrivateKey^_^
-      script: ps --no-headers -eo pid,%cpu,%mem,cmd --sort=-%cpu | head -n 10 | awk 'BEGIN {print "pid cpu_usage mem_usage command"} {print $1, $2, $3, $4}'
       parseType: multiRow
 
   - name: top_mem_process
@@ -759,6 +808,8 @@ metrics:
       privateKey: ^_^privateKey^_^
       privateKeyPassphrase: ^_^privateKeyPassphrase^_^
       timeout: ^_^timeout^_^
+      bundleScript: ^_^bundleScript^_^
+      bundleSection: top_mem_process
       reuseConnection: ^_^reuseConnection^_^
       # whether to use proxy server for ssh connection
       useProxy: ^_^useProxy^_^
@@ -772,7 +823,6 @@ metrics:
       proxyPassword: ^_^proxyPassword^_^
       # ssh proxy private key
       proxyPrivateKey: ^_^proxyPrivateKey^_^
-      script: ps --no-headers -eo pid,%cpu,%mem,cmd --sort=-%mem | head -n 10 | awk 'BEGIN {print "pid cpu_usage mem_usage command"} {print $1, $2, $3, $4}'
       parseType: multiRow
 
 alerts:

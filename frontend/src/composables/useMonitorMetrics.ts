@@ -14,6 +14,7 @@ export interface TemplateMetricField {
   field: string
   title: string
   type: MetricFieldType
+  unit?: string
 }
 
 export interface TemplateMetricGroup {
@@ -61,6 +62,30 @@ function toFieldType(raw: any): MetricFieldType {
   return 'number'
 }
 
+function normalizeUnit(raw: any): string {
+  const text = String(raw ?? '').trim()
+  if (!text) return ''
+  const lower = text.toLowerCase()
+  if (lower === 'mb' || lower === 'mib' || lower === 'm') return 'MB'
+  if (lower === 'kb' || lower === 'kib' || lower === 'k') return 'KB'
+  if (lower === 'gb' || lower === 'gib' || lower === 'g') return 'GB'
+  if (lower === 'tb' || lower === 'tib' || lower === 't') return 'TB'
+  if (lower === 'b' || lower === 'byte' || lower === 'bytes') return 'Bytes'
+  if (lower === 'ms') return 'ms'
+  if (lower === 's' || lower === 'sec' || lower === 'second') return 's'
+  if (lower === 'iops') return 'IOPS'
+  if (lower === '%') return '%'
+  return text
+}
+
+function withUnitTitle(title: string, unit: string): string {
+  if (!unit) return title
+  const normalizedTitle = String(title || '').trim()
+  if (!normalizedTitle) return title
+  if (normalizedTitle.includes(`(${unit})`)) return normalizedTitle
+  return `${normalizedTitle} (${unit})`
+}
+
 export function parseTemplateMetricGroups(templateContent: string, locale = 'zh-CN'): TemplateMetricGroup[] {
   try {
     const root = (yaml.load(templateContent || '') || {}) as any
@@ -76,10 +101,12 @@ export function parseTemplateMetricGroups(templateContent: string, locale = 'zh-
         const field = String(f?.field || '').trim()
         if (!field) continue
         const fieldTitle = pickI18nText(f?.i18n || f?.name, locale, field)
+        const unit = normalizeUnit(f?.unit)
         fields.push({
           field,
-          title: fieldTitle,
-          type: toFieldType(f?.type)
+          title: withUnitTitle(fieldTitle, unit),
+          type: toFieldType(f?.type),
+          unit
         })
       }
       if (!fields.length) continue

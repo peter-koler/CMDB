@@ -139,7 +139,7 @@ SELECT id, name, type, expr, template, period, times, enabled, labels_json, anno
 	}
 	query += `
 FROM alert_defines
-WHERE enabled = 1 AND type = 'realtime_metric'
+WHERE ` + s.enabledFilter("enabled") + ` AND type = 'realtime_metric'
 ORDER BY updated_at DESC, id DESC
 `
 	rows, err := s.query(query)
@@ -214,7 +214,7 @@ SELECT id, name, type, expr, template, period, times, enabled, labels_json, anno
 	}
 	query += `
 FROM alert_defines
-WHERE enabled = 1 AND type = 'periodic_metric'
+WHERE ` + s.enabledFilter("enabled") + ` AND type = 'periodic_metric'
 ORDER BY updated_at DESC, id DESC
 `
 	rows, err := s.query(query)
@@ -281,12 +281,13 @@ func (s *AlertRuntimeStore) LoadEnabledAlertGroups() ([]RuntimeAlertGroup, error
 	if s == nil || s.db == nil {
 		return nil, nil
 	}
-	rows, err := s.query(`
+	query := `
 SELECT id, group_key, match_type, labels_json, group_wait, group_interval, repeat_interval
 FROM alert_groups
-WHERE enabled = 1
+WHERE ` + s.enabledFilter("enabled") + `
 ORDER BY updated_at DESC, id DESC
-`)
+`
+	rows, err := s.query(query)
 	if err != nil {
 		return nil, err
 	}
@@ -322,12 +323,13 @@ func (s *AlertRuntimeStore) LoadEnabledAlertInhibits() ([]RuntimeAlertInhibit, e
 	if s == nil || s.db == nil {
 		return nil, nil
 	}
-	rows, err := s.query(`
+	query := `
 SELECT id, source_labels_json, target_labels_json, equal_labels_json
 FROM alert_inhibits
-WHERE enabled = 1
+WHERE ` + s.enabledFilter("enabled") + `
 ORDER BY updated_at DESC, id DESC
-`)
+`
+	rows, err := s.query(query)
 	if err != nil {
 		return nil, err
 	}
@@ -361,12 +363,13 @@ func (s *AlertRuntimeStore) LoadEnabledAlertSilences() ([]RuntimeAlertSilence, e
 	if s == nil || s.db == nil {
 		return nil, nil
 	}
-	rows, err := s.query(`
+	query := `
 SELECT id, type, match_type, labels_json, days_json, start_time, end_time
 FROM alert_silences
-WHERE enabled = 1
+WHERE ` + s.enabledFilter("enabled") + `
 ORDER BY updated_at DESC, id DESC
-`)
+`
+	rows, err := s.query(query)
 	if err != nil {
 		return nil, err
 	}
@@ -1457,6 +1460,18 @@ WHERE table_schema = 'public' AND table_name = ? AND column_name = ?
 		}
 	}
 	return false
+}
+
+func (s *AlertRuntimeStore) enabledFilter(column string) string {
+	col := strings.TrimSpace(column)
+	if col == "" {
+		col = "enabled"
+	}
+	if s.driver == "postgres" {
+		// PostgreSQL 兼容 boolean / integer 历史列类型，统一按文本值判定启用态。
+		return fmt.Sprintf("COALESCE(%s::text, '') IN ('1','t','true')", col)
+	}
+	return fmt.Sprintf("%s = 1", col)
 }
 
 func (s *AlertRuntimeStore) rebind(query string) string {

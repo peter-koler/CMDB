@@ -29,6 +29,8 @@ type options struct {
 	ProxyPrivateKeyPath       string
 	ProxyPrivateKeyPassphrase string
 	Script                    string
+	BundleScript              string
+	BundleSection             string
 	ParseType                 string
 	Timeout                   time.Duration
 }
@@ -47,8 +49,10 @@ func parseOptions(task model.MetricsTask) (options, error) {
 		return options{}, fmt.Errorf("missing ssh username")
 	}
 	script := firstNonEmpty(task.Params["script"], task.Params["ssh.script"])
-	if strings.TrimSpace(script) == "" {
-		return options{}, fmt.Errorf("missing ssh script")
+	bundleScript := firstNonEmpty(task.Params["bundleScript"], task.Params["ssh.bundleScript"])
+	bundleSection := strings.TrimSpace(firstNonEmpty(task.Params["bundleSection"], task.Params["ssh.bundleSection"]))
+	if strings.TrimSpace(script) == "" && strings.TrimSpace(bundleScript) == "" {
+		return options{}, fmt.Errorf("missing ssh script or bundleScript")
 	}
 	parseType := strings.TrimSpace(strings.ToLower(firstNonEmpty(task.Params["parseType"], task.Params["ssh.parseType"])))
 	if parseType == "" {
@@ -85,6 +89,8 @@ func parseOptions(task model.MetricsTask) (options, error) {
 		ProxyPrivateKeyPath:       firstNonEmpty(task.Params["proxyPrivateKeyPath"], task.Params["ssh.proxyPrivateKeyPath"]),
 		ProxyPrivateKeyPassphrase: firstNonEmpty(task.Params["proxyPrivateKeyPassphrase"], task.Params["ssh.proxyPrivateKeyPassphrase"]),
 		Script:                    script,
+		BundleScript:              bundleScript,
+		BundleSection:             bundleSection,
 		ParseType:                 parseType,
 		Timeout:                   timeout,
 	}, nil

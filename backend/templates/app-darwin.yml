@@ -79,6 +79,80 @@ params:
     # default value
     defaultValue: 6000
   # field-param field key
+  - field: bundleScript
+    name:
+      zh-CN: 统一快照脚本
+      en-US: Bundle Snapshot Script
+      ja-JP: バンドルスナップショットスクリプト
+    type: textarea
+    required: true
+    hide: true
+    defaultValue: |-
+      set +e
+      
+      echo "__ARCO_SECTION_BEGIN__basic"
+      (
+          hostname | awk -F "," '{printf "%s\n", $1}'
+          sw_vers | awk '/:/ {printf "%s ", $2} END {print ""}'
+          sysctl -n kern.boottime | awk '{for(i=9;i<=NF;i++) printf "%s ", $i; print ""}'
+      )
+            # ssh response data parse type: oneRow, multiRow
+            parseType: oneRow
+      echo "__ARCO_SECTION_END__basic"
+      
+      echo "__ARCO_SECTION_BEGIN__cpu"
+      sysctl -n machdep.cpu.brand_string; sysctl -n hw.logicalcpu; sysctl -n vm.loadavg | awk '{print $2, $3, $4}'; idle=$(top -l 1 | grep "CPU usage" | awk '{print $7}' | tr -d '%') ; free_pages=$(vm_stat | awk '/free/ {gsub(/\./,"",$3); print $3}'); active_pages=$(vm_stat | awk '/active/ {gsub(/\./,"",$3); print $3}'); first_swapins=$(vm_stat | awk '/swapins/ {gsub(/\./,"",$2); print $2}'); sleep 1; second_swapins=$(vm_stat | awk '/swapins/ {gsub(/\./,"",$2); print $2}'); echo "$free_pages"; echo "$active_pages";  echo "$idle";
+      echo "__ARCO_SECTION_END__cpu"
+      
+      echo "__ARCO_SECTION_BEGIN__memory"
+      sysctl -n hw.memsize | awk '{
+        t=$1/1048576;
+        cmd="vm_stat";
+        while (cmd | getline) {
+          if ($1=="Pages") {
+            if ($2=="free:") {f=$3}
+            else if ($2=="active:") {a=$3}
+            else if ($2=="inactive:") {i=$3}
+            else if ($2=="speculative:") {s=$3}
+            else if ($2~/wired/) {w=$NF}
+          };
+          gsub(/\.[ \t]*$/,"",f);
+          gsub(/\.[ \t]*$/,"",a);
+          gsub(/\.[ \t]*$/,"",i);
+          gsub(/\.[ \t]*$/,"",s);
+          gsub(/\.[ \t]*$/,"",w);
+        };
+        close(cmd);
+        fm=(f+s)/256;
+        um=(a+w)/256;
+        im=i/256;
+        bm=im;
+        am=fm+im;
+        print "total used free buff_cache available";
+        printf "%d %d %d %d %d\n", t, um, fm, bm, am
+      }'
+            parseType: multiRow
+      echo "__ARCO_SECTION_END__memory"
+      
+      echo "__ARCO_SECTION_BEGIN__disk"
+      diskutil list | grep '^/dev/' | wc -l; diskutil list | grep -E 'Apple_HFS|Apple_APFS|Microsoft Basic Data|Linux Filesystem' | wc -l;
+      echo "__ARCO_SECTION_END__disk"
+      
+      echo "__ARCO_SECTION_BEGIN__interface"
+      echo "interface_name ip_address mac_address receive_bytes transmit_bytes"; tail -n +3 /proc/net/dev 2>/dev/null | while read -r iface rest; do iface=${iface%:}; [ -z "$iface" ] && continue; set -- $rest; rx=$1; tx=$9; ip=$(ip -o -4 addr show dev "$iface" 2>/dev/null | awk '{print $4}' | head -n 1 | cut -d/ -f1); [ -z "$ip" ] && ip=$(ifconfig "$iface" 2>/dev/null | awk '/inet /{for(i=1;i<=NF;i++){if($i=="inet"){print $(i+1);exit} if(index($i,"addr:")==1){sub("addr:","",$i);print $i;exit}}}' | head -n 1); [ -z "$ip" ] && ip=-; mac=$(cat /sys/class/net/"$iface"/address 2>/dev/null | tr 'A-Z' 'a-z'); [ -z "$mac" ] && mac=$(ifconfig "$iface" 2>/dev/null | awk '/(ether|HWaddr)/{for(i=1;i<=NF;i++){if($i=="ether"||$i=="HWaddr"){print $(i+1);exit}}}' | tr 'A-Z' 'a-z' | head -n 1); [ -z "$mac" ] && mac=-; [ -z "$rx" ] && rx=0; [ -z "$tx" ] && tx=0; echo "$iface $ip $mac $rx $tx"; done
+      echo "__ARCO_SECTION_END__interface"
+      
+      echo "__ARCO_SECTION_BEGIN__disk_free"
+      df -mP | tail -n +2 | awk 'BEGIN{ print "filesystem used available usage mounted"} {print $1,$3,$4,$5,$6}'
+      echo "__ARCO_SECTION_END__disk_free"
+      
+      echo "__ARCO_SECTION_BEGIN__top_cpu_process"
+      ps aux | sort -k3nr | awk 'BEGIN{ print "pid cpu_usage mem_usage command" } {printf "%s %s %s ", $2, $3, $4; for (i=11; i<=NF; i++) { printf "%s", $i; if (i < NF) printf " "; } print ""}' | head -n 11
+      echo "__ARCO_SECTION_END__top_cpu_process"
+      
+      echo "__ARCO_SECTION_BEGIN__top_mem_process"
+      ps aux | sort -k4nr | awk 'BEGIN{ print "pid cpu_usage mem_usage command" } {printf "%s %s %s ", $2, $3, $4; for (i=11; i<=NF; i++) { printf "%s", $i; if (i < NF) printf " "; } print ""}' | head -n 11
+      echo "__ARCO_SECTION_END__top_mem_process"
   - field: reuseConnection
     # name-param field display i18n name
     name:
@@ -289,6 +363,8 @@ metrics:
       # ssh private key passphrase
       privateKeyPassphrase: ^_^privateKeyPassphrase^_^
       timeout: ^_^timeout^_^
+      bundleScript: ^_^bundleScript^_^
+      bundleSection: basic
       reuseConnection: ^_^reuseConnection^_^
       # whether to use proxy server for ssh connection
       useProxy: ^_^useProxy^_^
@@ -303,18 +379,6 @@ metrics:
       # ssh proxy private key
       proxyPrivateKey: ^_^proxyPrivateKey^_^
       # ssh run collect script
-      script: |
-        printf "hostname version uptime\n"
-        hostname_v=$(hostname 2>/dev/null)
-        version_v="$(sw_vers -productName 2>/dev/null | tr ' ' '_')-$(sw_vers -productVersion 2>/dev/null)-$(sw_vers -buildVersion 2>/dev/null)"
-        uptime_v=$(uptime | awk -F ',' '{print $1}' | tr -d ' ')
-        [ -z "$hostname_v" ] && hostname_v=unknown
-        [ -z "$version_v" ] && version_v=$(uname -r 2>/dev/null || echo unknown)
-        [ -z "$uptime_v" ] && uptime_v=up0
-        printf "%s %s %s\n" "$hostname_v" "$version_v" "$uptime_v"
-      # ssh response data parse type: oneRow, multiRow
-      parseType: oneRow
-
   - name: cpu
     i18n:
       zh-CN: CPU 信息
@@ -392,6 +456,8 @@ metrics:
       privateKey: ^_^privateKey^_^
       privateKeyPassphrase: ^_^privateKeyPassphrase^_^
       timeout: ^_^timeout^_^
+      bundleScript: ^_^bundleScript^_^
+      bundleSection: cpu
       reuseConnection: ^_^reuseConnection^_^
       # whether to use proxy server for ssh connection
       useProxy: ^_^useProxy^_^
@@ -405,7 +471,6 @@ metrics:
       proxyPassword: ^_^proxyPassword^_^
       # ssh proxy private key
       proxyPrivateKey: ^_^proxyPrivateKey^_^
-      script: printf 'cores load interrupt context_switch idle info\n'; cores=$(sysctl -n hw.logicalcpu); load=$(sysctl -n vm.loadavg | awk '{print $2","$3","$4}'); interrupt=$(vm_stat | awk '/free/ {gsub(/\./,"",$3); print $3; exit}'); context_switch=$(vm_stat | awk '/active/ {gsub(/\./,"",$3); print $3; exit}'); idle=$(top -l 1 | grep "CPU usage" | awk '{print $7}' | tr -d '%'); info=$(sysctl -n machdep.cpu.brand_string); printf '%s %s %s %s %s %s\n' "$cores" "$load" "$interrupt" "$context_switch" "$idle" "$info"
       parseType: oneRow
 
   - name: memory
@@ -486,6 +551,8 @@ metrics:
       privateKey: ^_^privateKey^_^
       privateKeyPassphrase: ^_^privateKeyPassphrase^_^
       timeout: ^_^timeout^_^
+      bundleScript: ^_^bundleScript^_^
+      bundleSection: memory
       reuseConnection: ^_^reuseConnection^_^
       # whether to use proxy server for ssh connection
       useProxy: ^_^useProxy^_^
@@ -499,35 +566,6 @@ metrics:
       proxyPassword: ^_^proxyPassword^_^
       # ssh proxy private key
       proxyPrivateKey: ^_^proxyPrivateKey^_^
-      script: |
-        sysctl -n hw.memsize | awk '{
-          t=$1/1048576;
-          cmd="vm_stat";
-          while (cmd | getline) {
-            if ($1=="Pages") {
-              if ($2=="free:") {f=$3}
-              else if ($2=="active:") {a=$3}
-              else if ($2=="inactive:") {i=$3}
-              else if ($2=="speculative:") {s=$3}
-              else if ($2~/wired/) {w=$NF}
-            };
-            gsub(/\.[ \t]*$/,"",f);
-            gsub(/\.[ \t]*$/,"",a);
-            gsub(/\.[ \t]*$/,"",i);
-            gsub(/\.[ \t]*$/,"",s);
-            gsub(/\.[ \t]*$/,"",w);
-          };
-          close(cmd);
-          fm=(f+s)/256;
-          um=(a+w)/256;
-          im=i/256;
-          bm=im;
-          am=fm+im;
-          print "total used free buff_cache available";
-          printf "%d %d %d %d %d\n", t, um, fm, bm, am
-        }'
-      parseType: multiRow
-
   - name: disk
     i18n:
       zh-CN: 磁盘信息
@@ -581,6 +619,8 @@ metrics:
       privateKey: ^_^privateKey^_^
       privateKeyPassphrase: ^_^privateKeyPassphrase^_^
       timeout: ^_^timeout^_^
+      bundleScript: ^_^bundleScript^_^
+      bundleSection: disk
       reuseConnection: ^_^reuseConnection^_^
       # whether to use proxy server for ssh connection
       useProxy: ^_^useProxy^_^
@@ -595,7 +635,6 @@ metrics:
       # ssh proxy private key
       proxyPrivateKey: ^_^proxyPrivateKey^_^
       #      script: cat /proc/net/dev | tail -n +3 | awk 'BEGIN{ print "interface_name receive_bytes transmit_bytes"} {gsub(":", "", $1); print $1,$2,$10}'
-      script: printf 'disk_num partition_num\n'; disk_num=$(diskutil list | grep '^/dev/' | wc -l); partition_num=$(diskutil list | grep -E 'Apple_HFS|Apple_APFS|Microsoft Basic Data|Linux Filesystem' | wc -l); printf '%s %s\n' "$disk_num" "$partition_num"
       parseType: oneRow
 
   - name: interface
@@ -654,6 +693,8 @@ metrics:
       privateKey: ^_^privateKey^_^
       privateKeyPassphrase: ^_^privateKeyPassphrase^_^
       timeout: ^_^timeout^_^
+      bundleScript: ^_^bundleScript^_^
+      bundleSection: interface
       reuseConnection: ^_^reuseConnection^_^
       # whether to use proxy server for ssh connection
       useProxy: ^_^useProxy^_^
@@ -667,7 +708,6 @@ metrics:
       proxyPassword: ^_^proxyPassword^_^
       # ssh proxy private key
       proxyPrivateKey: ^_^proxyPrivateKey^_^
-      script: netstat -i | grep -v "lo0" | awk 'BEGIN { print "interface_name ip_address mac_address receive_bytes transmit_bytes" } NR>1 && $1 !~ /^-/ { iface=$1; cmd_ip="ifconfig " iface " 2>/dev/null | sed -n \"s/.*inet \\\\([0-9.]*\\\\).*/\\\\1/p\" | head -n 1"; cmd_mac="ifconfig " iface " 2>/dev/null | sed -n \"s/.*ether \\\\([0-9a-f:]*\\\\).*/\\\\1/p\" | head -n 1"; cmd_ip | getline ip; close(cmd_ip); cmd_mac | getline mac; close(cmd_mac); if(ip=="") ip="-"; if(mac=="") mac="-"; print iface, ip, mac, $5, $9 }'
       parseType: multiRow
 
   - name: disk_free
@@ -726,6 +766,8 @@ metrics:
       privateKey: ^_^privateKey^_^
       privateKeyPassphrase: ^_^privateKeyPassphrase^_^
       timeout: ^_^timeout^_^
+      bundleScript: ^_^bundleScript^_^
+      bundleSection: disk_free
       reuseConnection: ^_^reuseConnection^_^
       # whether to use proxy server for ssh connection
       useProxy: ^_^useProxy^_^
@@ -739,7 +781,6 @@ metrics:
       proxyPassword: ^_^proxyPassword^_^
       # ssh proxy private key
       proxyPrivateKey: ^_^proxyPrivateKey^_^
-      script: df -mP | tail -n +2 | awk 'BEGIN{ print "filesystem used available usage mounted"} {print $1,$3,$4,$5,$6}'
       parseType: multiRow
 
   - name: top_cpu_process
@@ -790,6 +831,8 @@ metrics:
       privateKey: ^_^privateKey^_^
       privateKeyPassphrase: ^_^privateKeyPassphrase^_^
       timeout: ^_^timeout^_^
+      bundleScript: ^_^bundleScript^_^
+      bundleSection: top_cpu_process
       reuseConnection: ^_^reuseConnection^_^
       # whether to use proxy server for ssh connection
       useProxy: ^_^useProxy^_^
@@ -803,7 +846,6 @@ metrics:
       proxyPassword: ^_^proxyPassword^_^
       # ssh proxy private key
       proxyPrivateKey: ^_^proxyPrivateKey^_^
-      script: ps aux | sort -k3nr | awk 'BEGIN{ print "pid cpu_usage mem_usage command" } {printf "%s %s %s ", $2, $3, $4; for (i=11; i<=NF; i++) { printf "%s", $i; if (i < NF) printf " "; } print ""}' | head -n 11
       parseType: multiRow
 
   - name: top_mem_process
@@ -854,6 +896,8 @@ metrics:
       privateKey: ^_^privateKey^_^
       privateKeyPassphrase: ^_^privateKeyPassphrase^_^
       timeout: ^_^timeout^_^
+      bundleScript: ^_^bundleScript^_^
+      bundleSection: top_mem_process
       reuseConnection: ^_^reuseConnection^_^
       # whether to use proxy server for ssh connection
       useProxy: ^_^useProxy^_^
@@ -868,7 +912,6 @@ metrics:
       # ssh proxy private key
 
       proxyPrivateKey: ^_^proxyPrivateKey^_^
-      script: ps aux | sort -k4nr | awk 'BEGIN{ print "pid cpu_usage mem_usage command" } {printf "%s %s %s ", $2, $3, $4; for (i=11; i<=NF; i++) { printf "%s", $i; if (i < NF) printf " "; } print ""}' | head -n 11
       parseType: multiRow
 
 alerts:

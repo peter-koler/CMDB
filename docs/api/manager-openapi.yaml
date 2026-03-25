@@ -1,0 +1,410 @@
+openapi: 3.0.3
+info:
+  title: Arco Monitoring Manager API
+  version: 1.0.0
+  description: |
+    Contract between Python Web and Go Manager.
+    Scope is frozen for M0-01:
+    - Create monitor
+    - Update monitor
+    - Query monitor(s)
+    - Query alerts
+    - Acknowledge alert
+servers:
+  - url: http://go-manager.internal
+tags:
+  - name: Monitors
+  - name: Alerts
+security:
+  - bearerAuth: []
+paths:
+  /api/v1/monitors:
+    post:
+      tags: [Monitors]
+      summary: Create a monitor
+      operationId: createMonitor
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MonitorCreateRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MonitorDetail'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    get:
+      tags: [Monitors]
+      summary: List monitors
+      operationId: listMonitors
+      parameters:
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1, default: 1 }
+        - in: query
+          name: page_size
+          schema: { type: integer, minimum: 1, maximum: 200, default: 20 }
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [enabled, disabled]
+        - in: query
+          name: app
+          schema: { type: string }
+        - in: query
+          name: q
+          schema: { type: string }
+      responses:
+        '200':
+          description: Monitor list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MonitorListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/monitors/{monitor_id}:
+    get:
+      tags: [Monitors]
+      summary: Get monitor detail
+      operationId: getMonitor
+      parameters:
+        - $ref: '#/components/parameters/MonitorId'
+      responses:
+        '200':
+          description: Monitor detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MonitorDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    put:
+      tags: [Monitors]
+      summary: Update a monitor
+      operationId: updateMonitor
+      parameters:
+        - $ref: '#/components/parameters/MonitorId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MonitorUpdateRequest'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MonitorDetail'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/alerts:
+    get:
+      tags: [Alerts]
+      summary: List alerts
+      operationId: listAlerts
+      parameters:
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1, default: 1 }
+        - in: query
+          name: page_size
+          schema: { type: integer, minimum: 1, maximum: 200, default: 20 }
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [pending, processing, recovered, closed]
+        - in: query
+          name: severity
+          schema:
+            type: string
+            enum: [info, warning, critical]
+        - in: query
+          name: monitor_id
+          schema: { type: integer, format: int64 }
+        - in: query
+          name: from
+          description: RFC3339 start time
+          schema: { type: string, format: date-time }
+        - in: query
+          name: to
+          description: RFC3339 end time
+          schema: { type: string, format: date-time }
+      responses:
+        '200':
+          description: Alert list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/alerts/{alert_id}/acknowledge:
+    post:
+      tags: [Alerts]
+      summary: Acknowledge an alert
+      operationId: acknowledgeAlert
+      parameters:
+        - $ref: '#/components/parameters/AlertId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AlertAcknowledgeRequest'
+      responses:
+        '200':
+          description: Acknowledged
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    MonitorId:
+      in: path
+      name: monitor_id
+      required: true
+      schema:
+        type: integer
+        format: int64
+    AlertId:
+      in: path
+      name: alert_id
+      required: true
+      schema:
+        type: integer
+        format: int64
+
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Unauthorized:
+      description: Authentication required
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Forbidden:
+      description: Permission denied
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Conflict:
+      description: State conflict
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    ValidationError:
+      description: Validation failed
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+  schemas:
+    MonitorCreateRequest:
+      type: object
+      required: [name, app, target, interval_seconds, template_id]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 128 }
+        app: { type: string, minLength: 1, maxLength: 64 }
+        target: { type: string, minLength: 1, maxLength: 255 }
+        template_id: { type: integer, format: int64 }
+        interval_seconds: { type: integer, minimum: 5, maximum: 86400 }
+        enabled: { type: boolean, default: true }
+        labels:
+          type: object
+          additionalProperties: { type: string, maxLength: 128 }
+        params:
+          type: object
+          additionalProperties: { type: string }
+
+    MonitorUpdateRequest:
+      allOf:
+        - $ref: '#/components/schemas/MonitorCreateRequest'
+        - type: object
+          required: [version]
+          properties:
+            version:
+              type: integer
+              minimum: 1
+              description: Optimistic lock version
+
+    MonitorDetail:
+      type: object
+      required: [id, name, app, target, interval_seconds, enabled, status, labels, version]
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        app: { type: string }
+        target: { type: string }
+        template_id: { type: integer, format: int64 }
+        interval_seconds: { type: integer }
+        enabled: { type: boolean }
+        status:
+          type: string
+          enum: [up, down, unknown]
+        last_collected_at:
+          type: string
+          format: date-time
+          nullable: true
+        labels:
+          type: object
+          additionalProperties: { type: string }
+        version: { type: integer }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    MonitorListResponse:
+      type: object
+      required: [items, page, page_size, total]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/MonitorDetail' }
+        page: { type: integer }
+        page_size: { type: integer }
+        total: { type: integer }
+
+    AlertAcknowledgeRequest:
+      type: object
+      properties:
+        note: { type: string, maxLength: 512 }
+
+    AlertDetail:
+      type: object
+      required: [id, monitor_id, severity, status, alert_name, fired_at]
+      properties:
+        id: { type: integer, format: int64 }
+        monitor_id: { type: integer, format: int64 }
+        alert_name: { type: string }
+        severity:
+          type: string
+          enum: [info, warning, critical]
+        status:
+          type: string
+          enum: [pending, processing, recovered, closed]
+        metric_name: { type: string }
+        metric_value: { type: string }
+        threshold: { type: string }
+        description: { type: string }
+        assignee: { type: string, nullable: true }
+        note: { type: string, nullable: true }
+        fired_at: { type: string, format: date-time }
+        acknowledged_at: { type: string, format: date-time, nullable: true }
+        recovered_at: { type: string, format: date-time, nullable: true }
+        closed_at: { type: string, format: date-time, nullable: true }
+
+    AlertListResponse:
+      type: object
+      required: [items, page, page_size, total]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/AlertDetail' }
+        page: { type: integer }
+        page_size: { type: integer }
+        total: { type: integer }
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              description: Stable error code defined in manager-error-codes.md
+            message:
+              type: string
+            details:
+              type: object
+              additionalProperties: true
+            request_id:
+              type: string

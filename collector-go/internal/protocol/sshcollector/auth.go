@@ -48,8 +48,10 @@ func buildSSHConfig(opts options, asProxy bool) (*ssh.ClientConfig, error) {
 
 func authMethods(password, privateKey, privateKeyPath, passphrase string) ([]ssh.AuthMethod, error) {
 	methods := make([]ssh.AuthMethod, 0, 3)
+	hasExplicitAuth := false
 	if strings.TrimSpace(password) != "" {
 		methods = append(methods, ssh.Password(password))
+		hasExplicitAuth = true
 	}
 	signer, err := privateKeySigner(privateKey, privateKeyPath, passphrase)
 	if err != nil {
@@ -57,13 +59,18 @@ func authMethods(password, privateKey, privateKeyPath, passphrase string) ([]ssh
 	}
 	if signer != nil {
 		methods = append(methods, ssh.PublicKeys(signer))
+		hasExplicitAuth = true
 	}
-	if sock := strings.TrimSpace(os.Getenv("SSH_AUTH_SOCK")); sock != "" {
+	// Keep authentication deterministic:
+	// only fallback to ssh-agent when no explicit password/private-key is configured.
+	if !hasExplicitAuth {
+		if sock := strings.TrimSpace(os.Getenv("SSH_AUTH_SOCK")); sock != "" {
 		conn, dialErr := net.DialTimeout("unix", sock, 2*time.Second)
 		if dialErr == nil {
 			agentClient := agent.NewClient(conn)
 			methods = append(methods, ssh.PublicKeysCallback(agentClient.Signers))
 		}
+	}
 	}
 	return methods, nil
 }

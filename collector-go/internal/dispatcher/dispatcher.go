@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -14,6 +15,7 @@ import (
 	"collector-go/internal/model"
 	"collector-go/internal/pipeline"
 	"collector-go/internal/protocol"
+	"collector-go/internal/protocol/sshcollector"
 	"collector-go/internal/queue"
 	"collector-go/internal/scheduler"
 	"collector-go/internal/worker"
@@ -94,6 +96,9 @@ func (d *Dispatcher) executeJobCycle(ctx context.Context, job model.Job) {
 	redisCache := newRedisCycleCache()
 	jdbcCache := newJDBCCycleCache()
 	valueStore := newCycleValueStore()
+	if d.executeSSHBundleCycle(ctx, job, valueStore) {
+		return
+	}
 	for i := 0; i < len(job.Tasks); {
 		p := job.Tasks[i].Priority
 		j := i + 1
@@ -112,6 +117,95 @@ func (d *Dispatcher) executeJobCycle(ctx context.Context, job model.Job) {
 		wg.Wait()
 		i = j
 	}
+}
+
+func (d *Dispatcher) executeSSHBundleCycle(ctx context.Context, job model.Job, valueStore *cycleValueStore) bool {
+	if len(job.Tasks) == 0 {
+		return false
+	}
+	for _, task := range job.Tasks {
+		if strings.TrimSpace(strings.ToLower(task.Protocol)) != "ssh" {
+			return false
+		}
+		if taskHasDynamicPlaceholders(task) {
+			return false
+		}
+	}
+	startAt := time.Now()
+	outcome, err := sshcollector.CollectBundle(ctx, job.Tasks)
+	if collectorDebugEnabled.Load() {
+		debugf("[ssh-bundle-cmd] monitor_id=%d job_id=%d app=%s script=\n%s", job.Monitor, job.ID, job.App, outcome.Script)
+		debugf("[ssh-bundle-output] monitor_id=%d job_id=%d app=%s output=\n%s", job.Monitor, job.ID, job.App, outcome.RawOutput)
+	}
+	if err != nil {
+		debugf("[collect-fail] monitor_id=%d job_id=%d app=%s metrics=ssh_bundle protocol=ssh reason=%v",
+			job.Monitor, job.ID, job.App, err)
+		for _, task := range job.Tasks {
+			d.pushResult(ctx, model.Result{
+				JobID: job.ID, MonitorID: job.Monitor, App: job.App, Metrics: task.Name,
+				Protocol: task.Protocol, Time: startAt, Success: false, Code: model.CodeCollectFailed,
+				Message: fmt.Sprintf("ssh bundle failed: %v", err),
+			})
+		}
+		return true
+	}
+	snapshotTime := startAt
+	for _, bundleRes := range outcome.Results {
+		task := bundleRes.Task
+		fields := bundleRes.Fields
+		msg := bundleRes.Message
+		collectErr := bundleRes.Err
+		if msg == "" {
+			msg = "ok"
+		}
+		if collectErr == nil {
+			var transformErr error
+			fields, transformErr = pipeline.Apply(fields, task.Transform)
+			if transformErr != nil {
+				collectErr = transformErr
+			}
+		}
+		debug := map[string]string{}
+		debug["bundle.mode"] = "single_ssh_session"
+		debug["bundle.total_latency_ms"] = strconv.FormatInt(outcome.RawLatency.Milliseconds(), 10)
+		if collectErr == nil {
+			var calcDebug map[string]string
+			fields, calcDebug = pipeline.ApplyCalculates(fields, task.CalculateSpecs)
+			mergeDebug(debug, calcDebug)
+			var dropDebug map[string]string
+			fields, dropDebug = pipeline.ApplyFieldWhitelist(fields, task.FieldSpecs, true)
+			mergeDebug(debug, dropDebug)
+		}
+		res := model.Result{
+			JobID: job.ID, MonitorID: job.Monitor, App: job.App, Metrics: task.Name,
+			Protocol: task.Protocol, Time: snapshotTime, Success: collectErr == nil, Code: model.CodeSuccess,
+			Message: msg, Fields: fields, Debug: debug, RawLatency: outcome.RawLatency,
+		}
+		if collectErr != nil {
+			res.Code = model.CodeCollectFailed
+			if errors.Is(collectErr, context.DeadlineExceeded) || errors.Is(collectErr, context.Canceled) {
+				res.Code = model.CodeTimeout
+			}
+			res.Message = fmt.Sprintf("%s: %v", msg, collectErr)
+			debugf("[collect-fail] monitor_id=%d job_id=%d app=%s metrics=%s protocol=%s code=%s message=%q reason=%v",
+				job.Monitor, job.ID, job.App, task.Name, task.Protocol, res.Code, msg, collectErr)
+		}
+		if collectErr == nil && d.precompute != nil && d.precompute.Enabled() {
+			triggered, summary := d.precompute.Evaluate(task, fields)
+			if triggered {
+				if res.Fields == nil {
+					res.Fields = map[string]string{}
+				}
+				res.Fields["__precompute_triggered__"] = "true"
+				res.Fields["__precompute_summary__"] = summary
+			}
+		}
+		if collectErr == nil && valueStore != nil {
+			valueStore.Save(fields)
+		}
+		d.pushResult(ctx, res)
+	}
+	return true
 }
 
 func (d *Dispatcher) submitWithRetry(ctx context.Context, task worker.Task, job model.Job, meta model.MetricsTask) {

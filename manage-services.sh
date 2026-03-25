@@ -17,18 +17,24 @@ PROJECT_ROOT="/Users/peter/Documents/arco"
 MANAGER_DIR="$PROJECT_ROOT/manager-go"
 COLLECTOR_DIR="$PROJECT_ROOT/collector-go"
 MANAGER_CONFIG="${MANAGER_CONFIG:-$MANAGER_DIR/config/manager.yaml}"
+COLLECTOR_CONFIG="${COLLECTOR_CONFIG:-$COLLECTOR_DIR/config/collector.json}"
 
 # Go 编译缓存（避免某些环境下默认缓存目录无权限）
 export GOCACHE="${GOCACHE:-/tmp/arco-go-build-cache}"
 export GOMODCACHE="${GOMODCACHE:-/tmp/arco-go-mod-cache}"
+
+# 端口（可通过环境变量覆盖）
+MANAGER_PORT="${MANAGER_PORT:-8080}"
+COLLECTOR_PORT="${COLLECTOR_PORT:-50051}"
 
 # PID 文件
 MANAGER_PID_FILE="/tmp/manager-go.pid"
 COLLECTOR_PID_FILE="/tmp/collector-go.pid"
 
 # 日志文件
-MANAGER_LOG="/tmp/manager-go.log"
-COLLECTOR_LOG="/tmp/collector-go.log"
+RUNTIME_LOG_DIR="${RUNTIME_LOG_DIR:-$PROJECT_ROOT/logs}"
+MANAGER_LOG="${MANAGER_LOG:-$RUNTIME_LOG_DIR/manager-go-runtime.log}"
+COLLECTOR_LOG="${COLLECTOR_LOG:-$RUNTIME_LOG_DIR/collector-go-runtime.log}"
 
 # 显示帮助信息
 show_help() {
@@ -85,6 +91,7 @@ start_manager() {
     fi
     
     cd "$MANAGER_DIR"
+    mkdir -p "$RUNTIME_LOG_DIR"
 
     if [ ! -f "$MANAGER_CONFIG" ]; then
         echo -e "${RED}错误: manager 配置文件不存在: $MANAGER_CONFIG${NC}"
@@ -101,6 +108,7 @@ start_manager() {
     fi
     
     echo -e "${BLUE}使用配置文件: $MANAGER_CONFIG${NC}"
+    echo -e "${BLUE}日志文件: $MANAGER_LOG${NC}"
     nohup ./manager-go -config "$MANAGER_CONFIG" > "$MANAGER_LOG" 2>&1 &
     
     local new_pid=$!
@@ -129,6 +137,12 @@ start_collector() {
     fi
     
     cd "$COLLECTOR_DIR"
+    mkdir -p "$RUNTIME_LOG_DIR"
+
+    if [ ! -f "$COLLECTOR_CONFIG" ]; then
+        echo -e "${RED}错误: collector 配置文件不存在: $COLLECTOR_CONFIG${NC}"
+        return 1
+    fi
 
     # IPMI 内置工具路径（默认不依赖系统 PATH）
     if [ -z "${COLLECTOR_IPMITOOL_BIN:-}" ]; then
@@ -176,7 +190,9 @@ start_collector() {
         return 1
     fi
     
-    nohup ./collector-go > "$COLLECTOR_LOG" 2>&1 &
+    echo -e "${BLUE}使用配置文件: $COLLECTOR_CONFIG${NC}"
+    echo -e "${BLUE}日志文件: $COLLECTOR_LOG${NC}"
+    nohup ./collector-go -config "$COLLECTOR_CONFIG" > "$COLLECTOR_LOG" 2>&1 &
     
     local new_pid=$!
     echo $new_pid > "$COLLECTOR_PID_FILE"
@@ -298,10 +314,10 @@ check_process_details() {
         # 检查端口占用情况
         case "$service" in
             "manager-go")
-                check_port 8080 "manager-go"
+                check_port "$MANAGER_PORT" "manager-go"
                 ;;
             "collector-go")
-                check_port 8081 "collector-go"
+                check_port "$COLLECTOR_PORT" "collector-go"
                 ;;
         esac
         return 0
@@ -375,10 +391,10 @@ show_status() {
     echo ""
     
     # Manager 状态
-    check_service_status "manager-go" "$MANAGER_PID_FILE" "$MANAGER_LOG" 8080
+    check_service_status "manager-go" "$MANAGER_PID_FILE" "$MANAGER_LOG" "$MANAGER_PORT"
     
     # Collector 状态
-    check_service_status "collector-go" "$COLLECTOR_PID_FILE" "$COLLECTOR_LOG" 8081
+    check_service_status "collector-go" "$COLLECTOR_PID_FILE" "$COLLECTOR_LOG" "$COLLECTOR_PORT"
     
     echo -e "${BLUE}==========================================${NC}"
 }

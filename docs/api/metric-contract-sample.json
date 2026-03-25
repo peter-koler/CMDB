@@ -1,0 +1,38 @@
+[
+  {
+    "mode": "standard",
+    "app": "linux",
+    "instance": "10.0.0.21:9100",
+    "monitor_id": "10001",
+    "metrics": "cpu",
+    "field": "usage",
+    "name": "cpu_usage",
+    "labels": {
+      "job": "linux",
+      "instance": "10.0.0.21:9100",
+      "__monitor_id__": "10001",
+      "__metrics__": "cpu",
+      "__metric__": "usage",
+      "env": "prod",
+      "region": "cn-sh"
+    },
+    "value": "48.2"
+  },
+  {
+    "mode": "prometheus",
+    "app": "_prometheus_node_exporter",
+    "instance": "10.0.0.31:9100",
+    "monitor_id": "10002",
+    "metrics": "node_cpu_seconds_total",
+    "name": "node_cpu_seconds_total",
+    "labels": {
+      "job": "node_exporter",
+      "instance": "10.0.0.31:9100",
+      "__monitor_id__": "10002",
+      "__metrics__": "node_cpu_seconds_total",
+      "env": "prod",
+      "cluster": "cn-core"
+    },
+    "value": "123.45"
+  }
+]

@@ -719,10 +719,14 @@ func main() {
 	}
 	updateMetricSnapshot := func(point model.MetricPoint) map[string]float64 {
 		base := pointVars(point)
+		fieldName := strings.TrimSpace(point.Field)
+		metricName := strings.TrimSpace(point.Metrics)
 		// direct aliases for expression convenience, e.g. used_memory > 0
-		base[strings.TrimSpace(point.Field)] = point.Value
-		base[strings.TrimSpace(point.Metrics)] = point.Value
-		if strings.TrimSpace(point.Field) == "success" {
+		if !(fieldName == "success" && !shouldUseSuccessForAvailability(metricName)) {
+			base[fieldName] = point.Value
+		}
+		base[metricName] = point.Value
+		if fieldName == "success" && shouldUseSuccessForAvailability(metricName) {
 			base["server_up"] = point.Value
 			if appToken := normalizeAlertToken(point.App); appToken != "" {
 				base[appToken+"_server_up"] = point.Value
@@ -1423,6 +1427,16 @@ func boolToFloat(ok bool) float64 {
 	return 0
 }
 
+func shouldUseSuccessForAvailability(metricGroup string) bool {
+	group := strings.ToLower(strings.TrimSpace(metricGroup))
+	switch group {
+	case "basic", "availability", "status":
+		return true
+	default:
+		return false
+	}
+}
+
 func cloneLabels(src map[string]string) map[string]string {
 	if len(src) == 0 {
 		return nil
@@ -1514,6 +1528,30 @@ func enrichUnknownVariable(vars map[string]float64, unknown string) (map[string]
 		if v, ok := vars["server_up"]; ok {
 			out := clone()
 			out[key] = v
+			return out, true
+		}
+		// 兼容仅存在 success / *_success 的场景（例如运行初期仅收到局部点位）。
+		if v, ok := vars["success"]; ok {
+			out := clone()
+			out[key] = v
+			return out, true
+		}
+		var (
+			successVal float64
+			successCnt int
+		)
+		for k, v := range vars {
+			if strings.HasSuffix(strings.TrimSpace(k), "_success") {
+				successVal = v
+				successCnt++
+				if successCnt > 1 {
+					break
+				}
+			}
+		}
+		if successCnt == 1 {
+			out := clone()
+			out[key] = successVal
 			return out, true
 		}
 	}

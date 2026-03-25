@@ -35,7 +35,24 @@ func TestParseOptionsMissingScript(t *testing.T) {
 		},
 	})
 	if err == nil {
-		t.Fatalf("expected error when script missing")
+		t.Fatalf("expected error when script and bundleScript are both missing")
+	}
+}
+
+func TestParseOptionsBundleWithoutScript(t *testing.T) {
+	opts, err := parseOptions(model.MetricsTask{
+		Params: map[string]string{
+			"host":          "10.0.0.1",
+			"username":      "root",
+			"bundleScript":  "echo __ARCO_SECTION_BEGIN__cpu; echo ok; echo __ARCO_SECTION_END__cpu",
+			"bundleSection": "cpu",
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected bundle-only options to pass, got: %v", err)
+	}
+	if opts.BundleSection != "cpu" || opts.Script != "" {
+		t.Fatalf("unexpected bundle-only options: %+v", opts)
 	}
 }
 

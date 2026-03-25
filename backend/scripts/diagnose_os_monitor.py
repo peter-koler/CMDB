@@ -538,9 +538,11 @@ def main() -> int:
     print()
 
     print("=== Group Diagnosis ===")
+    group_verdicts: dict[str, str] = {}
     for gname in sorted(groups.keys()):
         gdef = groups[gname]
         verdict, detail = summarize_group(gname, gdef, expected_by_group[gname], api_items, db_by_group)
+        group_verdicts[gname] = verdict
         print(f"[{verdict}] {detail}")
     print()
 
@@ -571,8 +573,14 @@ def main() -> int:
 
     print()
     print("=== Quick Verdict ===")
+    all_groups_ok = bool(group_verdicts) and all(v == "OK" for v in group_verdicts.values())
     if health_err:
         print("manager-go API 不可达，先排查服务监听和网络。")
+    elif api_items and all_groups_ok:
+        if db_rows:
+            print("采集正常：API 与分组检查均通过，且 DB 历史存在。")
+        else:
+            print("采集正常：API 与分组检查均通过；DB 历史为空通常表示当前主要走 VM 查询链路。")
     elif not api_items and not db_rows:
         print("API 与 DB 都没有近时段指标，优先排查 collector 执行/分发链路。")
     elif api_items and not db_rows:

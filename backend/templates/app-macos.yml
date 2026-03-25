@@ -284,7 +284,7 @@ metrics:
       # ssh proxy private key
       proxyPrivateKey: ^_^proxyPrivateKey^_^
       # ssh run collect script
-      script: printf 'hostname version uptime\n'; hostname_v=$(scutil --get ComputerName 2>/dev/null || hostname 2>/dev/null); version_v="$(sw_vers -productName 2>/dev/null | tr ' ' '_')-$(sw_vers -productVersion 2>/dev/null)-$(sw_vers -buildVersion 2>/dev/null)"; uptime_v=$(uptime | awk -F ',' '{print $1}' | tr -d ' '); [ -z "$hostname_v" ] && hostname_v=unknown; [ -z "$version_v" ] && version_v=$(uname -r 2>/dev/null || echo unknown); [ -z "$uptime_v" ] && uptime_v=up0; printf '%s %s %s\n' "$hostname_v" "$version_v" "$uptime_v"
+      script: scutil --get ComputerName; echo "$(sw_vers -productName) $(sw_vers -productVersion) ($(sw_vers -buildVersion))"; uptime| awk '{print $1,$2,$3,$4}' | sed 's/,//'
       # ssh response data parse type: oneRow, multiRow
       parseType: oneRow
 
@@ -355,7 +355,7 @@ metrics:
       proxyPassword: ^_^proxyPassword^_^
       # ssh proxy private key
       proxyPrivateKey: ^_^proxyPrivateKey^_^
-      script: printf 'cores load idle info\n'; cores=$(sysctl -n hw.ncpu); load=$(sysctl -n vm.loadavg | awk '{print $2","$3","$4}'); idle=$(top -l 1 | grep 'CPU usage' | awk '{print $3}' | sed 's/%//'); info=$(sysctl -n machdep.cpu.brand_string); printf '%s %s %s %s\n' "$cores" "$load" "$idle" "$info"
+      script: sysctl -n machdep.cpu.brand_string; sysctl -n hw.ncpu; sysctl -n vm.loadavg | awk '{print $2,$3,$4}'; top -l 1 | grep 'CPU usage' | awk '{print $3}' | sed 's/%//'
       parseType: oneRow
 
   - name: memory
@@ -505,7 +505,7 @@ metrics:
       proxyPassword: ^_^proxyPassword^_^
       # ssh proxy private key
       proxyPrivateKey: ^_^proxyPrivateKey^_^
-      script: printf 'disk_num partition_num block_write block_read write_rate\n'; disk_num=$(diskutil list | grep '^/dev/' | wc -l); partition_num=$(diskutil list | grep -E 'Apple_HFS|Apple_APFS|Microsoft Basic Data|Linux Filesystem' | wc -l); block_write=$(iostat -d | awk 'NR==3{print $2}'); block_read=$(iostat -d | awk 'NR==3{print $1}'); write_rate=$block_write; printf '%s %s %s %s %s\n' "$disk_num" "$partition_num" "$block_write" "$block_read" "$write_rate"
+      script: iostat -d | awk 'NR==3{print $1}'; iostat -d | awk 'NR==3{print $2}'; vm_stat | awk '/Pages free/{print $3}' | tr -d ':'; vm_stat | awk '/Pages active/{print $3}' | tr -d ':'; sysctl -n hw.memsize | awk '{print int($1/1024/1024)}'
       parseType: oneRow
 
   - name: interface
@@ -573,7 +573,9 @@ metrics:
       proxyPassword: ^_^proxyPassword^_^
       # ssh proxy private key
       proxyPrivateKey: ^_^proxyPrivateKey^_^
-      script: netstat -ibn | awk 'BEGIN{print "interface_name ip_address mac_address receive_bytes transmit_bytes"} NR>1 && $1!~/Name/ && $7~/^[0-9]+$/ {iface=$1; cmd_ip="ifconfig " iface " 2>/dev/null | sed -n \"s/.*inet \\\\([0-9.]*\\\\).*/\\\\1/p\" | head -n 1"; cmd_mac="ifconfig " iface " 2>/dev/null | sed -n \"s/.*ether \\\\([0-9a-f:]*\\\\).*/\\\\1/p\" | head -n 1"; cmd_ip | getline ip; close(cmd_ip); cmd_mac | getline mac; close(cmd_mac); if(ip=="") ip="-"; if(mac=="") mac="-"; print iface, ip, mac, $7, $10}'
+      script: echo "interface_name ip_address mac_address receive_bytes transmit_bytes"; tail -n +3 /proc/net/dev 2>/dev/null | while read -r iface rest; do iface=${iface%:}; [ -z "$iface" ] && continue; set -- $rest; rx=$1; tx=$9; ip=$(ip -o -4 addr show dev "$iface" 2>/dev/null | awk '{print $4}' | head -n 1 | cut -d/ -f1); [ -z "$ip" ] && ip=$(ifconfig "$iface" 2>/dev/null | awk '/inet /{for(i=1;i<=NF;i++){if($i=="inet"){print $(i+1);exit} if(index($i,"addr:")==1){sub("addr:","",$i);print $i;exit}}}' | head -n 1); [ -z "$ip" ] && ip=-; mac=$(cat /sys/class/net/"$iface"/address 2>/dev/null | tr 'A-Z' 'a-z'); [ -z "$mac" ] && mac=$(ifconfig "$iface" 2>/dev/null | awk '/(ether|HWaddr)/{for(i=1;i<=NF;i++){if($i=="ether"||$i=="HWaddr"){print $(i+1);exit}}}' | tr 'A-Z' 'a-z' | head -n 1); [ -z "$mac" ] && mac=-; [ -z "$rx" ] && rx=0; [ -z "$tx" ] && tx=0; echo "$iface $ip $mac $rx $tx"; done
+'; tail -n +3 /proc/net/dev 2>/dev/null | while read -r iface rest; do iface=${iface%:}; [ -z "$iface" ] && continue; set -- $rest; rx=$1; tx=$9; ip=$(ip -o -4 addr show dev "$iface" 2>/dev/null | awk '{print $4}' | head -n 1 | cut -d/ -f1); [ -z "$ip" ] && ip=$(ifconfig "$iface" 2>/dev/null | awk '/inet /{for(i=1;i<=NF;i++){if($i=="inet"){print $(i+1);exit} if(index($i,"addr:")==1){sub("addr:","",$i);print $i;exit}}}' | head -n 1); [ -z "$ip" ] && ip=-; mac=$(cat /sys/class/net/"$iface"/address 2>/dev/null | tr 'A-Z' 'a-z'); [ -z "$mac" ] && mac=$(ifconfig "$iface" 2>/dev/null | awk '/(ether|HWaddr)/{for(i=1;i<=NF;i++){if($i=="ether"||$i=="HWaddr"){print $(i+1);exit}}}' | tr 'A-Z' 'a-z' | head -n 1); [ -z "$mac" ] && mac=-; [ -z "$rx" ] && rx=0; [ -z "$tx" ] && tx=0; printf '%s %s %s %s %s
+' "$iface" "$ip" "$mac" "$rx" "$tx"; done
       parseType: multiRow
 
   - name: disk_free
