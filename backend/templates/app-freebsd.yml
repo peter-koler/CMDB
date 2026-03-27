@@ -83,6 +83,7 @@ params:
     type: textarea
     required: true
     hide: true
+    persist: false
     defaultValue: |-
       set +e
       

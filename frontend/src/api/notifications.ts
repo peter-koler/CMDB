@@ -118,6 +118,7 @@ export const sendNotification = (data: {
   content: string
   template_id?: number
   variables?: Record<string, any>
+  attachments?: any[]
 }) => {
   return request({
     url: '/notifications',
@@ -136,6 +137,7 @@ export const sendBroadcast = (data: {
   content: string
   template_id?: number
   variables?: Record<string, any>
+  attachments?: any[]
 }) => {
   return request({
     url: '/notifications/broadcast',

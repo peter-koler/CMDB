@@ -28,7 +28,7 @@
               <a-dropdown :trigger="['contextmenu']">
                 <span>{{ name }}</span>
                 <template #overlay>
-                  <a-menu @click="(e) => handleMenuClick(e, id)">
+                  <a-menu @click="handleMenuClick($event, id)">
                     <a-menu-item key="add">添加子部门</a-menu-item>
                     <a-menu-item key="edit">编辑</a-menu-item>
                     <a-menu-item key="delete" danger>删除</a-menu-item>
@@ -132,7 +132,7 @@
         v-model:target-keys="targetKeys"
         :data-source="allUsers"
         :titles="['未分配用户', '已选用户']"
-        :render="item => item.title"
+        :render="renderTransferItem"
         :list-style="{ width: '300px', height: '400px' }"
       />
     </a-modal>
@@ -203,6 +203,8 @@ const deptRules = {
 }
 
 const userModalVisible = ref(false)
+
+const renderTransferItem = (item: { title: string }) => item.title
 
 onMounted(() => {
   fetchDepartments()

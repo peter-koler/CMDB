@@ -205,10 +205,12 @@ func (c *Client) SendTask(task *pb.CollectTask) error {
 		return errors.New("not connected")
 	}
 
-	// 缓存任务
-	c.mu.Lock()
-	c.jobs[task.JobId] = task
-	c.mu.Unlock()
+	// 仅缓存周期任务；一次性探测任务不应在重连时被重发。
+	if task.GetIntervalMs() > 0 {
+		c.mu.Lock()
+		c.jobs[task.JobId] = task
+		c.mu.Unlock()
+	}
 
 	frame := &pb.CollectorFrame{
 		Payload: &pb.CollectorFrame_Upsert{Upsert: task},
@@ -369,7 +371,7 @@ func (c *Client) handleFrame(frame *pb.ManagerFrame) {
 		}
 	case *pb.ManagerFrame_Heartbeat:
 		// 收到心跳响应，更新状态
-	//	log.Printf("[Collector %s] Received heartbeat ack", c.id)
+		//	log.Printf("[Collector %s] Received heartbeat ack", c.id)
 	}
 }
 

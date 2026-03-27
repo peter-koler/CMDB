@@ -490,7 +490,7 @@ const fetchLogs = async () => {
     })
     const payload = res?.data?.items ? res.data.items : res?.data
     const data = Array.isArray(payload) ? payload : []
-    const total = res?.data?.total ?? res?.total ?? data.length
+    const total = res?.data?.total ?? data.length
     logs.value = data
     logPagination.total = total
   } catch (error) {

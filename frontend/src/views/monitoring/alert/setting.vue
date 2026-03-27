@@ -482,7 +482,7 @@ const ruleScope = ref<'global' | 'bound' | 'all'>('global')
 const noticeRuleMap = computed(() => {
   const map = new Map<number, AlertNotice>()
   noticeRules.value.forEach(rule => {
-    map.set(rule.id, rule)
+    map.set(Number(rule.id), rule)
   })
   return map
 })
@@ -577,8 +577,8 @@ const severityColor = (severity?: string) => {
   return map[severity || ''] || 'default'
 }
 
-const getNoticeRuleName = (id: number) => {
-  const item = noticeRuleMap.value.get(id)
+const getNoticeRuleName = (id: number | string) => {
+  const item = noticeRuleMap.value.get(Number(id))
   return item?.name || `#${id}`
 }
 

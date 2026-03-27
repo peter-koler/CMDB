@@ -536,15 +536,17 @@ const handleRefresh = () => {
 const handleExport = async () => {
   exportLoading.value = true
   try {
-    const data = await exportTopology({
+    const exported = await exportTopology({
       format: 'csv',
       model_id: searchModelId.value,
       ci_id: searchCiId.value,
       depth: relationDepth.value,
       keyword: searchKeyword.value
-    })
+    }) as unknown
 
-    const blob = data instanceof Blob ? data : new Blob([data], { type: 'text/csv;charset=utf-8;' })
+    const blob = exported instanceof Blob
+      ? exported
+      : new Blob([exported as BlobPart], { type: 'text/csv;charset=utf-8;' })
     const url = window.URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url

@@ -67,9 +67,21 @@ const props = defineProps<{
   yamlContent: string
 }>()
 
-const parsedConfig = computed(() => {
+type TemplatePreviewConfig = {
+  app?: string
+  category?: string
+  name?: Record<string, string>
+  params?: any[]
+  metrics?: any[]
+}
+
+const parsedConfig = computed<TemplatePreviewConfig>(() => {
   try {
-    return yaml.load(props.yamlContent) || {}
+    const doc = yaml.load(props.yamlContent)
+    if (!doc || typeof doc !== 'object' || Array.isArray(doc)) {
+      return {}
+    }
+    return doc as TemplatePreviewConfig
   } catch (e) {
     console.error('YAML parse error:', e)
     return {}
@@ -77,7 +89,7 @@ const parsedConfig = computed(() => {
 })
 
 const previewParams = computed<any[]>(() => {
-  const params = Array.isArray((parsedConfig.value as any)?.params) ? (parsedConfig.value as any).params : []
+  const params = Array.isArray(parsedConfig.value.params) ? parsedConfig.value.params : []
   const seen = new Set<string>()
   const out: any[] = []
   for (const item of params) {
@@ -92,7 +104,7 @@ const previewParams = computed<any[]>(() => {
 })
 
 const previewMetrics = computed<any[]>(() => {
-  const metrics = Array.isArray((parsedConfig.value as any)?.metrics) ? (parsedConfig.value as any).metrics : []
+  const metrics = Array.isArray(parsedConfig.value.metrics) ? parsedConfig.value.metrics : []
   return metrics.map((metric: any) => {
     const fields = Array.isArray(metric?.fields) ? metric.fields : []
     const seen = new Set<string>()

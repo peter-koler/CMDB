@@ -167,6 +167,7 @@ metrics:
       url: ^_^url^_^
 
   - name: state
+    viewMode: row
     i18n:
       zh-CN: 状态信息
       en-US: State Info
@@ -355,6 +356,7 @@ metrics:
       url: ^_^url^_^
 
   - name: connection_state
+    viewMode: row
     i18n:
       zh-CN: 连接状态
       en-US: Connection State
@@ -388,6 +390,7 @@ metrics:
       url: ^_^url^_^
 
   - name: connection_db
+    viewMode: row
     i18n:
       zh-CN: 连接数据库
       en-US: Connection Db
@@ -421,6 +424,7 @@ metrics:
       url: ^_^url^_^
 
   - name: tuple
+    viewMode: row
     i18n:
       zh-CN: 元组信息
       en-US: Tuple Info
@@ -471,6 +475,7 @@ metrics:
       url: ^_^url^_^
 
   - name: temp_file
+    viewMode: row
     i18n:
       zh-CN: 临时文件
       en-US: Temp File
@@ -511,6 +516,7 @@ metrics:
       url: ^_^url^_^
 
   - name: lock
+    viewMode: row
     i18n:
       zh-CN: 锁信息
       en-US: Lock Info
@@ -552,6 +558,7 @@ metrics:
       url: ^_^url^_^
 
   - name: slow_sql
+    viewMode: row
     i18n:
       zh-CN: 慢查询
       en-US: Slow Sql
@@ -615,6 +622,7 @@ metrics:
       url: ^_^url^_^
 
   - name: transaction
+    viewMode: row
     i18n:
       zh-CN: 事务信息
       en-US: Transaction Info
@@ -656,6 +664,7 @@ metrics:
       url: ^_^url^_^
 
   - name: conflicts
+    viewMode: row
     i18n:
       zh-CN: 冲突信息
       en-US: Conflicts Info
@@ -713,6 +722,7 @@ metrics:
       url: ^_^url^_^
 
   - name: cache_hit_ratio
+    viewMode: row
     i18n:
       zh-CN: 缓存命中率
       en-US: Cache Hit Ratio

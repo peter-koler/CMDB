@@ -1,10 +1,10 @@
 <template>
-  <div class="page-container">
+  <div class="app-page page-container">
     <a-spin :spinning="loading">
       <!-- Logo配置 -->
       <a-row :gutter="[16, 16]">
         <a-col :span="24">
-          <a-card :bordered="false" class="config-card">
+          <a-card :bordered="false" class="config-card app-surface-card">
             <template #title>
               <div class="card-title">
                 <PictureOutlined class="title-icon" />
@@ -62,7 +62,7 @@
 
       <a-row :gutter="[16, 16]" style="margin-top: 0">
         <a-col :span="24">
-          <a-card :bordered="false" class="config-card">
+          <a-card :bordered="false" class="config-card app-surface-card">
             <template #title>
               <div class="card-title">
                 <SafetyCertificateOutlined class="title-icon" />
@@ -107,7 +107,7 @@
 
       <a-row :gutter="[16, 16]" style="margin-top: 0">
         <a-col :span="24">
-          <a-card :bordered="false" class="config-card">
+          <a-card :bordered="false" class="config-card app-surface-card">
             <template #title>
               <div class="card-title">
                 <LockOutlined class="title-icon" />
@@ -168,7 +168,7 @@
 
       <a-row :gutter="[16, 16]" style="margin-top: 0">
         <a-col :xs="24" :sm="24" :md="12">
-          <a-card :bordered="false" class="config-card">
+          <a-card :bordered="false" class="config-card app-surface-card">
             <template #title>
               <div class="card-title">
                 <SecurityScanOutlined class="title-icon" />
@@ -200,7 +200,7 @@
           </a-card>
         </a-col>
         <a-col :xs="24" :sm="24" :md="12">
-          <a-card :bordered="false" class="config-card">
+          <a-card :bordered="false" class="config-card app-surface-card">
             <template #title>
               <div class="card-title">
                 <FileTextOutlined class="title-icon" />
@@ -225,7 +225,7 @@
 
       <a-row :gutter="[16, 16]" style="margin-top: 0">
         <a-col :span="24">
-          <a-card :bordered="false" class="config-card">
+          <a-card :bordered="false" class="config-card app-surface-card">
             <template #title>
               <div class="card-title">
                 <IdcardOutlined class="title-icon" />
@@ -443,7 +443,7 @@ onMounted(() => {
 
 <style scoped>
 .page-container {
-  padding-bottom: 80px;
+  padding-bottom: 0;
 }
 
 .config-card {
@@ -493,16 +493,16 @@ onMounted(() => {
 }
 
 .footer-actions {
-  position: fixed;
+  position: sticky;
   bottom: 0;
-  right: 0;
-  left: 208px;
-  padding: 16px 24px;
+  margin-top: auto;
+  padding: 16px 20px 4px;
   background: var(--app-surface-card);
   border-top: 1px solid var(--app-border);
   text-align: center;
   z-index: 99;
   box-shadow: 0 -8px 24px color-mix(in srgb, var(--app-text-primary) 8%, transparent);
+  backdrop-filter: blur(10px);
 }
 
 .logo-upload-container {
@@ -545,7 +545,7 @@ onMounted(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  color: white;
+  color: var(--app-button-primary-text);
   opacity: 0;
   transition: opacity 0.3s;
 }
@@ -603,7 +603,7 @@ onMounted(() => {
 
 @media (max-width: 768px) {
   .footer-actions {
-    left: 0;
+    padding-inline: 0;
   }
   
   .config-input {

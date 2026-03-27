@@ -2,8 +2,8 @@ import request from '@/utils/request'
 
 export interface UploadResponse {
   code: number
-  message: string
-  data: {
+  message?: string
+  data?: {
     filename: string
     path: string
     url: string

@@ -380,6 +380,6 @@ onMounted(async () => {
 }
 
 .text-muted {
-  color: #999;
+  color: var(--app-text-muted);
 }
 </style>

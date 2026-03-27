@@ -1,3 +1,5 @@
+import type { DefaultPolicyItem } from './default-policies'
+
 export const MIDDLEWARE_DEFAULT_POLICIES = {
   activemq: [
     { key: 'activemq_unavailable', name: 'ActiveMQ实例不可用', type: 'realtime_metric', metric: 'activemq_server_up', operator: '==', threshold: 0, level: 'critical', period: 60, times: 1, mode: 'core', enabled: true, expr: 'activemq_server_up == 0', template: '实例不可用' },
@@ -130,4 +132,4 @@ export const MIDDLEWARE_DEFAULT_POLICIES = {
     { key: 'apollo_heap_used_critical', name: 'Apollo堆内存使用过高', type: 'periodic_metric', metric: 'metric_value', operator: '>', threshold: 3221225472, level: 'critical', period: 300, times: 1, mode: 'extended', enabled: false, expr: "(area == 'heap') && metric_value > 3221225472", template: '堆内存使用过高' },
     { key: 'apollo_nonheap_used_high', name: 'Apollo非堆内存使用偏高', type: 'periodic_metric', metric: 'metric_value', operator: '>', threshold: 1073741824, level: 'warning', period: 300, times: 2, mode: 'extended', enabled: false, expr: "(area == 'nonheap') && metric_value > 1073741824", template: '非堆内存使用偏高' }
   ]
-} as const
+} as const satisfies Record<string, readonly DefaultPolicyItem[]>

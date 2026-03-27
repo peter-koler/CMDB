@@ -123,7 +123,7 @@
         v-model:target-keys="targetUserKeys"
         :data-source="allUsers"
         :titles="['未分配用户', '已选用户']"
-        :render="item => item.title"
+        :render="renderTransferItem"
         :list-style="{ width: '300px', height: '400px' }"
       />
     </a-modal>
@@ -199,6 +199,8 @@ const dataPermission = reactive({
 const userModalVisible = ref(false)
 const allUsers = ref<any[]>([])
 const targetUserKeys = ref<string[]>([])
+
+const renderTransferItem = (item: { title: string }) => item.title
 
 onMounted(() => {
   fetchRoles()

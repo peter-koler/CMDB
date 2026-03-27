@@ -166,7 +166,7 @@
         v-model:target-keys="selectedDeptKeys"
         :data-source="deptOptions"
         :titles="['未分配', '已分配']"
-        :render="item => item.title"
+        :render="renderTransferItem"
         :list-style="{ width: '250px', height: '300px' }"
       />
     </a-modal>
@@ -182,7 +182,7 @@
         v-model:target-keys="selectedRoleKeys"
         :data-source="roleOptions"
         :titles="['未分配', '已分配']"
-        :render="item => item.title"
+        :render="renderTransferItem"
         :list-style="{ width: '250px', height: '300px' }"
       />
     </a-modal>
@@ -242,6 +242,8 @@ const pagination = reactive({
   showSizeChanger: true,
   showTotal: (total: number) => `共 ${total} 条`
 })
+
+const renderTransferItem = (item: { title: string }) => item.title
 
 // 用户编辑
 const modalVisible = ref(false)

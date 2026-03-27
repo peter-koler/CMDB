@@ -435,7 +435,8 @@ watch(
 watch(
   () => [chartType.value, points.value.length, props.open],
   async ([type, count, open]) => {
-    if (!open || type === 'table' || isStringMetric.value || count <= 0) {
+    const pointCount = Number(count)
+    if (!open || type === 'table' || isStringMetric.value || pointCount <= 0) {
       if (type === 'table' || isStringMetric.value || !open) disposeChart()
       return
     }

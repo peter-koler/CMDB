@@ -133,7 +133,7 @@ def _emit_alert_event(event: str, payload: dict):
         socketio.emit(event, payload, namespace="/notifications")
 
 
-def _manager_call(method: str, path: str, payload=None, params=None, fallback=None):
+def _manager_call(method: str, path: str, payload=None, params=None, fallback=None, timeout_seconds=None):
     try:
         data = manager_api_service.request(
             method=method,
@@ -141,6 +141,7 @@ def _manager_call(method: str, path: str, payload=None, params=None, fallback=No
             payload=payload,
             params=params,
             auth_header=_auth_header(),
+            timeout_seconds=timeout_seconds,
         )
         return jsonify({"code": 200, "data": data})
     except ManagerError as e:
@@ -921,6 +922,25 @@ def get_target(monitor_id: int):
         if isinstance(data, dict) and data.get("fallback_error") == "not_found":
             return jsonify({"code": 404, "message": "监控任务不存在"}), 404
     return response
+
+
+@monitoring_target_bp.route("/targets/<int:monitor_id>/connectivity-test", methods=["POST"])
+@jwt_required()
+@require_any_permission("monitoring:target:view", "monitoring:list:view")
+def test_target_connectivity(monitor_id: int):
+    timeout_ms = request.args.get("timeout_ms", type=int)
+    params = {}
+    if timeout_ms and timeout_ms > 0:
+        params["timeout_ms"] = timeout_ms
+    timeout_seconds = 20
+    if timeout_ms and timeout_ms > 0:
+        timeout_seconds = max(5, int(timeout_ms / 1000) + 5)
+    return _manager_call(
+        "POST",
+        f"/api/v1/monitors/{monitor_id}/connectivity-test",
+        params=params,
+        timeout_seconds=timeout_seconds,
+    )
 
 
 @monitoring_target_bp.route("/targets/<int:monitor_id>", methods=["PUT"])

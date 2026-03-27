@@ -242,3 +242,55 @@ metrics:
 		t.Fatalf("unexpected error path: %s", ce.Path)
 	}
 }
+
+func TestCompileMetricsTasks_NonPersistParamUsesTemplateDefault(t *testing.T) {
+	rt := RuntimeTemplate{
+		App: "linux",
+		Content: `
+app: linux
+params:
+  - field: bundleScript
+    hide: true
+    persist: false
+    defaultValue: echo from_template
+metrics:
+  - name: basic
+    protocol: ssh
+    fields:
+      - field: output
+        type: 1
+    ssh:
+      host: ^_^host^_^
+      port: ^_^port^_^
+      username: ^_^username^_^
+      password: ^_^password^_^
+      bundleScript: ^_^bundleScript^_^
+      bundleSection: basic
+      parseType: multiRow
+`,
+	}
+	monitor := &model.Monitor{
+		ID:     5,
+		App:    "linux",
+		Target: "192.168.1.10:22",
+		Params: map[string]string{
+			"username":     "test",
+			"password":     "pwd",
+			"bundleScript": "echo from_monitor",
+		},
+	}
+	tasks, err := CompileMetricsTasks(rt, monitor)
+	if err != nil {
+		t.Fatalf("compile failed: %v", err)
+	}
+	if got := tasks[0].GetParams()["bundleScript"]; got != "echo from_template" {
+		t.Fatalf("expected template bundleScript, got %q", got)
+	}
+	filtered := FilterPersistableParams(rt, monitor.Params)
+	if _, ok := filtered["bundleScript"]; ok {
+		t.Fatalf("expected bundleScript removed from persistable params: %+v", filtered)
+	}
+	if filtered["username"] != "test" {
+		t.Fatalf("expected username kept, got %+v", filtered)
+	}
+}

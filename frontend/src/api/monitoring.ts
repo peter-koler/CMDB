@@ -226,6 +226,36 @@ export interface MonitoringTarget {
   version?: number
 }
 
+export interface MonitoringConnectivityTestItem {
+  metrics: string
+  protocol: string
+  success: boolean
+  code?: string
+  message?: string
+  raw_latency_ms?: number
+  field_count?: number
+  fields?: Record<string, string>
+  debug?: Record<string, string>
+}
+
+export interface MonitoringConnectivityTestResult {
+  monitor_id: number
+  monitor_name?: string
+  app?: string
+  target?: string
+  collector_id?: string
+  collector_addr?: string
+  success: boolean
+  completed: boolean
+  timed_out: boolean
+  metrics_total: number
+  metrics_finished: number
+  summary?: string
+  started_at?: string
+  finished_at?: string
+  items: MonitoringConnectivityTestItem[]
+}
+
 export const getMonitoringTargets = (params?: Record<string, any>) => {
   return request({
     url: '/monitoring/targets',
@@ -238,6 +268,14 @@ export const getMonitoringTarget = (monitorId: number) => {
   return request({
     url: `/monitoring/targets/${monitorId}`,
     method: 'GET'
+  })
+}
+
+export const testMonitoringTargetConnectivity = (monitorId: number, params?: { timeout_ms?: number }) => {
+  return request<MonitoringConnectivityTestResult>({
+    url: `/monitoring/targets/${monitorId}/connectivity-test`,
+    method: 'POST',
+    params
   })
 }
 

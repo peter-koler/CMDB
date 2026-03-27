@@ -7,13 +7,13 @@
           <a-card size="small"><a-statistic title="监控总数" :value="overview.total_monitors" /></a-card>
         </a-col>
         <a-col :xs="24" :sm="12" :lg="6">
-          <a-card size="small"><a-statistic title="正常" :value="overview.healthy_monitors" :value-style="{ color: '#52c41a' }" /></a-card>
+          <a-card size="small"><a-statistic title="正常" :value="overview.healthy_monitors" :value-style="{ color: 'var(--arco-success)' }" /></a-card>
         </a-col>
         <a-col :xs="24" :sm="12" :lg="6">
-          <a-card size="small"><a-statistic title="异常" :value="overview.unhealthy_monitors" :value-style="{ color: '#faad14' }" /></a-card>
+          <a-card size="small"><a-statistic title="异常" :value="overview.unhealthy_monitors" :value-style="{ color: 'var(--arco-warning)' }" /></a-card>
         </a-col>
         <a-col :xs="24" :sm="12" :lg="6">
-          <a-card size="small"><a-statistic title="当前告警" :value="overview.open_alerts" :value-style="{ color: '#f5222d' }" /></a-card>
+          <a-card size="small"><a-statistic title="当前告警" :value="overview.open_alerts" :value-style="{ color: 'var(--arco-danger)' }" /></a-card>
         </a-col>
       </a-row>
 
@@ -32,7 +32,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { message } from 'ant-design-vue'
-import { getMonitoringDashboard } from '@/api/monitoring'
+import { getMonitoringDashboard, type MonitoringDashboardData } from '@/api/monitoring'
 
 const loading = ref(false)
 const topAlertMonitors = ref<Array<{ name: string; value: number }>>([])
@@ -51,8 +51,8 @@ const columns = [
 const load = async () => {
   loading.value = true
   try {
-    const res = await getMonitoringDashboard()
-    const data = res?.data || {}
+    const res = await getMonitoringDashboard() as { data?: MonitoringDashboardData }
+    const data: Partial<MonitoringDashboardData> = res?.data || {}
     Object.assign(overview, data.overview || {})
     topAlertMonitors.value = Array.isArray(data.top_alert_monitors) ? data.top_alert_monitors : []
   } catch (error: any) {

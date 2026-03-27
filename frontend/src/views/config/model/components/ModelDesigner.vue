@@ -196,7 +196,7 @@
                                 <SwapOutlined />
                               </a-button>
                               <template #overlay>
-                                <a-menu @click="({ key }) => moveChildToGroup(item, childIndex, String(key))">
+                                <a-menu @click="handleChildMoveMenuClick(item, childIndex, $event)">
                                   <a-menu-item key="__root__">移动到基础属性</a-menu-item>
                                   <a-menu-item
                                     v-for="groupOpt in getGroupMoveOptions(item.id)"
@@ -324,7 +324,7 @@
                         <SwapOutlined />
                       </a-button>
                       <template #overlay>
-                        <a-menu @click="({ key }) => moveTopLevelToGroup(index, String(key))">
+                        <a-menu @click="handleTopLevelMoveMenuClick(index, $event)">
                           <a-menu-item
                             v-for="groupOpt in getGroupMoveOptions()"
                             :key="groupOpt.id"
@@ -1353,6 +1353,10 @@ const moveTopLevelToGroup = (index: number, targetGroupId: string) => {
   targetGroup.children.push(sourceItem)
 }
 
+const handleTopLevelMoveMenuClick = (index: number, info: { key: string | number }) => {
+  moveTopLevelToGroup(index, String(info.key))
+}
+
 const moveChildToGroup = (sourceGroup: CanvasItem, childIndex: number, targetKey: string) => {
   if (!Array.isArray(sourceGroup.children)) return
   const sourceItem = sourceGroup.children[childIndex]
@@ -1373,6 +1377,14 @@ const moveChildToGroup = (sourceGroup: CanvasItem, childIndex: number, targetKey
     targetGroup.children = []
   }
   targetGroup.children.push(sourceItem)
+}
+
+const handleChildMoveMenuClick = (
+  sourceGroup: CanvasItem,
+  childIndex: number,
+  info: { key: string | number }
+) => {
+  moveChildToGroup(sourceGroup, childIndex, String(info.key))
 }
 
 const moveChildItem = (group: CanvasItem, childIndex: number, direction: number) => {

@@ -1,3 +1,5 @@
+import type { DefaultPolicyItem } from './default-policies'
+
 export const WEBSERVER_DEFAULT_POLICIES = {
   tomcat: [
     { key: 'tomcat_unavailable', name: 'Tomcat实例不可用', type: 'realtime_metric', metric: 'tomcat_server_up', operator: '==', threshold: 0, level: 'critical', period: 60, times: 1, mode: 'core', enabled: true, expr: 'tomcat_server_up == 0', template: '实例不可用' },
@@ -25,4 +27,4 @@ export const WEBSERVER_DEFAULT_POLICIES = {
     { key: 'jetty_pending_finalization_high', name: 'Jetty对象终结队列积压', type: 'periodic_metric', metric: 'ObjectPendingFinalizationCount', operator: '>', threshold: 100, level: 'warning', period: 300, times: 2, mode: 'extended', enabled: false, expr: 'ObjectPendingFinalizationCount > 100', template: '对象终结队列积压' },
     { key: 'jetty_uptime_short', name: 'Jetty运行时长过短', type: 'periodic_metric', metric: 'Uptime', operator: '<', threshold: 3600000, level: 'warning', period: 600, times: 1, mode: 'extended', enabled: false, expr: 'Uptime < 3600000', template: '运行时长过短' }
   ]
-} as const
+} as const satisfies Record<string, readonly DefaultPolicyItem[]>

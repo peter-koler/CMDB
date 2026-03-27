@@ -8,9 +8,11 @@ import (
 	"log"
 	"net"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"manager-go/internal/model"
@@ -23,6 +25,7 @@ import (
 type Manager struct {
 	clients map[string]*Client
 	mu      sync.RWMutex
+	probeMu sync.Mutex
 
 	// 依赖
 	monitorStore   *store.MonitorStore
@@ -42,6 +45,46 @@ type Manager struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
+
+	probeSeq      atomic.Int64
+	probeSessions map[int64]*probeSession
+}
+
+type ConnectivityCheckItem struct {
+	Metrics      string            `json:"metrics"`
+	Protocol     string            `json:"protocol"`
+	Success      bool              `json:"success"`
+	Code         string            `json:"code"`
+	Message      string            `json:"message"`
+	RawLatencyMs int64             `json:"raw_latency_ms"`
+	FieldCount   int               `json:"field_count"`
+	Fields       map[string]string `json:"fields,omitempty"`
+	Debug        map[string]string `json:"debug,omitempty"`
+}
+
+type ConnectivityCheckResult struct {
+	MonitorID       int64                   `json:"monitor_id"`
+	MonitorName     string                  `json:"monitor_name"`
+	App             string                  `json:"app"`
+	Target          string                  `json:"target"`
+	CollectorID     string                  `json:"collector_id"`
+	CollectorAddr   string                  `json:"collector_addr"`
+	Success         bool                    `json:"success"`
+	Completed       bool                    `json:"completed"`
+	TimedOut        bool                    `json:"timed_out"`
+	MetricsTotal    int                     `json:"metrics_total"`
+	MetricsFinished int                     `json:"metrics_finished"`
+	Summary         string                  `json:"summary"`
+	StartedAt       string                  `json:"started_at"`
+	FinishedAt      string                  `json:"finished_at"`
+	Items           []ConnectivityCheckItem `json:"items"`
+}
+
+type probeSession struct {
+	expected  int
+	startedAt time.Time
+	results   []*pb.CollectRep
+	done      chan []*pb.CollectRep
 }
 
 // ManagerOption 配置选项
@@ -95,6 +138,7 @@ func NewManager(monitorStore *store.MonitorStore, collectorStore *store.Collecto
 		maxReconnectAttempts: 10,
 		ctx:                  ctx,
 		cancel:               cancel,
+		probeSessions:        make(map[int64]*probeSession),
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -152,6 +196,9 @@ func (m *Manager) RegisterWithInfo(id, addr, ip, version, mode string) error {
 		WithReconnectBackoff(m.reconnectBackoff),
 		WithMaxReconnectAttempts(m.maxReconnectAttempts),
 		WithReportHandler(func(report *pb.CollectRep) {
+			if m.handleProbeReport(report) {
+				return
+			}
 			if m.onReport != nil {
 				m.onReport(id, report)
 			}
@@ -388,6 +435,75 @@ func (m *Manager) ValidateMonitorTemplate(monitor *model.Monitor) error {
 	return err
 }
 
+func (m *Manager) FilterPersistableParams(monitor *model.Monitor, params map[string]string) map[string]string {
+	if len(params) == 0 {
+		return nil
+	}
+	if m == nil || m.templateReg == nil || monitor == nil {
+		return cloneStringMap(params)
+	}
+	rt, ok := m.getTemplateForMonitor(monitor)
+	if !ok {
+		return cloneStringMap(params)
+	}
+	return templ.FilterPersistableParams(rt, params)
+}
+
+func (m *Manager) ProbeMonitorConnection(monitorID int64, timeout time.Duration) (*ConnectivityCheckResult, error) {
+	monitor, err := m.monitorStore.Get(monitorID)
+	if err != nil {
+		return nil, err
+	}
+	task, _, err := m.BuildCollectTaskStrict(&monitor)
+	if err != nil {
+		return nil, err
+	}
+	client, _, err := m.selectCollectorForMonitor(monitorID)
+	if err != nil {
+		return nil, err
+	}
+	if client.GetState() != StateConnected {
+		return nil, fmt.Errorf("collector %s is not connected", client.id)
+	}
+
+	probeTask := cloneCollectTask(task)
+	probeID := m.nextProbeJobID()
+	probeTask.JobId = probeID
+	probeTask.MonitorId = -monitor.ID
+	probeTask.IntervalMs = 0
+	probeTask.CommandId = time.Now().UnixNano()
+	probeTask.TraceId = fmt.Sprintf("probe-%d-%d", monitor.ID, time.Now().UnixNano())
+
+	startedAt := time.Now().UTC()
+	session := &probeSession{
+		expected:  len(probeTask.GetTasks()),
+		startedAt: startedAt,
+		done:      make(chan []*pb.CollectRep, 1),
+	}
+	m.registerProbeSession(probeID, session)
+	defer m.unregisterProbeSession(probeID)
+
+	if err := client.SendTask(probeTask); err != nil {
+		return nil, err
+	}
+
+	if timeout <= 0 {
+		timeout = 15 * time.Second
+	}
+	var (
+		reports  []*pb.CollectRep
+		timedOut bool
+	)
+	select {
+	case reports = <-session.done:
+	case <-time.After(timeout):
+		timedOut = true
+		reports = m.snapshotProbeResults(probeID)
+	}
+
+	return buildConnectivityCheckResult(&monitor, client, probeTask, startedAt, time.Now().UTC(), reports, timedOut), nil
+}
+
 // SyncAllMonitors 同步所有启用的 Monitor 到 Collector
 func (m *Manager) SyncAllMonitors() error {
 	monitors := m.monitorStore.List()
@@ -573,6 +689,171 @@ func (m *Manager) persistBind(collectorID string, monitorID int64, pinned bool) 
 	}
 	_, err = m.collectorStore.CreateBind(collectorID, monitorID, wantPinned)
 	return err
+}
+
+func (m *Manager) nextProbeJobID() int64 {
+	return -1 * m.probeSeq.Add(1)
+}
+
+func (m *Manager) registerProbeSession(jobID int64, session *probeSession) {
+	m.probeMu.Lock()
+	m.probeSessions[jobID] = session
+	m.probeMu.Unlock()
+}
+
+func (m *Manager) unregisterProbeSession(jobID int64) {
+	m.probeMu.Lock()
+	delete(m.probeSessions, jobID)
+	m.probeMu.Unlock()
+}
+
+func (m *Manager) snapshotProbeResults(jobID int64) []*pb.CollectRep {
+	m.probeMu.Lock()
+	defer m.probeMu.Unlock()
+	session, ok := m.probeSessions[jobID]
+	if !ok || len(session.results) == 0 {
+		return nil
+	}
+	out := make([]*pb.CollectRep, len(session.results))
+	copy(out, session.results)
+	return out
+}
+
+func (m *Manager) handleProbeReport(report *pb.CollectRep) bool {
+	if report == nil || report.GetJobId() >= 0 {
+		return false
+	}
+	m.probeMu.Lock()
+	session, ok := m.probeSessions[report.GetJobId()]
+	if !ok {
+		m.probeMu.Unlock()
+		return true
+	}
+	session.results = append(session.results, report)
+	reached := len(session.results) >= session.expected && session.expected > 0
+	var snapshot []*pb.CollectRep
+	if reached {
+		snapshot = make([]*pb.CollectRep, len(session.results))
+		copy(snapshot, session.results)
+	}
+	m.probeMu.Unlock()
+	if reached {
+		select {
+		case session.done <- snapshot:
+		default:
+		}
+	}
+	return true
+}
+
+func cloneCollectTask(task *pb.CollectTask) *pb.CollectTask {
+	if task == nil {
+		return nil
+	}
+	dup := &pb.CollectTask{
+		JobId:      task.GetJobId(),
+		MonitorId:  task.GetMonitorId(),
+		App:        task.GetApp(),
+		IntervalMs: task.GetIntervalMs(),
+		CommandId:  task.GetCommandId(),
+		Version:    task.GetVersion(),
+		TraceId:    task.GetTraceId(),
+		Tasks:      make([]*pb.MetricsTask, 0, len(task.GetTasks())),
+	}
+	for _, item := range task.GetTasks() {
+		if item == nil {
+			continue
+		}
+		taskCopy := &pb.MetricsTask{
+			Name:           item.GetName(),
+			Protocol:       item.GetProtocol(),
+			TimeoutMs:      item.GetTimeoutMs(),
+			Priority:       item.GetPriority(),
+			Params:         clonePBStringMap(item.GetParams()),
+			ExecKind:       item.GetExecKind(),
+			SpecJson:       item.GetSpecJson(),
+			Transform:      append([]*pb.Transform(nil), item.GetTransform()...),
+			FieldSpecs:     append([]*pb.FieldSpec(nil), item.GetFieldSpecs()...),
+			CalculateSpecs: append([]*pb.CalculateSpec(nil), item.GetCalculateSpecs()...),
+		}
+		dup.Tasks = append(dup.Tasks, taskCopy)
+	}
+	return dup
+}
+
+func clonePBStringMap(src map[string]string) map[string]string {
+	if len(src) == 0 {
+		return nil
+	}
+	dst := make(map[string]string, len(src))
+	for k, v := range src {
+		dst[k] = v
+	}
+	return dst
+}
+
+func buildConnectivityCheckResult(monitor *model.Monitor, client *Client, task *pb.CollectTask, startedAt, finishedAt time.Time, reports []*pb.CollectRep, timedOut bool) *ConnectivityCheckResult {
+	items := make([]ConnectivityCheckItem, 0, len(reports))
+	successCount := 0
+	for _, rep := range reports {
+		if rep == nil {
+			continue
+		}
+		if rep.GetSuccess() {
+			successCount++
+		}
+		items = append(items, ConnectivityCheckItem{
+			Metrics:      rep.GetMetrics(),
+			Protocol:     rep.GetProtocol(),
+			Success:      rep.GetSuccess(),
+			Code:         probeResultCode(rep.GetSuccess(), timedOut),
+			Message:      rep.GetMessage(),
+			RawLatencyMs: rep.GetRawLatencyMs(),
+			FieldCount:   len(rep.GetFields()),
+			Fields:       rep.GetFields(),
+			Debug:        rep.GetDebug(),
+		})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Success == items[j].Success {
+			return items[i].Metrics < items[j].Metrics
+		}
+		return !items[i].Success && items[j].Success
+	})
+	total := len(task.GetTasks())
+	completed := len(items) >= total && total > 0
+	success := completed && successCount == total
+	summary := fmt.Sprintf("共 %d 个指标组，成功 %d 个，失败 %d 个", total, successCount, total-successCount)
+	if timedOut {
+		summary = fmt.Sprintf("%s，等待 collector 返回结果超时", summary)
+	}
+	return &ConnectivityCheckResult{
+		MonitorID:       monitor.ID,
+		MonitorName:     monitor.Name,
+		App:             monitor.App,
+		Target:          monitor.Target,
+		CollectorID:     client.id,
+		CollectorAddr:   client.addr,
+		Success:         success,
+		Completed:       completed,
+		TimedOut:        timedOut,
+		MetricsTotal:    total,
+		MetricsFinished: len(items),
+		Summary:         summary,
+		StartedAt:       startedAt.Format(time.RFC3339),
+		FinishedAt:      finishedAt.Format(time.RFC3339),
+		Items:           items,
+	}
+}
+
+func probeResultCode(success bool, timedOut bool) string {
+	if success {
+		return "SUCCESS"
+	}
+	if timedOut {
+		return "TIMEOUT"
+	}
+	return "COLLECT_FAILED"
 }
 
 func (m *Manager) buildMetricsTasks(monitor *model.Monitor) []*pb.MetricsTask {

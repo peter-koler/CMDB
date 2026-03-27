@@ -845,6 +845,7 @@ metrics:
 
   - name: process_state
     priority: 12
+    viewMode: row
     i18n:
       zh-CN: 进程状态信息
       en-US: Process State Info
@@ -878,6 +879,7 @@ metrics:
 
   - name: slow_sql
     priority: 13
+    viewMode: row
     i18n:
       zh-CN: 慢查询信息
       en-US: Slow Sql Info

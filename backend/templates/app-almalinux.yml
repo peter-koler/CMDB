@@ -83,6 +83,7 @@ params:
     type: textarea
     required: true
     hide: true
+    persist: false
     defaultValue: |-
       set +e
       
@@ -91,7 +92,7 @@ params:
       echo "__ARCO_SECTION_END__basic"
       
       echo "__ARCO_SECTION_BEGIN__cpu"
-      "LANG=C lscpu | awk -F: '$1==\"Model name\" {print $2}';awk '/processor/{core++} END{print core}' /proc/cpuinfo;uptime | sed 's/,/ /g' | awk '{for(i=NF-2;i<=NF;i++)print $i }' | xargs;vmstat 1 1 | awk 'NR==3{print $11}';vmstat 1 1 | awk 'NR==3{print $12}';vmstat 1 2 | awk 'NR==4{print $15}'"
+      LANG=C lscpu | awk -F: '$1=="Model name" {print $2}';awk '/processor/{core++} END{print core}' /proc/cpuinfo;uptime | sed 's/,/ /g' | awk '{for(i=NF-2;i<=NF;i++)print $i }' | xargs;vmstat 1 1 | awk 'NR==3{print $11}';vmstat 1 1 | awk 'NR==3{print $12}';vmstat 1 2 | awk 'NR==4{print $15}'
       echo "__ARCO_SECTION_END__cpu"
       
       echo "__ARCO_SECTION_BEGIN__memory"

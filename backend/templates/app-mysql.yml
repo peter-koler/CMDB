@@ -396,7 +396,8 @@ metrics:
       - uptime
       - questions
     calculates:
-      - qps=uptime / questions
+      - questions=questions
+      - qps=questions / (uptime + 1)
     protocol: jdbc
     jdbc:
       host: ^_^host^_^
@@ -577,7 +578,18 @@ metrics:
       - threads_running
       - questions
     calculates:
-      - qps=uptime / questions
+      - uptime=uptime
+      - com_select=com_select
+      - com_insert=com_insert
+      - com_update=com_update
+      - com_delete=com_delete
+      - com_commit=com_commit
+      - com_rollback=com_rollback
+      - threads_created=threads_created
+      - threads_connected=threads_connected
+      - threads_cached=threads_cached
+      - threads_running=threads_running
+      - qps=questions / (uptime + 1)
     protocol: jdbc
     jdbc:
       host: ^_^host^_^
@@ -667,6 +679,32 @@ metrics:
         i18n:
           zh-CN: 外部锁定操作数
           en-US: Handler External Key
+    aliasFields:
+      - handler_commit
+      - handler_delete
+      - handler_write
+      - handler_update
+      - handler_discover
+      - handler_prepare
+      - handler_read_first
+      - handler_read_rnd
+      - handler_read_next
+      - handler_read_rnd_next
+      - handler_read_key
+      - handler_external_lock
+    calculates:
+      - handler_commit=handler_commit
+      - handler_delete=handler_delete
+      - handler_write=handler_write
+      - handler_update=handler_update
+      - handler_discover=handler_discover
+      - handler_prepare=handler_prepare
+      - handler_read_first=handler_read_first
+      - handler_read_rnd=handler_read_rnd
+      - handler_read_next=handler_read_next
+      - handler_read_rnd_next=handler_read_rnd_next
+      - handler_read_key=handler_read_key
+      - handler_external_lock=handler_external_lock
     protocol: jdbc
     jdbc:
       host: ^_^host^_^
@@ -716,6 +754,16 @@ metrics:
         i18n:
           zh-CN: 客户端中断数
           en-US: Aborted Clients
+    aliasFields:
+      - connections
+      - max_used_connections
+      - aborted_connects
+      - aborted_clients
+    calculates:
+      - connections=connections
+      - max_used_connections=max_used_connections
+      - aborted_connects=aborted_connects
+      - aborted_clients=aborted_clients
     protocol: jdbc
     jdbc:
       host: ^_^host^_^
@@ -726,7 +774,7 @@ metrics:
       database: ^_^database^_^
       timeout: ^_^timeout^_^
       queryType: columns
-      sql: show global status;
+      sql: show global status where Variable_name = 'Connections' or Variable_name = 'Max_used_connections' or Variable_name = 'Aborted_connects' or Variable_name = 'Aborted_clients';
       url: ^_^url^_^
       sshTunnel:
         enable: ^_^enableSshTunnel^_^
@@ -765,6 +813,16 @@ metrics:
         i18n:
           zh-CN: 运行线程数
           en-US: Threads Running
+    aliasFields:
+      - threads_created
+      - threads_connected
+      - threads_cached
+      - threads_running
+    calculates:
+      - threads_created=threads_created
+      - threads_connected=threads_connected
+      - threads_cached=threads_cached
+      - threads_running=threads_running
     protocol: jdbc
     jdbc:
       host: ^_^host^_^
@@ -809,6 +867,14 @@ metrics:
         i18n:
           zh-CN: 创建的临时文件数量
           en-US: Created TMP Files
+    aliasFields:
+      - created_tmp_tables
+      - created_tmp_disk_tables
+      - created_tmp_files
+    calculates:
+      - created_tmp_tables=created_tmp_tables
+      - created_tmp_disk_tables=created_tmp_disk_tables
+      - created_tmp_files=created_tmp_files
     protocol: jdbc
     jdbc:
       host: ^_^host^_^
@@ -863,6 +929,18 @@ metrics:
         i18n:
           zh-CN: 全表扫描查询数
           en-US: Select Scan
+    aliasFields:
+      - select_full_join
+      - select_full_range_join
+      - select_range
+      - select_range_check
+      - select_scan
+    calculates:
+      - select_full_join=select_full_join
+      - select_full_range_join=select_full_range_join
+      - select_range=select_range
+      - select_range_check=select_range_check
+      - select_scan=select_scan
     protocol: jdbc
     jdbc:
       host: ^_^host^_^
@@ -912,6 +990,16 @@ metrics:
         i18n:
           zh-CN: 全表扫描排序次数
           en-US: Sort Scan
+    aliasFields:
+      - sort_rows
+      - sort_range
+      - sort_merge_passes
+      - sort_scan
+    calculates:
+      - sort_rows=sort_rows
+      - sort_range=sort_range
+      - sort_merge_passes=sort_merge_passes
+      - sort_scan=sort_scan
     protocol: jdbc
     jdbc:
       host: ^_^host^_^
@@ -951,6 +1039,12 @@ metrics:
         i18n:
           zh-CN: 须等待获取表锁次数
           en-US: Table Locks Waited
+    aliasFields:
+      - table_locks_immediate
+      - table_locks_waited
+    calculates:
+      - table_locks_immediate=table_locks_immediate
+      - table_locks_waited=table_locks_waited
     protocol: jdbc
     jdbc:
       host: ^_^host^_^
@@ -976,6 +1070,7 @@ metrics:
 
   - name: process_state
     priority: 12
+    viewMode: row
     i18n:
       zh-CN: 进程状态信息
       en-US: Process State Info
@@ -1001,7 +1096,98 @@ metrics:
       database: ^_^database^_^
       timeout: ^_^timeout^_^
       queryType: multiRow
-      sql: select state, count(*) as num from information_schema.PROCESSLIST where state != '' group by state;
+      sql: |
+        select
+          COALESCE(NULLIF(state, ''), 'idle') as state,
+          count(*) as num
+        from information_schema.PROCESSLIST
+        group by COALESCE(NULLIF(state, ''), 'idle')
+        order by num desc, state asc;
+      url: ^_^url^_^
+      sshTunnel:
+        enable: ^_^enableSshTunnel^_^
+        host: ^_^sshHost^_^
+        port: ^_^sshPort^_^
+        timeout: ^_^sshTimeout^_^
+        username: ^_^sshUsername^_^
+        password: ^_^sshPassword^_^
+        privateKey: ^_^sshPrivateKey^_^
+        privateKeyPassphrase: ^_^sshPrivateKeyPassphrase^_^
+        shareConnection: ^_^sshShareConnection^_^
+
+  - name: processlist
+    priority: 13
+    viewMode: row
+    i18n:
+      zh-CN: 活跃会话列表
+      en-US: Active Sessions
+    fields:
+      - field: id
+        type: 1
+        label: true
+        i18n:
+          zh-CN: 会话ID
+          en-US: Session ID
+      - field: user
+        type: 1
+        i18n:
+          zh-CN: 用户
+          en-US: User
+      - field: host
+        type: 1
+        i18n:
+          zh-CN: 来源主机
+          en-US: Source Host
+      - field: db
+        type: 1
+        i18n:
+          zh-CN: 数据库
+          en-US: Database
+      - field: command
+        type: 1
+        i18n:
+          zh-CN: 命令
+          en-US: Command
+      - field: time_seconds
+        type: 0
+        unit: s
+        i18n:
+          zh-CN: 运行时长
+          en-US: Running Seconds
+      - field: state
+        type: 1
+        i18n:
+          zh-CN: 状态
+          en-US: State
+      - field: sql_text
+        type: 1
+        i18n:
+          zh-CN: SQL 文本
+          en-US: SQL Text
+    protocol: jdbc
+    jdbc:
+      host: ^_^host^_^
+      port: ^_^port^_^
+      platform: mysql
+      username: ^_^username^_^
+      password: ^_^password^_^
+      database: ^_^database^_^
+      timeout: ^_^timeout^_^
+      queryType: multiRow
+      sql: |
+        select
+          cast(id as char) as id,
+          user,
+          host,
+          COALESCE(db, '') as db,
+          command,
+          time as time_seconds,
+          COALESCE(NULLIF(state, ''), 'idle') as state,
+          left(COALESCE(info, ''), 512) as sql_text
+        from information_schema.PROCESSLIST
+        where command != 'Sleep'
+        order by time desc, id desc
+        limit 50;
       url: ^_^url^_^
       sshTunnel:
         enable: ^_^enableSshTunnel^_^
@@ -1015,7 +1201,8 @@ metrics:
         shareConnection: ^_^sshShareConnection^_^
 
   - name: slow_sql
-    priority: 13
+    priority: 14
+    viewMode: row
     i18n:
       zh-CN: 慢查询信息
       en-US: Slow Sql Info
@@ -1041,16 +1228,36 @@ metrics:
         i18n:
           zh-CN: 数据库
           en-US: Database
-      - field: query_time
-        type: 3
+      - field: query_time_seconds
+        type: 0
+        unit: s
         i18n:
-          zh-CN: 查询时间
-          en-US: Query Time
+          zh-CN: 查询耗时
+          en-US: Query Time Seconds
+      - field: lock_time_seconds
+        type: 0
+        unit: s
+        i18n:
+          zh-CN: 锁等待时间
+          en-US: Lock Time Seconds
+      - field: rows_sent
+        type: 0
+        i18n:
+          zh-CN: 返回行数
+          en-US: Rows Sent
+      - field: rows_examined
+        type: 0
+        i18n:
+          zh-CN: 扫描行数
+          en-US: Rows Examined
     aliasFields:
       - sql_text
       - start_time
       - db
-      - query_time
+      - query_time_seconds
+      - lock_time_seconds
+      - rows_sent
+      - rows_examined
     calculates:
       - id= start_time + sql_text
     protocol: jdbc
@@ -1063,7 +1270,18 @@ metrics:
       database: ^_^database^_^
       timeout: ^_^timeout^_^
       queryType: multiRow
-      sql: select sql_text, start_time, db, query_time from mysql.slow_log;
+      sql: |
+        select
+          left(sql_text, 512) as sql_text,
+          cast(start_time as char) as start_time,
+          COALESCE(db, '') as db,
+          TIME_TO_SEC(query_time) as query_time_seconds,
+          TIME_TO_SEC(lock_time) as lock_time_seconds,
+          rows_sent,
+          rows_examined
+        from mysql.slow_log
+        order by start_time desc
+        limit 50;
       url: ^_^url^_^
       sshTunnel:
         enable: ^_^enableSshTunnel^_^
@@ -1077,6 +1295,7 @@ metrics:
         shareConnection: ^_^sshShareConnection^_^
   - name: account_expiry
     priority: 100
+    viewMode: row
     i18n:
       zh-CN: 数据库账号有效期
       en-US: Account Expiry
@@ -1103,6 +1322,11 @@ metrics:
         i18n:
           zh-CN: 是否已过期
           en-US: Password Expired
+      - field: account_status
+        type: 1
+        i18n:
+          zh-CN: 账号状态
+          en-US: Account Status
 
     protocol: jdbc
     jdbc:
@@ -1122,7 +1346,8 @@ metrics:
              NULL,
              password_lifetime - DATEDIFF(NOW(), password_last_changed)
           ) AS days_left,
-          password_expired
+          password_expired,
+          IF(password_expired = 'Y', 'expired', 'active') AS account_status
         FROM mysql.user;
       url: ^_^url^_^
       sshTunnel:
@@ -1135,4 +1360,3 @@ metrics:
         privateKey: ^_^sshPrivateKey^_^
         privateKeyPassphrase: ^_^sshPrivateKeyPassphrase^_^
         shareConnection: ^_^sshShareConnection^_^
-

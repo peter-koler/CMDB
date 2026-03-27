@@ -54,7 +54,7 @@ const buildAvailabilityPolicy = (app: string, displayName: string): DefaultPolic
   template: '实例不可用'
 })
 
-const clonePolicies = (policies: DefaultPolicyItem[]): DefaultPolicyItem[] =>
+const clonePolicies = (policies: readonly DefaultPolicyItem[]): DefaultPolicyItem[] =>
   policies.map((item) => ({ ...item, labels: item.labels ? { ...item.labels } : undefined }))
 
 export const REDIS_DEFAULT_POLICY: DefaultPolicyItem[] = [
@@ -90,9 +90,9 @@ export const getBuiltinDefaultPolicyByApp = (appRaw: string): DefaultPolicyItem[
   if (app === 'redis') return clonePolicies(REDIS_DEFAULT_POLICY)
   if (app === 'mysql') return clonePolicies(MYSQL_DEFAULT_POLICY)
   const middleware = MIDDLEWARE_DEFAULT_POLICIES[app as keyof typeof MIDDLEWARE_DEFAULT_POLICIES]
-  if (middleware) return clonePolicies(middleware as DefaultPolicyItem[])
+  if (middleware) return clonePolicies(middleware as readonly DefaultPolicyItem[])
   const webserver = WEBSERVER_DEFAULT_POLICIES[app as keyof typeof WEBSERVER_DEFAULT_POLICIES]
-  if (webserver) return clonePolicies(webserver as DefaultPolicyItem[])
+  if (webserver) return clonePolicies(webserver as readonly DefaultPolicyItem[])
   const dbName = DB_APP_NAMES[app]
   if (!dbName) return []
   return [buildAvailabilityPolicy(app, dbName)]

@@ -9,6 +9,7 @@ import {
 } from '@/api/monitoring'
 
 export type MetricFieldType = 'number' | 'string' | 'time'
+export type TemplateMetricViewMode = 'metric' | 'row'
 
 export interface TemplateMetricField {
   field: string
@@ -21,6 +22,7 @@ export interface TemplateMetricGroup {
   key: string
   title: string
   fields: TemplateMetricField[]
+  viewMode?: TemplateMetricViewMode
 }
 
 export interface MetricLatestPoint {
@@ -86,6 +88,13 @@ function withUnitTitle(title: string, unit: string): string {
   return `${normalizedTitle} (${unit})`
 }
 
+function normalizeViewMode(raw: any): TemplateMetricViewMode | undefined {
+  const text = String(raw ?? '').trim().toLowerCase()
+  if (text === 'row' || text === 'rows' || text === 'table') return 'row'
+  if (text === 'metric' || text === 'metrics' || text === 'field') return 'metric'
+  return undefined
+}
+
 export function parseTemplateMetricGroups(templateContent: string, locale = 'zh-CN'): TemplateMetricGroup[] {
   try {
     const root = (yaml.load(templateContent || '') || {}) as any
@@ -110,7 +119,12 @@ export function parseTemplateMetricGroups(templateContent: string, locale = 'zh-
         })
       }
       if (!fields.length) continue
-      out.push({ key, title, fields })
+      out.push({
+        key,
+        title,
+        fields,
+        viewMode: normalizeViewMode(metric?.viewMode ?? metric?.view_mode ?? metric?.displayMode ?? metric?.display_mode)
+      })
     }
     return out
   } catch {
@@ -210,16 +224,18 @@ export async function fetchLatestByNames(
   const from = now.subtract(lookbackSeconds, 'second').unix()
   const to = now.unix()
   const step = resolveQueryStep(lookbackSeconds, intervalSeconds)
+  const batches = splitMetricNameBatches(unique)
 
   try {
-    const res = await getTargetMetricLatest(monitorId, {
-      names: unique.join(','),
-      from,
-      to,
-      step
-    })
-    const parsed = normalizeList((res as any)?.data || res)
-    if (parsed.items.length) {
+    for (const batch of batches) {
+      const res = await getTargetMetricLatest(monitorId, {
+        names: batch.join(','),
+        from,
+        to,
+        step
+      })
+      const parsed = normalizeList((res as any)?.data || res)
+      if (!parsed.items.length) continue
       for (const item of parsed.items || []) {
         const name = String((item as any)?.name || '').trim()
         if (!name) continue
@@ -234,43 +250,69 @@ export async function fetchLatestByNames(
           timestamp: Number.isFinite(ts) && ts > 0 ? ts : undefined
         }
       }
-      return out
     }
+    if (Object.keys(out).length) return out
   } catch {
     // fallback to query-range for compatibility with old manager
   }
 
-  const res = await queryTargetMetricRange(monitorId, {
-    names: unique.join(','),
-    from,
-    to,
-    step
-  })
-  const parsed = normalizeList((res as any)?.data || res)
+  for (const batch of batches) {
+    const res = await queryTargetMetricRange(monitorId, {
+      names: batch.join(','),
+      from,
+      to,
+      step
+    })
+    const parsed = normalizeList((res as any)?.data || res)
 
-  for (const item of parsed.items || []) {
-    const name = String((item as any)?.name || (item as any)?.labels?.__name__ || '').trim()
-    if (!name) continue
-    const points = Array.isArray((item as any)?.points) ? (item as any).points : []
-    let latestTs = 0
-    let latestVal: number | undefined = undefined
-    for (const point of points) {
-      const ts = Number((point as any)?.timestamp)
-      const val = Number((point as any)?.value)
-      if (!Number.isFinite(ts) || !Number.isFinite(val)) continue
-      if (ts >= latestTs) {
-        latestTs = ts
-        latestVal = val
+    for (const item of parsed.items || []) {
+      const name = String((item as any)?.name || (item as any)?.labels?.__name__ || '').trim()
+      if (!name) continue
+      const points = Array.isArray((item as any)?.points) ? (item as any).points : []
+      let latestTs = 0
+      let latestVal: number | undefined = undefined
+      for (const point of points) {
+        const ts = Number((point as any)?.timestamp)
+        const val = Number((point as any)?.value)
+        if (!Number.isFinite(ts) || !Number.isFinite(val)) continue
+        if (ts >= latestTs) {
+          latestTs = ts
+          latestVal = val
+        }
       }
-    }
-    out[name] = {
-      name,
-      value: latestVal,
-      timestamp: latestTs > 0 ? latestTs : undefined
+      out[name] = {
+        name,
+        value: latestVal,
+        timestamp: latestTs > 0 ? latestTs : undefined
+      }
     }
   }
 
   return out
+}
+
+function splitMetricNameBatches(names: string[], maxChars = 1200, maxItems = 40): string[][] {
+  const batches: string[][] = []
+  let current: string[] = []
+  let currentSize = 0
+
+  for (const raw of names) {
+    const name = String(raw || '').trim()
+    if (!name) continue
+    const nextSize = currentSize + (current.length ? 1 : 0) + name.length
+    if (current.length && (current.length >= maxItems || nextSize > maxChars)) {
+      batches.push(current)
+      current = []
+      currentSize = 0
+    }
+    current.push(name)
+    currentSize += (current.length > 1 ? 1 : 0) + name.length
+  }
+
+  if (current.length) {
+    batches.push(current)
+  }
+  return batches.length ? batches : [[]]
 }
 
 export async function fetchTrendSeries(

@@ -160,7 +160,8 @@ const goToNotificationPage = () => {
 
 <style scoped>
 .notification-center {
-  width: 360px;
+  width: min(360px, calc(100vw - 32px));
+  max-width: calc(100vw - 32px);
   max-height: 500px;
   display: flex;
   flex-direction: column;
@@ -203,5 +204,13 @@ const goToNotificationPage = () => {
   border-top: 1px solid var(--app-border);
   background: var(--app-surface-card);
   text-align: center;
+}
+
+@media (max-width: 576px) {
+  .notification-center {
+    width: min(360px, calc(100vw - 20px));
+    max-width: calc(100vw - 20px);
+    max-height: min(500px, calc(100vh - 120px));
+  }
 }
 </style>

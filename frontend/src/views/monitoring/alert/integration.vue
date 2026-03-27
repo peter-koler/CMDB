@@ -27,9 +27,9 @@
             <a-space>
               <img v-if="source.icon" :src="source.icon" :alt="source.name" style="width: 32px; height: 32px;" />
               <span v-else class="source-icon">{{ source.name.charAt(0) }}</span>
-              <span style="font-weight: 500; font-size: 16px;">{{ source.name }}</span>
+              <span class="source-name">{{ source.name }}</span>
             </a-space>
-            <div style="margin-top: 8px; color: #999; font-size: 12px;">
+            <div class="help-text help-text-spaced">
               {{ source.description }}
             </div>
           </a-card>
@@ -57,7 +57,7 @@
                   重新生成
                 </a-button>
               </a-input-group>
-              <div style="margin-top: 8px; color: #999;">
+              <div class="help-text help-text-spaced">
                 将此 URL 配置到 {{ selectedSource.name }} 的 Webhook 接收地址
               </div>
             </a-form-item>
@@ -79,7 +79,7 @@
                   重新生成
                 </a-button>
               </a-input-group>
-              <div style="margin-top: 8px; color: #999;">
+              <div class="help-text help-text-spaced">
                 在请求头中添加: <code>Authorization: Bearer {{ authToken ? '***' : 'your-token' }}</code>
               </div>
             </a-form-item>
@@ -198,7 +198,7 @@
               <template #message>自定义 Webhook 接入说明</template>
               <template #description>
                 <p>接收符合以下格式的 JSON 数据：</p>
-                <pre style="background: #f5f5f5; padding: 12px; border-radius: 4px; overflow-x: auto;">{{ customFormatExample }}</pre>
+                <pre class="format-example">{{ customFormatExample }}</pre>
               </template>
             </a-alert>
           </template>
@@ -679,6 +679,31 @@ onMounted(() => {
   border-color: var(--app-accent);
   background-color: var(--app-accent-soft);
 }
+
+.source-name {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--app-text-primary);
+}
+
+.help-text {
+  color: var(--app-text-muted);
+  font-size: 12px;
+}
+
+.help-text-spaced {
+  margin-top: 8px;
+}
+
+.format-example {
+  padding: 12px;
+  overflow-x: auto;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  background: var(--app-surface-subtle);
+  color: var(--app-text-primary);
+}
+
 .source-icon {
   width: 32px;
   height: 32px;

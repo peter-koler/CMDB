@@ -144,33 +144,43 @@
           <template #icon><BellOutlined /></template>
           <template #title>{{ t('menu.monitoringAlertCenter') }}</template>
           <a-menu-item key="monitoring-alert-current" v-if="hasAnyPermission(['monitoring:alert:current', 'monitoring:alert:center'])" @click="navigateTo('/alert-center/current')">
+            <template #icon><BellOutlined /></template>
             <span>{{ t('menu.monitoringAlertCurrent') }}</span>
           </a-menu-item>
           <a-menu-item key="monitoring-alert-my" v-if="hasAnyPermission(['monitoring:alert:my', 'monitoring:alert:center'])" @click="navigateTo('/alert-center/my')">
+            <template #icon><UserOutlined /></template>
             <span>我的告警</span>
           </a-menu-item>
           <a-menu-item key="monitoring-alert-history" v-if="hasAnyPermission(['monitoring:alert:history', 'monitoring:alert:center'])" @click="navigateTo('/alert-center/history')">
+            <template #icon><HistoryOutlined /></template>
             <span>{{ t('menu.monitoringAlertHistory') }}</span>
           </a-menu-item>
           <a-menu-item key="monitoring-alert-setting" v-if="hasAnyPermission(['monitoring:alert:setting', 'monitoring:alert:rule'])" @click="navigateTo('/alert-center/setting')">
+            <template #icon><SettingOutlined /></template>
             <span>告警配置</span>
           </a-menu-item>
           <a-menu-item key="monitoring-alert-integration" v-if="hasAnyPermission(['monitoring:alert:integration', 'monitoring:alert:external'])" @click="navigateTo('/alert-center/integration')">
+            <template #icon><ApiOutlined /></template>
             <span>外部告警接入</span>
           </a-menu-item>
           <a-menu-item key="monitoring-alert-group" v-if="hasPermission('monitoring:alert:group')" @click="navigateTo('/alert-center/group')">
+            <template #icon><ClusterOutlined /></template>
             <span>{{ t('menu.monitoringAlertGroup') }}</span>
           </a-menu-item>
           <a-menu-item key="monitoring-alert-inhibit" v-if="hasPermission('monitoring:alert:inhibit')" @click="navigateTo('/alert-center/inhibit')">
+            <template #icon><StopOutlined /></template>
             <span>{{ t('menu.monitoringAlertInhibit') }}</span>
           </a-menu-item>
           <a-menu-item key="monitoring-alert-silence" v-if="hasPermission('monitoring:alert:silence')" @click="navigateTo('/alert-center/silence')">
+            <template #icon><SoundOutlined /></template>
             <span>{{ t('menu.monitoringAlertSilence') }}</span>
           </a-menu-item>
           <a-menu-item key="monitoring-alert-notice" v-if="hasPermission('monitoring:alert:notice')" @click="navigateTo('/alert-center/notice')">
+            <template #icon><NotificationOutlined /></template>
             <span>通知规则</span>
           </a-menu-item>
           <a-menu-item key="monitoring-alert-notice-receiver" v-if="hasPermission('monitoring:alert:notice')" @click="navigateTo('/alert-center/notice-receiver')">
+            <template #icon><MailOutlined /></template>
             <span>通知渠道</span>
           </a-menu-item>
         </a-sub-menu>
@@ -251,7 +261,7 @@
               v-model:open="notificationVisible"
               placement="bottomRight"
               trigger="click"
-              :overlay-style="{ width: '360px', padding: 0 }"
+              :overlay-style="notificationOverlayStyle"
             >
               <template #content>
                 <NotificationCenter
@@ -397,8 +407,13 @@ const siteLogo = ref('')
 const siteName = ref('Arco CMDB')
 const notificationVisible = ref(false)
 const customViews = ref<any[]>([])
-const siderWidth = 240
+const siderWidth = 280
 const siderCollapsedWidth = 60
+const notificationOverlayStyle = {
+  width: 'min(360px, calc(100vw - 32px))',
+  maxWidth: 'calc(100vw - 32px)',
+  padding: 0
+}
 
 const breadcrumbIconMap = {
   SettingOutlined,
@@ -897,10 +912,6 @@ const handleNotificationClick = (notification: any) => {
   color: var(--arco-text-tertiary);
 }
 
-.sider-menu :deep(.ant-menu-inline .ant-menu-item) {
-  padding-inline-start: 22px !important;
-}
-
 .sider-menu :deep(.ant-menu-item:hover),
 .sider-menu :deep(.ant-menu-submenu-title:hover) {
   color: var(--arco-text);
@@ -941,7 +952,40 @@ const handleNotificationClick = (notification: any) => {
 
 .sider-menu :deep(.ant-menu-sub.ant-menu-inline) {
   background: transparent;
-  margin-top: 2px;
+  margin-top: 4px;
+  margin-left: 14px;
+  padding-left: 10px;
+  border-left: 1px solid color-mix(in srgb, var(--arco-border) 78%, transparent 22%);
+}
+
+.sider-menu :deep(.ant-menu-sub.ant-menu-inline > .ant-menu-item) {
+  position: relative;
+  height: 42px;
+  line-height: 42px;
+  margin: 4px 0;
+  padding-inline-start: 40px !important;
+  color: color-mix(in srgb, var(--arco-text) 84%, var(--arco-text-secondary) 16%);
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.sider-menu :deep(.ant-menu-sub.ant-menu-inline > .ant-menu-item .anticon) {
+  font-size: 15px;
+}
+
+.sider-menu :deep(.ant-menu-sub.ant-menu-inline > .ant-menu-item::after) {
+  content: '';
+  position: absolute;
+  left: 18px;
+  top: 50%;
+  width: 8px;
+  height: 1px;
+  background: color-mix(in srgb, var(--arco-border-strong) 80%, transparent 20%);
+  transform: translateY(-50%);
+}
+
+.sider-menu :deep(.ant-menu-sub.ant-menu-inline > .ant-menu-item-selected::before) {
+  left: 12px;
 }
 
 .layout-main {

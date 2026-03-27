@@ -190,6 +190,8 @@ func (s *Server) handleMonitors(w http.ResponseWriter, r *http.Request) {
 			Params:          in.Params,
 			Enabled:         in.Enabled,
 		}
+		in.Params = s.sanitizePersistableParams(&candidate, in.Params)
+		candidate.Params = in.Params
 		if err := s.preCompileAndAudit(&candidate, "create"); err != nil {
 			writeErr(w, http.StatusUnprocessableEntity, "MONITOR_INVALID_CONFIG", err.Error())
 			return
@@ -248,6 +250,14 @@ func (s *Server) handleMonitorByID(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(parts) == 1 {
 		s.handleMonitorCRUD(w, r, id)
+		return
+	}
+	if len(parts) == 2 && parts[1] == "connectivity-test" {
+		if r.Method == http.MethodPost {
+			s.handleMonitorConnectivityTest(w, r, id)
+			return
+		}
+		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
 	if len(parts) == 2 && parts[1] == "collector" {
@@ -1405,6 +1415,8 @@ func (s *Server) handleMonitorCRUD(w http.ResponseWriter, r *http.Request, id in
 			Enabled:         in.Enabled,
 			Version:         current.Version,
 		}
+		in.Params = s.sanitizePersistableParams(&candidate, in.Params)
+		candidate.Params = in.Params
 		if err := s.preCompileAndAudit(&candidate, "update"); err != nil {
 			writeErr(w, http.StatusUnprocessableEntity, "MONITOR_INVALID_CONFIG", err.Error())
 			return
@@ -1460,6 +1472,16 @@ func (s *Server) handleMonitorCRUD(w http.ResponseWriter, r *http.Request, id in
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
+}
+
+func (s *Server) sanitizePersistableParams(monitor *model.Monitor, params map[string]string) map[string]string {
+	if len(params) == 0 {
+		return nil
+	}
+	if s.collectorManager == nil {
+		return params
+	}
+	return s.collectorManager.FilterPersistableParams(monitor, params)
 }
 
 func (s *Server) handleEnableDisable(w http.ResponseWriter, r *http.Request, id int64, enabled bool) {
@@ -1621,6 +1643,27 @@ func (s *Server) handleManualRecompile(w http.ResponseWriter, id int64) {
 		"metrics_tasks": len(task.GetTasks()),
 		"timestamp":     time.Now().UTC().Format(time.RFC3339),
 	})
+}
+
+func (s *Server) handleMonitorConnectivityTest(w http.ResponseWriter, r *http.Request, id int64) {
+	if s.collectorManager == nil {
+		writeErr(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "collector manager not configured")
+		return
+	}
+	timeoutMs := atoiDefault(strings.TrimSpace(r.URL.Query().Get("timeout_ms")), 15000)
+	if timeoutMs < 1000 {
+		timeoutMs = 1000
+	}
+	result, err := s.collectorManager.ProbeMonitorConnection(id, time.Duration(timeoutMs)*time.Millisecond)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeStoreErr(w, err)
+			return
+		}
+		writeErr(w, http.StatusBadGateway, "CONNECTIVITY_TEST_FAILED", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (s *Server) handleTemplateUpgrade(w http.ResponseWriter, r *http.Request, id int64) {

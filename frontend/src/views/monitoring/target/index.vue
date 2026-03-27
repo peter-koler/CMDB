@@ -1,124 +1,153 @@
 <template>
-  <div class="monitor-target-layout">
-    <div class="category-sidebar">
-      <a-card :bordered="false" class="category-card">
-        <template #title>
-          <div class="category-title">
-            <span>监控分类</span>
-            <a-button type="link" size="small" @click="reloadCategoryMenu">
-              <reload-outlined />
-            </a-button>
-          </div>
-        </template>
-        <a-tree
-          :tree-data="categoryTree"
-          :field-names="{ title: 'name', key: 'code', children: 'children' }"
-          :selected-keys="selectedCategory ? [selectedCategory] : []"
-          @select="handleCategorySelect"
-          block-node
-          default-expand-all
-        >
-          <template #title="{ name, count, nodeType }">
-            <div class="category-node">
-              <span class="category-name">{{ name }}</span>
-              <span v-if="nodeType === 'category' && count" class="category-count">({{ count }})</span>
+  <div class="app-page monitoring-target-page">
+    <div class="monitor-target-layout">
+      <div class="category-sidebar">
+        <a-card :bordered="false" class="category-card app-surface-card">
+          <template #title>
+            <div class="category-title">
+              <span>监控分类</span>
+              <a-button type="link" size="small" @click="reloadCategoryMenu">
+                <reload-outlined />
+              </a-button>
             </div>
           </template>
-        </a-tree>
-      </a-card>
-    </div>
-
-    <div class="target-content">
-      <a-card :bordered="false">
-        <a-space direction="vertical" style="width: 100%" :size="16">
-          <a-form layout="inline">
-            <a-form-item label="关键字">
-              <a-input v-model:value="keyword" placeholder="名称/CI/地址" style="width: 220px" />
-            </a-form-item>
-            <a-form-item label="状态">
-              <a-select v-model:value="status" allow-clear placeholder="全部状态" style="width: 140px">
-                <a-select-option value="enabled">enabled</a-select-option>
-                <a-select-option value="disabled">disabled</a-select-option>
-              </a-select>
-            </a-form-item>
-            <a-form-item>
-              <a-space>
-                <a-button type="primary" :loading="loading" @click="loadTargets">查询</a-button>
-                <a-button @click="reset">重置</a-button>
-                <a-button v-if="canCreate" type="primary" @click="openModal()">新增监控</a-button>
-              </a-space>
-            </a-form-item>
-          </a-form>
-
-          <div v-if="selectedCategoryName" class="current-category">
-            <a-tag color="blue">{{ selectedCategoryName }}</a-tag>
-            <a-button type="link" size="small" @click="clearCategoryFilter">清除筛选</a-button>
-          </div>
-
-          <a-table
-            :loading="loading"
-            :columns="columns"
-            :data-source="targets"
-            row-key="id"
-            :pagination="pagination"
-            :row-selection="rowSelection"
-            @change="handleTableChange"
+          <a-tree
+            :tree-data="categoryTree"
+            :field-names="{ title: 'name', key: 'code', children: 'children' }"
+            :selected-keys="selectedCategory ? [selectedCategory] : []"
+            @select="handleCategorySelect"
+            block-node
+            default-expand-all
           >
-            <template #bodyCell="{ column, record }">
-              <template v-if="column.key === 'ci'">
-                <div class="ci-cell">
-                  <div>{{ record.ci_code || '-' }}</div>
-                  <div class="sub-text">{{ record.ci_name || '' }}</div>
-                </div>
-              </template>
-
-              <template v-if="column.key === 'interval'">
-                {{ normalizedInterval(record) }}
-              </template>
-
-              <template v-if="column.key === 'status'">
-                <a-tag :color="record.enabled === false ? 'default' : 'green'">
-                  {{ record.enabled === false ? 'disabled' : 'enabled' }}
-                </a-tag>
-              </template>
-
-              <template v-if="column.key === 'enabled'">
-                <a-switch
-                  :checked="record.enabled !== false"
-                  :disabled="!canEdit"
-                  @change="(checked: boolean) => toggleTarget(record, checked)"
-                />
-              </template>
-
-              <template v-if="column.key === 'actions'">
-                <a-space>
-                  <a-button type="link" size="small" @click="openDetail(record)">详情</a-button>
-                  <a-button type="link" size="small" :disabled="!canEdit" @click="openModal(record)">编辑</a-button>
-                  <a-popconfirm title="确认删除该监控？" @confirm="removeTarget(record)">
-                    <a-button type="link" size="small" danger :disabled="!canDelete">删除</a-button>
-                  </a-popconfirm>
-                </a-space>
-              </template>
+            <template #title="{ name, count, nodeType }">
+              <div class="category-node">
+                <span class="category-name">{{ name }}</span>
+                <span v-if="nodeType === 'category' && count" class="category-count">({{ count }})</span>
+              </div>
             </template>
-          </a-table>
+          </a-tree>
+        </a-card>
+      </div>
 
-          <a-space>
-            <a-button :disabled="!selectedRowKeys.length || !canDelete" danger @click="batchDelete">批量删除</a-button>
-            <a-input-number v-model:value="batchInterval" :min="10" :step="10" style="width: 160px" />
-            <a-button :disabled="!selectedRowKeys.length || !canEdit" @click="batchUpdateInterval">批量修改间隔</a-button>
+      <div class="target-content">
+        <a-card :bordered="false" class="app-surface-card">
+          <a-space direction="vertical" style="width: 100%" :size="16">
+            <a-form layout="inline">
+              <a-form-item label="关键字">
+                <a-input v-model:value="keyword" placeholder="名称/CI/地址" style="width: 220px" />
+              </a-form-item>
+              <a-form-item label="类型">
+                <a-select v-model:value="type" mode="multiple" allow-clear placeholder="全部类型" style="width: 200px" :max-tag-count="1">
+                  <a-select-option v-for="t in availableTypes" :key="t.app" :value="t.app">{{ t.name }}</a-select-option>
+                </a-select>
+              </a-form-item>
+              <a-form-item label="状态">
+                <a-select v-model:value="status" allow-clear placeholder="全部状态" style="width: 140px">
+                  <a-select-option value="enabled">enabled</a-select-option>
+                  <a-select-option value="disabled">disabled</a-select-option>
+                </a-select>
+              </a-form-item>
+              <a-form-item>
+                <a-space>
+                  <a-button type="primary" :loading="loading" @click="loadTargets">查询</a-button>
+                  <a-button @click="reset">重置</a-button>
+                  <a-button v-if="canCreate" type="primary" @click="openModal()">新增监控</a-button>
+                </a-space>
+              </a-form-item>
+            </a-form>
+
+            <div v-if="selectedCategoryName" class="current-category">
+              <a-tag color="blue">{{ selectedCategoryName }}</a-tag>
+              <a-button type="link" size="small" @click="clearCategoryFilter">清除筛选</a-button>
+            </div>
+
+            <a-table
+              :loading="loading"
+              :columns="columns"
+              :data-source="targets"
+              row-key="id"
+              :scroll="tableScroll"
+              :pagination="pagination"
+              :row-selection="rowSelection"
+              @change="handleTableChange"
+            >
+              <template #bodyCell="{ column, record }">
+                <template v-if="column.key === 'ci'">
+                  <div class="ci-cell">
+                    <div>{{ record.ci_code || '-' }}</div>
+                    <div class="sub-text">{{ record.ci_name || '' }}</div>
+                  </div>
+                </template>
+
+                <template v-if="column.key === 'interval'">
+                  {{ normalizedInterval(record) }}
+                </template>
+
+                <template v-if="column.key === 'status'">
+                  <a-tag :color="record.enabled === false ? 'default' : 'green'">
+                    {{ record.enabled === false ? 'disabled' : 'enabled' }}
+                  </a-tag>
+                </template>
+
+                <template v-if="column.key === 'enabled'">
+                  <a-switch
+                    :checked="record.enabled !== false"
+                    :disabled="!canEdit"
+                    @change="(checked: boolean) => toggleTarget(record, checked)"
+                  />
+                </template>
+
+                <template v-if="column.key === 'actions'">
+                  <div class="table-actions">
+                    <a-button class="table-action-button" type="link" size="small" @click="openDetail(record)">详情</a-button>
+                    <span class="table-action-divider">|</span>
+                    <a-button
+                      class="table-action-button"
+                      type="link"
+                      size="small"
+                      :loading="connectivityTestingId === record.id"
+                      @click="openConnectivityTest(record)"
+                    >
+                      连通测试
+                    </a-button>
+                    <span class="table-action-divider">|</span>
+                    <a-button
+                      class="table-action-button"
+                      type="link"
+                      size="small"
+                      :disabled="!canEdit"
+                      @click="openModal(record)"
+                    >
+                      编辑
+                    </a-button>
+                    <span class="table-action-divider">|</span>
+                    <a-popconfirm title="确认删除该监控？" @confirm="removeTarget(record)">
+                      <a-button class="table-action-button" type="link" size="small" danger :disabled="!canDelete">
+                        删除
+                      </a-button>
+                    </a-popconfirm>
+                  </div>
+                </template>
+              </template>
+            </a-table>
+
+            <a-space>
+              <a-button :disabled="!selectedRowKeys.length || !canDelete" danger @click="batchDelete">批量删除</a-button>
+              <a-input-number v-model:value="batchInterval" :min="10" :step="10" style="width: 160px" />
+              <a-button :disabled="!selectedRowKeys.length || !canEdit" @click="batchUpdateInterval">批量修改间隔</a-button>
+            </a-space>
           </a-space>
-        </a-space>
-      </a-card>
-    </div>
+        </a-card>
+      </div>
 
-    <a-modal
-      v-model:open="modalOpen"
-      :title="modalTitle"
-      @ok="saveTarget"
-      :confirm-loading="saving"
-      width="760px"
-    >
-      <a-form layout="vertical" :model="formState">
+      <a-modal
+        v-model:open="modalOpen"
+        :title="modalTitle"
+        @ok="saveTarget"
+        :confirm-loading="saving"
+        width="760px"
+      >
+        <a-form layout="vertical" :model="formState">
         <a-row :gutter="16">
           <a-col :span="12">
             <a-form-item label="任务名称" required>
@@ -189,7 +218,7 @@
             </a-form-item>
           </a-col>
 
-          <a-col :span="12">
+          <a-col v-if="showManualTargetField" :span="12">
             <a-form-item label="目标地址(target)">
               <a-input v-model:value="formState.target" placeholder="可留空，默认由 params host/port 生成" />
             </a-form-item>
@@ -308,8 +337,15 @@
         <a-form-item label="启用">
           <a-switch v-model:checked="formState.enabled" />
         </a-form-item>
-      </a-form>
-    </a-modal>
+        </a-form>
+      </a-modal>
+
+      <ConnectivityTestModal
+        v-model:open="connectivityModalOpen"
+        :loading="connectivityTesting"
+        :result="connectivityResult"
+      />
+    </div>
   </div>
 </template>
 
@@ -319,6 +355,7 @@ import { message } from 'ant-design-vue'
 import { ReloadOutlined } from '@ant-design/icons-vue'
 import { useRouter } from 'vue-router'
 import * as yaml from 'js-yaml'
+import ConnectivityTestModal from '@/components/monitoring/ConnectivityTestModal.vue'
 import { useUserStore } from '@/stores/user'
 import {
   assignCollectorToMonitor,
@@ -331,8 +368,10 @@ import {
   getMonitoringTargets,
   getTemplates,
   type MonitorCategory,
+  type MonitoringConnectivityTestResult,
   type MonitoringTarget,
   type MonitorTemplate,
+  testMonitoringTargetConnectivity,
   unassignCollectorFromMonitor,
   updateMonitoringTarget
 } from '@/api/monitoring'
@@ -347,10 +386,12 @@ interface TemplateParamDef {
   defaultValue?: string | number | boolean
   placeholder?: string
   hide?: boolean
+  persist?: boolean | string
 }
 
 interface ParsedTemplate {
   params: TemplateParamDef[]
+  protocols: string[]
 }
 
 interface ModelOption {
@@ -417,11 +458,16 @@ const loading = ref(false)
 const saving = ref(false)
 const keyword = ref('')
 const status = ref<string | undefined>(undefined)
+const type = ref<string[]>([])
 const targets = ref<MonitoringTarget[]>([])
 const allTargets = ref<MonitoringTarget[]>([])
 const pagination = reactive({ current: 1, pageSize: 20, total: 0 })
 const selectedRowKeys = ref<number[]>([])
 const batchInterval = ref<number>(60)
+const connectivityModalOpen = ref(false)
+const connectivityTesting = ref(false)
+const connectivityTestingId = ref<number | null>(null)
+const connectivityResult = ref<MonitoringConnectivityTestResult | null>(null)
 
 const modalOpen = ref(false)
 const editing = ref<MonitoringTarget | null>(null)
@@ -457,16 +503,17 @@ const canCreate = computed(() => userStore.hasPermission('monitoring:list:create
 const canDelete = computed(() => userStore.hasPermission('monitoring:list:delete') || userStore.hasPermission('monitoring:list') || userStore.hasPermission('monitoring:target:delete') || userStore.hasPermission('monitoring:target'))
 
 const columns = [
-  { title: '名称', dataIndex: 'name', key: 'name', width: 180 },
-  { title: '任务标识', dataIndex: 'job_id', key: 'job_id', width: 180 },
-  { title: 'CI', key: 'ci', width: 220 },
-  { title: '类型', dataIndex: 'app', key: 'app', width: 120 },
-  { title: '目标地址', dataIndex: 'target', key: 'target' },
-  { title: '采集间隔(s)', key: 'interval', width: 120 },
-  { title: '状态', key: 'status', width: 100 },
-  { title: '启用', dataIndex: 'enabled', key: 'enabled', width: 90 },
-  { title: '操作', key: 'actions', width: 190 }
+  { title: '名称', dataIndex: 'name', key: 'name', width: 160, ellipsis: true },
+  { title: '任务标识', dataIndex: 'job_id', key: 'job_id', width: 160, ellipsis: true },
+  { title: 'CI', key: 'ci', width: 200 },
+  { title: '类型', dataIndex: 'app', key: 'app', width: 120, ellipsis: true },
+  { title: '目标地址', dataIndex: 'target', key: 'target', width: 200, ellipsis: true },
+  { title: '采集间隔(s)', key: 'interval', width: 110 },
+  { title: '状态', key: 'status', width: 96 },
+  { title: '启用', dataIndex: 'enabled', key: 'enabled', width: 84 },
+  { title: '操作', key: 'actions', width: 244 }
 ]
+const tableScroll = { x: 1434 }
 
 const rowSelection = computed(() => ({
   selectedRowKeys: selectedRowKeys.value,
@@ -476,6 +523,25 @@ const rowSelection = computed(() => ({
 }))
 
 const selectedTemplate = computed(() => templates.value.find((item) => item.app === formState.app))
+const selectedTemplateProtocols = computed(() => parsedTemplateMap.value[formState.app]?.protocols || [])
+const showManualTargetField = computed(() => selectedTemplateProtocols.value.includes('http'))
+
+// 获取当前列表中实际存在的类型
+const availableTypes = computed(() => {
+  const typeSet = new Set<string>()
+  allTargets.value.forEach((target) => {
+    if (target.app) {
+      typeSet.add(target.app)
+    }
+  })
+  return Array.from(typeSet).sort().map((app) => {
+    const template = templates.value.find((t) => t.app === app)
+    return {
+      app,
+      name: template?.name || app
+    }
+  })
+})
 const modalTemplates = computed(() => {
   if (editing.value?.id) return templates.value
   const categoryKey = createContextCategory.value
@@ -499,6 +565,14 @@ function isParamRequired(param: TemplateParamDef): boolean {
   return text === 'true' || text === '1' || text === 'yes' || text === 'on'
 }
 
+function isParamPersistable(param: TemplateParamDef): boolean {
+  const raw = param?.persist
+  if (typeof raw === 'boolean') return raw
+  const text = String(raw ?? '').trim().toLowerCase()
+  if (!text) return true
+  return !(text === 'false' || text === '0' || text === 'no' || text === 'off')
+}
+
 function parseTemplateContent(content: string): ParsedTemplate {
   try {
     const sanitizedContent = String(content || '').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
@@ -513,11 +587,17 @@ function parseTemplateContent(content: string): ParsedTemplate {
       seen.add(field)
       deduped.push(item)
     }
+    const protocols = Array.isArray(parsed?.metrics)
+      ? parsed.metrics
+          .map((item: any) => String(item?.protocol || '').trim().toLowerCase())
+          .filter(Boolean)
+      : []
     return {
-      params: deduped
+      params: deduped,
+      protocols: Array.from(new Set(protocols))
     }
   } catch {
-    return { params: [] }
+    return { params: [], protocols: [] }
   }
 }
 
@@ -534,6 +614,31 @@ function filterOption(input: string, option: any): boolean {
 
 function normalizedInterval(record: MonitoringTarget): number {
   return Number(record.interval_seconds || record.interval || 0)
+}
+
+async function openConnectivityTest(record: MonitoringTarget) {
+  if (!record?.id) return
+  connectivityModalOpen.value = true
+  connectivityTesting.value = true
+  connectivityTestingId.value = record.id
+  connectivityResult.value = null
+  try {
+    const res = await testMonitoringTargetConnectivity(record.id, { timeout_ms: 15000 })
+    if (res.code === 200) {
+      connectivityResult.value = res.data || null
+      if (res.data?.success) {
+        message.success('连通测试通过')
+      } else {
+        message.warning(res.data?.summary || '连通测试存在异常')
+      }
+    }
+  } catch (error: any) {
+    message.error(error?.response?.data?.message || '连通测试失败')
+    connectivityModalOpen.value = false
+  } finally {
+    connectivityTesting.value = false
+    connectivityTestingId.value = null
+  }
 }
 
 function paramLabel(param: TemplateParamDef): string {
@@ -836,6 +941,10 @@ function filterAndPaginateTargets() {
     filtered = filtered.filter((t) => (t.enabled !== false) === enabled)
   }
 
+  if (type.value && type.value.length > 0) {
+    filtered = filtered.filter((t) => t.app && type.value.includes(t.app))
+  }
+
   pagination.total = filtered.length
   const start = (pagination.current - 1) * pagination.pageSize
   const end = start + pagination.pageSize
@@ -907,6 +1016,9 @@ function applyTemplateDefaults() {
 
 function handleTemplateChange() {
   optionalParamsActiveKeys.value = []
+  if (!showManualTargetField.value) {
+    formState.target = ''
+  }
   applyTemplateDefaults()
 }
 
@@ -989,8 +1101,11 @@ async function saveTarget() {
 
   const currentCi = ciOptions.value.find((item) => item.id === formState.ci_id)
   const paramsPayload: Record<string, string> = {}
+  const paramDefMap = new Map(allParamDefs.value.map((item) => [item.field, item] as const))
   Object.entries(formState.params || {}).forEach(([key, value]) => {
     if (value === undefined || value === null || String(value).trim() === '') return
+    const def = paramDefMap.get(key)
+    if (def && !isParamPersistable(def)) return
     paramsPayload[key] = String(value)
   })
 
@@ -1010,7 +1125,7 @@ async function saveTarget() {
   if (!editing.value?.id) {
     payload.apply_default_alerts = Boolean(formState.apply_default_alerts)
   }
-  let resolvedTarget = formState.target.trim()
+  let resolvedTarget = showManualTargetField.value ? formState.target.trim() : ''
   if (!resolvedTarget && paramsPayload.host) {
     resolvedTarget = `${paramsPayload.host}:${paramsPayload.port || '6379'}`
   }
@@ -1133,6 +1248,7 @@ function handleTableChange(pager: any) {
 
 function reset() {
   keyword.value = ''
+  type.value = []
   status.value = undefined
   selectedCategory.value = null
   pagination.current = 1
@@ -1161,6 +1277,10 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.monitoring-target-page {
+  min-height: 100%;
+}
+
 .monitor-target-layout {
   display: flex;
   gap: 16px;
@@ -1199,12 +1319,13 @@ onMounted(async () => {
 }
 
 .category-count {
-  color: #999;
+  color: var(--app-text-muted);
   font-size: 12px;
 }
 
 .target-content {
   flex: 1;
+  min-width: 0;
 }
 
 .current-category {
@@ -1219,7 +1340,73 @@ onMounted(async () => {
 }
 
 .sub-text {
-  color: #8c8c8c;
+  color: var(--app-text-muted);
   font-size: 12px;
+}
+
+.table-actions {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.table-action-button {
+  min-width: auto;
+  padding-inline: 4px;
+}
+
+.table-action-divider {
+  color: var(--app-border-color);
+  line-height: 1;
+}
+
+.target-content :deep(.ant-table-wrapper) {
+  width: 100%;
+}
+
+.target-content :deep(.ant-form-inline) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 0;
+}
+
+.target-content :deep(.ant-form-inline .ant-form-item) {
+  margin-right: 12px;
+  margin-bottom: 0;
+}
+
+@media (max-width: 1024px) {
+  .monitor-target-layout {
+    flex-direction: column;
+  }
+
+  .category-sidebar {
+    width: 100%;
+  }
+
+  .category-card :deep(.ant-card-body) {
+    max-height: none;
+  }
+}
+
+@media (max-width: 768px) {
+  .target-content :deep(.ant-form-inline .ant-form-item) {
+    width: 100%;
+    margin-right: 0;
+  }
+
+  .target-content :deep(.ant-form-inline .ant-form-item-control) {
+    width: 100%;
+  }
+
+  .target-content :deep(.ant-form-inline .ant-input),
+  .target-content :deep(.ant-form-inline .ant-select),
+  .target-content :deep(.ant-form-inline .ant-select-selector) {
+    width: 100% !important;
+  }
+
+  .current-category {
+    flex-wrap: wrap;
+  }
 }
 </style>

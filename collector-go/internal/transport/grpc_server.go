@@ -14,6 +14,7 @@ import (
 
 type JobHandler interface {
 	RegisterJob(job model.Job)
+	RunJobOnce(ctx context.Context, job model.Job)
 	RemoveJob(jobID int64)
 }
 
@@ -73,7 +74,12 @@ func (s *GRPCServer) Connect(stream grpc.BidiStreamingServer[pb.CollectorFrame, 
 				return
 			}
 			if task := frame.GetUpsert(); task != nil {
-				s.handler.RegisterJob(toJob(task))
+				job := toJob(task)
+				if task.GetIntervalMs() <= 0 {
+					s.handler.RunJobOnce(ctx, job)
+				} else {
+					s.handler.RegisterJob(job)
+				}
 			}
 			if id := frame.GetDeleteJobId(); id > 0 {
 				s.handler.RemoveJob(id)

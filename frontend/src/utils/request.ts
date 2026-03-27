@@ -8,11 +8,24 @@ interface ApiResponse<T = any> {
   data?: T
 }
 
-const request: AxiosInstance = axios.create({
+interface RequestInstance {
+  <T = any>(config: AxiosRequestConfig): Promise<ApiResponse<T>>
+  get<T = any>(url: string, config?: AxiosRequestConfig): Promise<ApiResponse<T>>
+  delete<T = any>(url: string, config?: AxiosRequestConfig): Promise<ApiResponse<T>>
+  head<T = any>(url: string, config?: AxiosRequestConfig): Promise<ApiResponse<T>>
+  options<T = any>(url: string, config?: AxiosRequestConfig): Promise<ApiResponse<T>>
+  post<T = any>(url: string, data?: any, config?: AxiosRequestConfig): Promise<ApiResponse<T>>
+  put<T = any>(url: string, data?: any, config?: AxiosRequestConfig): Promise<ApiResponse<T>>
+  patch<T = any>(url: string, data?: any, config?: AxiosRequestConfig): Promise<ApiResponse<T>>
+  defaults: AxiosInstance['defaults']
+  interceptors: AxiosInstance['interceptors']
+}
+
+const request = axios.create({
   baseURL: '/api/v1',
   timeout: 30000,
   withCredentials: true
-})
+}) as unknown as RequestInstance
 
 // 用于存储刷新 token 的 Promise
 let refreshPromise: Promise<boolean> | null = null
@@ -105,6 +118,4 @@ export const getBaseURL = () => {
   return ''
 }
 
-export default request as {
-  <T = any>(config: AxiosRequestConfig): Promise<ApiResponse<T>>
-}
+export default request

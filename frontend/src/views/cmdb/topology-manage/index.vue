@@ -247,8 +247,9 @@ const initGraph = () => {
     behaviors: ['drag-canvas', 'zoom-canvas', 'drag-element', 'click-select', 'hover-activate'],
   })
 
-  graph.on('node:click', (evt) => {
-    const nodeId = String(evt.target.id)
+  graph.on('node:click', (evt: any) => {
+    const nodeId = String(evt?.target?.id || evt?.item?.id || '')
+    if (!nodeId) return
     activeNodeId.value = nodeId
     activeNode.value = renderedData.value.nodes.find((n: any) => n.id === nodeId) || null
 
@@ -404,7 +405,7 @@ const handleFitView = () => {
 }
 const expandAll = () => { collapsedNodeIds.value = new Set() }
 const collapseToSeed = () => {
-  const seeds = renderedData.value.extracted?.seedNodeIds || []
+  const seeds = fullExtractedData.value.seedNodeIds || []
   collapsedNodeIds.value = new Set(seeds)
 }
 

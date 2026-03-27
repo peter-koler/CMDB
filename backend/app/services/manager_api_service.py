@@ -87,6 +87,7 @@ class ManagerAPIService:
         payload: Optional[dict] = None,
         params: Optional[dict] = None,
         auth_header: Optional[str] = None,
+        timeout_seconds: Optional[float] = None,
     ) -> Any:
         self._before_request(path)
 
@@ -95,7 +96,7 @@ class ManagerAPIService:
             q = urllib.parse.urlencode(params)
             url = f"{url}?{q}"
 
-        timeout = float(self._cfg("GO_MANAGER_TIMEOUT_SECONDS", 3))
+        timeout = float(timeout_seconds if timeout_seconds is not None else self._cfg("GO_MANAGER_TIMEOUT_SECONDS", 3))
         max_retries = int(self._cfg("GO_MANAGER_MAX_RETRIES", 2))
         headers = {"Content-Type": "application/json"}
         if auth_header:
@@ -163,6 +164,7 @@ class ManagerAPIService:
         payload: Optional[dict] = None,
         params: Optional[dict] = None,
         auth_header: Optional[str] = None,
+        timeout_seconds: Optional[float] = None,
     ) -> tuple[int, Dict[str, str], bytes]:
         self._before_request(path)
 
@@ -171,7 +173,7 @@ class ManagerAPIService:
             q = urllib.parse.urlencode(params)
             url = f"{url}?{q}"
 
-        timeout = float(self._cfg("GO_MANAGER_TIMEOUT_SECONDS", 3))
+        timeout = float(timeout_seconds if timeout_seconds is not None else self._cfg("GO_MANAGER_TIMEOUT_SECONDS", 3))
         max_retries = int(self._cfg("GO_MANAGER_MAX_RETRIES", 2))
         headers = {"Content-Type": "application/json"}
         if auth_header:

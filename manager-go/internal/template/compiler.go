@@ -59,13 +59,9 @@ func compileErr(path string, reason string) error {
 }
 
 func CompileMetricsTasks(rt RuntimeTemplate, monitor *model.Monitor) ([]*pb.MetricsTask, error) {
-	content := strings.TrimSpace(rt.Content)
-	if content == "" {
-		return nil, compileErr("content", "template content is empty")
-	}
-	var root map[string]any
-	if err := yaml.Unmarshal([]byte(content), &root); err != nil {
-		return nil, compileErr("content", fmt.Sprintf("yaml parse failed: %v", err))
+	root, err := parseTemplateRoot(rt)
+	if err != nil {
+		return nil, err
 	}
 	metricsRaw := asSlice(root["metrics"])
 	if len(metricsRaw) == 0 {
@@ -90,6 +86,28 @@ func CompileMetricsTasks(rt RuntimeTemplate, monitor *model.Monitor) ([]*pb.Metr
 	}
 	optimizeMySQLJDBCSQL(tasks)
 	return tasks, nil
+}
+
+func FilterPersistableParams(rt RuntimeTemplate, params map[string]string) map[string]string {
+	cloned := cloneMapString(params)
+	if len(cloned) == 0 {
+		return cloned
+	}
+	root, err := parseTemplateRoot(rt)
+	if err != nil {
+		return cloned
+	}
+	nonPersistable := collectNonPersistableFields(root)
+	if len(nonPersistable) == 0 {
+		return cloned
+	}
+	for field := range nonPersistable {
+		delete(cloned, field)
+	}
+	if len(cloned) == 0 {
+		return nil
+	}
+	return cloned
 }
 
 func compileOneMetricTask(metric map[string]any, effective map[string]string, metricIdx int) (*pb.MetricsTask, error) {
@@ -149,6 +167,7 @@ func compileOneMetricTask(metric map[string]any, effective map[string]string, me
 
 func buildEffectiveParams(root map[string]any, monitor *model.Monitor) map[string]string {
 	effective := map[string]string{}
+	nonPersistable := collectNonPersistableFields(root)
 	for _, item := range asSlice(root["params"]) {
 		pm := asMap(item)
 		field := strings.TrimSpace(asString(pm["field"]))
@@ -160,6 +179,9 @@ func buildEffectiveParams(root map[string]any, monitor *model.Monitor) map[strin
 		}
 	}
 	for k, v := range monitor.Params {
+		if _, blocked := nonPersistable[k]; blocked {
+			continue
+		}
 		effective[k] = v
 	}
 	if _, ok := effective["host"]; !ok {
@@ -171,10 +193,74 @@ func buildEffectiveParams(root map[string]any, monitor *model.Monitor) map[strin
 			effective["port"] = port
 		}
 	}
-	if _, ok := effective["url"]; !ok && strings.TrimSpace(monitor.Target) != "" {
+	if _, ok := effective["url"]; !ok && strings.TrimSpace(monitor.Target) != "" && templateUsesHTTPProtocol(root) {
 		effective["url"] = strings.TrimSpace(monitor.Target)
 	}
 	return effective
+}
+
+func parseTemplateRoot(rt RuntimeTemplate) (map[string]any, error) {
+	content := strings.TrimSpace(rt.Content)
+	if content == "" {
+		return nil, compileErr("content", "template content is empty")
+	}
+	var root map[string]any
+	if err := yaml.Unmarshal([]byte(content), &root); err != nil {
+		return nil, compileErr("content", fmt.Sprintf("yaml parse failed: %v", err))
+	}
+	return root, nil
+}
+
+func collectNonPersistableFields(root map[string]any) map[string]struct{} {
+	out := map[string]struct{}{}
+	for _, item := range asSlice(root["params"]) {
+		pm := asMap(item)
+		field := strings.TrimSpace(asString(pm["field"]))
+		if field == "" {
+			continue
+		}
+		if shouldPersistParam(pm) {
+			continue
+		}
+		out[field] = struct{}{}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func shouldPersistParam(pm map[string]any) bool {
+	raw, exists := pm["persist"]
+	if !exists {
+		return true
+	}
+	switch v := raw.(type) {
+	case bool:
+		return v
+	case string:
+		s := strings.TrimSpace(strings.ToLower(v))
+		switch s {
+		case "", "true", "1", "yes", "on":
+			return true
+		case "false", "0", "no", "off":
+			return false
+		default:
+			return true
+		}
+	default:
+		return true
+	}
+}
+
+func templateUsesHTTPProtocol(root map[string]any) bool {
+	for _, item := range asSlice(root["metrics"]) {
+		metric := asMap(item)
+		if strings.EqualFold(strings.TrimSpace(asString(metric["protocol"])), "http") {
+			return true
+		}
+	}
+	return false
 }
 
 func compileFieldSpecs(fields []any, metricIdx int) ([]*pb.FieldSpec, map[string]struct{}, error) {

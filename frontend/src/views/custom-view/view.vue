@@ -108,7 +108,7 @@
           >
             <template #bodyCell="{ column, record }">
               <template v-if="column.key === 'code'">
-                <a @click="handleView(record)" style="color: #1890ff; cursor: pointer;">{{ record.code }}</a>
+                <a class="ci-link" @click="handleView(record)">{{ record.code }}</a>
               </template>
               <template v-else-if="column.key === 'action'">
                 <a-space>
@@ -501,7 +501,7 @@ const fetchModelFields = async (modelId: number | string | null) => {
 }
 
 const buildColumns = () => {
-  const newColumns = [
+  const newColumns: any[] = [
     { title: 'CI编码', dataIndex: 'code', key: 'code', width: 160, visible: true }
   ]
 
@@ -717,7 +717,7 @@ const handleImportOk = async () => {
   importing.value = true
   try {
     const file = importFileList.value[0]
-    const res = await importInstances(currentModelId.value, file)
+    const res = await importInstances(file, currentModelId.value)
     if (res.code === 200) {
       message.success(`导入成功：${res.data.success} 条，失败：${res.data.failed} 条`)
       importModalVisible.value = false
@@ -908,6 +908,15 @@ const handleBatchDelete = async () => {
 .drag-icon {
   color: var(--app-text-muted);
   cursor: move;
+}
+
+.ci-link {
+  color: var(--app-accent);
+  cursor: pointer;
+}
+
+.ci-link:hover {
+  color: var(--arco-primary-hover);
 }
 
 .import-template-action {

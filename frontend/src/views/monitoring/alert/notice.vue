@@ -178,7 +178,7 @@
           <a-button type="dashed" block @click="addLabel">
             <plus-outlined /> 添加标签条件
           </a-button>
-          <div style="margin-top: 4px; color: #999; font-size: 12px;">
+          <div class="form-help">
             只有匹配所有标签条件的告警才会发送通知
           </div>
         </a-form-item>
@@ -488,8 +488,8 @@ const saveItem = async () => {
       filter_all: formState.filter_all,
       labels: formState.filter_all ? {} : labelsToObject(formState.labelItems),
       days: formState.days,
-      period_start: formState.periodStart ? formState.periodStart.format('HH:mm:ss') : null,
-      period_end: formState.periodEnd ? formState.periodEnd.format('HH:mm:ss') : null,
+      period_start: formState.periodStart ? formState.periodStart.format('HH:mm:ss') : undefined,
+      period_end: formState.periodEnd ? formState.periodEnd.format('HH:mm:ss') : undefined,
       recipient_type: showRecipientConfig.value ? formState.recipient_type : 'user',
       recipient_ids: showRecipientConfig.value ? formState.recipient_ids : [],
       include_sub_departments: showRecipientConfig.value ? formState.include_sub_departments : true,

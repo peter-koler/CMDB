@@ -208,6 +208,7 @@ let persistTimer: ReturnType<typeof setTimeout> | null = null
 
 const DEFAULT_PAGE_SIZE = 10
 const PAGE_SIZE_OPTIONS = ['10', '20', '50', '100']
+const ROW_MODE_PROBE_LIMIT = 50
 
 const addModalOpen = ref(false)
 const addSelectedFields = ref<string[]>([])
@@ -524,6 +525,13 @@ function detectRowIndices(group: TemplateMetricGroup, visibleFields: TemplateMet
   return Array.from(out).sort((a, b) => a - b)
 }
 
+function hasLatestMetricData(latest?: MetricLatestPoint): boolean {
+  if (!latest) return false
+  if (latest.value !== undefined && Number.isFinite(latest.value)) return true
+  if (String(latest.text || '').trim()) return true
+  return Number.isFinite(latest.timestamp) && Number(latest.timestamp) > 0
+}
+
 function buildRowMetricNameCandidates(
   group: TemplateMetricGroup,
   field: TemplateMetricField,
@@ -600,6 +608,52 @@ function resolveRowMetricName(
     if (matched) return matched
   }
   return candidates[0] || ''
+}
+
+function detectExplicitRowIndices(
+  group: TemplateMetricGroup,
+  visibleFields: TemplateMetricField[],
+  baseMetricByField: Record<string, string>,
+  latestMap: Record<string, MetricLatestPoint>
+): number[] {
+  const out: number[] = []
+  for (let rowIndex = 1; rowIndex <= ROW_MODE_PROBE_LIMIT; rowIndex += 1) {
+    let hasAny = false
+    for (const field of visibleFields) {
+      const candidates = buildRowMetricNameCandidates(group, field, baseMetricByField[field.field], rowIndex)
+      for (const candidate of candidates) {
+        if (hasLatestMetricData(latestMap[candidate])) {
+          hasAny = true
+          break
+        }
+      }
+      if (hasAny) break
+    }
+    if (!hasAny) {
+      if (out.length > 0) break
+      continue
+    }
+    out.push(rowIndex)
+  }
+  return out
+}
+
+function buildExplicitRowMetricNameByKey(
+  group: TemplateMetricGroup,
+  visibleFields: TemplateMetricField[],
+  rowIndices: number[],
+  baseMetricByField: Record<string, string>,
+  latestMap: Record<string, MetricLatestPoint>
+): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const rowIndex of rowIndices) {
+    for (const field of visibleFields) {
+      const candidates = buildRowMetricNameCandidates(group, field, baseMetricByField[field.field], rowIndex)
+      const matched = candidates.find((candidate) => hasLatestMetricData(latestMap[candidate]))
+      if (matched) out[`${rowIndex}:${field.field}`] = matched
+    }
+  }
+  return out
 }
 
 function parseNumericCellValue(raw: unknown): number | undefined {
@@ -704,7 +758,9 @@ async function refreshGroup(groupKey: string) {
       if (metricName) metricNames.push(metricName)
     }
 
-    const rowIndices = detectRowIndices(group, visibleFields)
+    const explicitRowMode = group.viewMode === 'row'
+    let explicitRowLatestMap: Record<string, MetricLatestPoint> = {}
+    let rowIndices = explicitRowMode ? [] : detectRowIndices(group, visibleFields)
     const seriesNamesClean = seriesNames.value.map((item) => String(item || '').trim()).filter(Boolean)
     const seriesNameSet = new Set(seriesNamesClean)
     const seriesNameMapLower = new Map<string, string>()
@@ -714,23 +770,41 @@ async function refreshGroup(groupKey: string) {
         seriesNameMapLower.set(lower, name)
       }
     }
-    if (rowIndices.length) {
-      const rowMetricNameByKey: Record<string, string> = {}
-      for (const rowIndex of rowIndices) {
+    if (explicitRowMode) {
+      const explicitMetricNames: string[] = [...metricNames]
+      for (let rowIndex = 1; rowIndex <= ROW_MODE_PROBE_LIMIT; rowIndex += 1) {
         for (const field of visibleFields) {
-          const rowMetricName = resolveRowMetricName(
-            buildRowMetricNameCandidates(group, field, baseMetricByField[field.field], rowIndex),
-            seriesNameSet,
-            seriesNameMapLower
-          )
-          if (!rowMetricName) continue
-          rowMetricNameByKey[`${rowIndex}:${field.field}`] = rowMetricName
-          metricNames.push(rowMetricName)
+          explicitMetricNames.push(...buildRowMetricNameCandidates(group, field, baseMetricByField[field.field], rowIndex))
         }
       }
-      const latestMap = metricNames.length
-        ? await fetchLatestByNames(props.monitorId, metricNames, props.intervalSeconds)
+      explicitRowLatestMap = explicitMetricNames.length
+        ? await fetchLatestByNames(props.monitorId, explicitMetricNames, props.intervalSeconds)
         : {}
+      rowIndices = detectExplicitRowIndices(group, visibleFields, baseMetricByField, explicitRowLatestMap)
+    }
+    if (rowIndices.length) {
+      const rowMetricNameByKey: Record<string, string> = explicitRowMode
+        ? buildExplicitRowMetricNameByKey(group, visibleFields, rowIndices, baseMetricByField, explicitRowLatestMap)
+        : {}
+      if (!explicitRowMode) {
+        for (const rowIndex of rowIndices) {
+          for (const field of visibleFields) {
+            const rowMetricName = resolveRowMetricName(
+              buildRowMetricNameCandidates(group, field, baseMetricByField[field.field], rowIndex),
+              seriesNameSet,
+              seriesNameMapLower
+            )
+            if (!rowMetricName) continue
+            rowMetricNameByKey[`${rowIndex}:${field.field}`] = rowMetricName
+            metricNames.push(rowMetricName)
+          }
+        }
+      }
+      const latestMap = explicitRowMode
+        ? explicitRowLatestMap
+        : metricNames.length
+          ? await fetchLatestByNames(props.monitorId, metricNames, props.intervalSeconds)
+          : {}
       const nextRows: MetricGroupRow[] = []
       for (const rowIndex of rowIndices) {
         const row: MetricGroupRow = {
@@ -763,6 +837,26 @@ async function refreshGroup(groupKey: string) {
       rowRowsByGroup.value = {
         ...rowRowsByGroup.value,
         [group.key]: nextRows
+      }
+      rowModeByGroup.value = {
+        ...rowModeByGroup.value,
+        [group.key]: true
+      }
+      rowsByGroup.value = {
+        ...rowsByGroup.value,
+        [group.key]: []
+      }
+      lastRefreshByGroup.value = {
+        ...lastRefreshByGroup.value,
+        [group.key]: dayjs().format('YYYY-MM-DD HH:mm:ss')
+      }
+      return
+    }
+    if (explicitRowMode) {
+      await refreshActiveAlertMetrics()
+      rowRowsByGroup.value = {
+        ...rowRowsByGroup.value,
+        [group.key]: []
       }
       rowModeByGroup.value = {
         ...rowModeByGroup.value,

@@ -149,6 +149,7 @@ metrics:
       url: ^_^url^_^
 
   - name: state
+    viewMode: row
     i18n:
       zh-CN: 状态
       en-US: Status

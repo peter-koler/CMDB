@@ -476,7 +476,9 @@ func collectColumns(rows *sql.Rows, aliasFields []string) (map[string]string, st
 			if alias == "" {
 				continue
 			}
-			filtered[alias] = valuesByLower[strings.ToLower(alias)]
+			if value, ok := valuesByLower[strings.ToLower(alias)]; ok {
+				filtered[alias] = value
+			}
 		}
 		return filtered, "ok", nil
 	}

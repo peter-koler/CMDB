@@ -58,10 +58,7 @@ func (d *Dispatcher) SetPrecomputeEvaluator(ev PrecomputeEvaluator) {
 
 func (d *Dispatcher) RegisterJob(job model.Job) {
 	d.RemoveJob(job.ID)
-	tasks := append([]model.MetricsTask(nil), job.Tasks...)
-	// HertzBeat-like semantics: smaller priority means higher priority.
-	sort.Slice(tasks, func(i, j int) bool { return tasks[i].Priority < tasks[j].Priority })
-	job.Tasks = tasks
+	job = normalizeJob(job)
 	id := d.wheel.ScheduleEvery(job.Interval, func(ctx context.Context) {
 		d.submitWithRetry(ctx, func(ctx context.Context) {
 			d.executeJobCycle(ctx, job)
@@ -72,6 +69,13 @@ func (d *Dispatcher) RegisterJob(job model.Job) {
 	d.jobTimers[job.ID] = id
 	d.jobs[job.ID] = job
 	d.mu.Unlock()
+}
+
+func (d *Dispatcher) RunJobOnce(ctx context.Context, job model.Job) {
+	job = normalizeJob(job)
+	d.submitWithRetry(ctx, func(ctx context.Context) {
+		d.executeJobCycle(ctx, job)
+	}, job, model.MetricsTask{Name: "job-cycle", Protocol: "dispatcher"})
 }
 
 func (d *Dispatcher) RemoveJob(jobID int64) {
@@ -87,6 +91,14 @@ func (d *Dispatcher) RemoveJob(jobID int64) {
 
 func (d *Dispatcher) DroppedResults() int64 {
 	return d.dropped.Load()
+}
+
+func normalizeJob(job model.Job) model.Job {
+	tasks := append([]model.MetricsTask(nil), job.Tasks...)
+	// HertzBeat-like semantics: smaller priority means higher priority.
+	sort.Slice(tasks, func(i, j int) bool { return tasks[i].Priority < tasks[j].Priority })
+	job.Tasks = tasks
+	return job
 }
 
 func (d *Dispatcher) executeJobCycle(ctx context.Context, job model.Job) {
@@ -251,6 +263,7 @@ func (d *Dispatcher) executeTask(ctx context.Context, job model.Job, task model.
 		ctx2 = cancelCtx
 	}
 	start := time.Now()
+	debugCollectStart(job, task)
 	fields, msg, err := d.collectDynamicTask(ctx2, collector, task, redisCache, jdbcCache, valueStore)
 	latency := time.Since(start)
 	if err == nil {
@@ -264,6 +277,7 @@ func (d *Dispatcher) executeTask(ctx context.Context, job model.Job, task model.
 		var dropDebug map[string]string
 		// whitelist is enforced only when field_specs are provided by manager compiler.
 		fields, dropDebug = pipeline.ApplyFieldWhitelist(fields, task.FieldSpecs, true)
+		dropDebug = suppressAliasDropDebug(task, dropDebug)
 		mergeDebug(debug, dropDebug)
 	}
 	res := model.Result{
@@ -280,6 +294,10 @@ func (d *Dispatcher) executeTask(ctx context.Context, job model.Job, task model.
 		debugf("[collect-fail] monitor_id=%d job_id=%d app=%s metrics=%s protocol=%s code=%s message=%q reason=%v params=%v",
 			job.Monitor, job.ID, job.App, task.Name, task.Protocol, res.Code, msg, err, maskedTaskParams(task.Params))
 	}
+	if err == nil {
+		debugf("[collect-ok] monitor_id=%d job_id=%d app=%s metrics=%s protocol=%s message=%q field_count=%d latency_ms=%d",
+			job.Monitor, job.ID, job.App, task.Name, task.Protocol, msg, len(fields), latency.Milliseconds())
+	}
 	if err == nil && d.precompute != nil && d.precompute.Enabled() {
 		triggered, summary := d.precompute.Evaluate(task, fields)
 		if triggered {
@@ -294,6 +312,25 @@ func (d *Dispatcher) executeTask(ctx context.Context, job model.Job, task model.
 		valueStore.Save(fields)
 	}
 	d.pushResult(ctx, res)
+}
+
+func debugCollectStart(job model.Job, task model.MetricsTask) {
+	protocolName := strings.TrimSpace(strings.ToLower(task.Protocol))
+	if protocolName == "jdbc" {
+		debugf("[collect-start] monitor_id=%d job_id=%d app=%s metrics=%s protocol=%s queryType=%s sql=%q params=%v",
+			job.Monitor,
+			job.ID,
+			job.App,
+			task.Name,
+			task.Protocol,
+			strings.TrimSpace(task.Params["queryType"]),
+			compactSQL(task.Params["sql"]),
+			maskedTaskParams(task.Params),
+		)
+		return
+	}
+	debugf("[collect-start] monitor_id=%d job_id=%d app=%s metrics=%s protocol=%s params=%v",
+		job.Monitor, job.ID, job.App, task.Name, task.Protocol, maskedTaskParams(task.Params))
 }
 
 func debugf(format string, args ...any) {
@@ -395,14 +432,32 @@ func (d *Dispatcher) collectWithJDBCCache(ctx context.Context, collector protoco
 		return collector.Collect(ctx, task)
 	}
 	if cached, ok := jdbcCache.Get(key); ok {
-		return cached, "ok(cache)", nil
+		debugf("[jdbc-cache-hit] metrics=%s queryType=%s sql=%q key=%q field_count=%d",
+			task.Name,
+			strings.TrimSpace(task.Params["queryType"]),
+			compactSQL(task.Params["sql"]),
+			maskCacheKey(key),
+			len(cached),
+		)
+		return materializeJDBCFields(task, cached), "ok(cache)", nil
 	}
-	fields, msg, err := collector.Collect(ctx, task)
+	fetchTask := cloneMetricsTask(task)
+	if fetchTask.Params != nil {
+		delete(fetchTask.Params, "alias_fields")
+	}
+	fields, msg, err := collector.Collect(ctx, fetchTask)
 	if err != nil {
 		return nil, msg, err
 	}
 	jdbcCache.Set(key, fields)
-	return cloneStringMap(fields), msg, nil
+	debugf("[jdbc-cache-miss] metrics=%s queryType=%s sql=%q key=%q field_count=%d",
+		task.Name,
+		strings.TrimSpace(task.Params["queryType"]),
+		compactSQL(task.Params["sql"]),
+		maskCacheKey(key),
+		len(fields),
+	)
+	return materializeJDBCFields(task, fields), msg, nil
 }
 
 func materializeRedisFields(task model.MetricsTask, cached map[string]string) map[string]string {
@@ -414,6 +469,32 @@ func materializeRedisFields(task model.MetricsTask, cached map[string]string) ma
 		out["section"] = section
 	}
 	return out
+}
+
+func materializeJDBCFields(task model.MetricsTask, cached map[string]string) map[string]string {
+	out := cloneStringMap(cached)
+	if out == nil {
+		out = map[string]string{}
+	}
+	aliasFields := parseAliasFieldsFromParams(task.Params)
+	if len(aliasFields) == 0 {
+		return out
+	}
+	valuesByLower := make(map[string]string, len(cached))
+	for key, value := range cached {
+		valuesByLower[strings.ToLower(strings.TrimSpace(key))] = value
+	}
+	projected := make(map[string]string, len(aliasFields))
+	for _, alias := range aliasFields {
+		trimmed := strings.TrimSpace(alias)
+		if trimmed == "" {
+			continue
+		}
+		if value, ok := valuesByLower[strings.ToLower(trimmed)]; ok {
+			projected[trimmed] = value
+		}
+	}
+	return projected
 }
 
 func cloneMetricsTask(task model.MetricsTask) model.MetricsTask {
@@ -434,6 +515,55 @@ func cloneStringMap(src map[string]string) map[string]string {
 		dst[k] = v
 	}
 	return dst
+}
+
+func parseAliasFieldsFromParams(params map[string]string) []string {
+	if len(params) == 0 {
+		return nil
+	}
+	raw := strings.TrimSpace(params["alias_fields"])
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		field := strings.TrimSpace(part)
+		if field == "" {
+			continue
+		}
+		out = append(out, field)
+	}
+	return out
+}
+
+func suppressAliasDropDebug(task model.MetricsTask, debug map[string]string) map[string]string {
+	if len(debug) == 0 {
+		return debug
+	}
+	aliases := parseAliasFieldsFromParams(task.Params)
+	if len(aliases) == 0 {
+		return debug
+	}
+	aliasSet := make(map[string]struct{}, len(aliases))
+	for _, alias := range aliases {
+		trimmed := strings.TrimSpace(alias)
+		if trimmed == "" {
+			continue
+		}
+		aliasSet["dropped."+trimmed] = struct{}{}
+	}
+	filtered := make(map[string]string, len(debug))
+	for key, value := range debug {
+		if _, skip := aliasSet[key]; skip {
+			continue
+		}
+		filtered[key] = value
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+	return filtered
 }
 
 type redisCycleCache struct {
@@ -547,6 +677,25 @@ func mergeDebug(target map[string]string, extra map[string]string) {
 	for k, v := range extra {
 		target[k] = v
 	}
+}
+
+func compactSQL(raw string) string {
+	text := strings.Join(strings.Fields(strings.TrimSpace(raw)), " ")
+	if len(text) > 180 {
+		return text[:177] + "..."
+	}
+	return text
+}
+
+func maskCacheKey(key string) string {
+	if key == "" {
+		return ""
+	}
+	parts := strings.Split(key, "|")
+	if len(parts) >= 6 {
+		parts[5] = "***"
+	}
+	return strings.Join(parts, "|")
 }
 
 func (d *Dispatcher) pushResult(ctx context.Context, result model.Result) {

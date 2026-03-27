@@ -1,10 +1,13 @@
 <template>
-  <div class="monitor-target-detail-page">
-    <a-card :bordered="false">
+  <div class="app-page monitor-target-detail-page">
+    <a-card :bordered="false" class="app-surface-card">
       <div class="detail-header">
         <a-space>
           <a-button @click="goBack">返回列表</a-button>
           <a-button :loading="loading" @click="reloadDetail">刷新</a-button>
+          <a-button :loading="connectivityTesting" :disabled="!targetDetail?.id" @click="runConnectivityTest">
+            连通测试
+          </a-button>
         </a-space>
         <a-space v-if="targetDetail">
           <a-tag color="blue">{{ targetDetail.app || '-' }}</a-tag>
@@ -18,7 +21,7 @@
         <a-empty v-if="!targetDetail" description="监控任务不存在或已删除" />
         <a-tabs v-else v-model:activeKey="detailTab">
           <a-tab-pane key="basic" tab="基本信息">
-            <a-descriptions bordered :column="2" size="small">
+            <a-descriptions bordered :column="{ xs: 1, sm: 1, md: 2 }" size="small">
               <a-descriptions-item label="任务ID">{{ targetDetail.id }}</a-descriptions-item>
               <a-descriptions-item label="任务标识">{{ targetDetail.job_id || '-' }}</a-descriptions-item>
               <a-descriptions-item label="名称">{{ targetDetail.name || '-' }}</a-descriptions-item>
@@ -53,12 +56,12 @@
           <a-tab-pane key="alerts" tab="告警">
             <a-space direction="vertical" style="width: 100%" :size="12">
               <a-spin :spinning="targetAlertSummaryLoading">
-                <a-row :gutter="12">
-                  <a-col :span="4"><a-statistic title="当前告警" :value="targetAlertSummary.open_total" /></a-col>
-                  <a-col :span="4"><a-statistic title="Critical" :value="targetAlertSummary.critical_total" value-style="color: #cf1322" /></a-col>
-                  <a-col :span="4"><a-statistic title="Warning" :value="targetAlertSummary.warning_total" value-style="color: #d48806" /></a-col>
-                  <a-col :span="4"><a-statistic title="Info" :value="targetAlertSummary.info_total" value-style="color: #1677ff" /></a-col>
-                  <a-col :span="8"><a-statistic title="最近24h历史告警" :value="targetAlertSummary.history_24h" /></a-col>
+                <a-row :gutter="[12, 12]">
+                  <a-col :xs="12" :sm="8" :md="6" :lg="4"><a-statistic title="当前告警" :value="targetAlertSummary.open_total" /></a-col>
+                  <a-col :xs="12" :sm="8" :md="6" :lg="4"><a-statistic title="Critical" :value="targetAlertSummary.critical_total" :value-style="{ color: 'var(--arco-danger)' }" /></a-col>
+                  <a-col :xs="12" :sm="8" :md="6" :lg="4"><a-statistic title="Warning" :value="targetAlertSummary.warning_total" :value-style="{ color: 'var(--arco-warning)' }" /></a-col>
+                  <a-col :xs="12" :sm="8" :md="6" :lg="4"><a-statistic title="Info" :value="targetAlertSummary.info_total" :value-style="{ color: 'var(--app-accent)' }" /></a-col>
+                  <a-col :xs="24" :sm="16" :md="12" :lg="8"><a-statistic title="最近24h历史告警" :value="targetAlertSummary.history_24h" /></a-col>
                 </a-row>
               </a-spin>
 
@@ -72,7 +75,7 @@
                 <a-button danger :disabled="!canEdit || !targetAlertSelectedRuleIds.length" @click="batchDeleteTargetAlertRules">批量删除</a-button>
               </a-space>
 
-              <a-card size="small" title="最近告警变更">
+              <a-card size="small" title="最近告警变更" class="app-surface-card">
                 <a-empty v-if="!targetAlertSummary.recent.length" description="暂无告警变更" />
                 <a-table
                   v-else
@@ -137,6 +140,12 @@
         </a-tabs>
       </a-spin>
     </a-card>
+
+    <ConnectivityTestModal
+      v-model:open="connectivityModalOpen"
+      :loading="connectivityTesting"
+      :result="connectivityResult"
+    />
 
     <a-modal
       v-model:open="targetAlertEditorOpen"
@@ -338,6 +347,7 @@ import { message } from 'ant-design-vue'
 import { useRoute, useRouter } from 'vue-router'
 import * as yaml from 'js-yaml'
 import { useUserStore } from '@/stores/user'
+import ConnectivityTestModal from '@/components/monitoring/ConnectivityTestModal.vue'
 import MonitorMetricsPanel from '@/components/monitoring/metrics/MonitorMetricsPanel.vue'
 import {
   applyTargetDefaultAlertRules,
@@ -349,10 +359,12 @@ import {
   getMonitoringTarget,
   getTargetAlertRules,
   getTemplates,
+  testMonitoringTargetConnectivity,
   updateTargetAlertRule,
   type AlertItem,
   type AlertNotice,
   type AlertRule,
+  type MonitoringConnectivityTestResult,
   type MonitoringTarget,
   type MonitorTemplate
 } from '@/api/monitoring'
@@ -374,6 +386,9 @@ const loading = ref(false)
 const targetDetail = ref<MonitoringTarget | null>(null)
 const detailTab = ref<'basic' | 'metrics' | 'alerts'>('basic')
 const metricsPanelVersion = ref(0)
+const connectivityModalOpen = ref(false)
+const connectivityTesting = ref(false)
+const connectivityResult = ref<MonitoringConnectivityTestResult | null>(null)
 
 const templates = ref<MonitorTemplate[]>([])
 const targetTemplateContent = computed(() => {
@@ -464,6 +479,29 @@ function normalizeList(payload: any): { items: any[]; total: number } {
 
 function normalizedInterval(record: MonitoringTarget): number {
   return Number(record.interval_seconds || record.interval || 0)
+}
+
+async function runConnectivityTest() {
+  if (!targetDetail.value?.id) return
+  connectivityModalOpen.value = true
+  connectivityTesting.value = true
+  connectivityResult.value = null
+  try {
+    const res = await testMonitoringTargetConnectivity(targetDetail.value.id, { timeout_ms: 15000 })
+    if (res.code === 200) {
+      connectivityResult.value = res.data || null
+      if (res.data?.success) {
+        message.success('连通测试通过')
+      } else {
+        message.warning(res.data?.summary || '连通测试存在异常')
+      }
+    }
+  } catch (error: any) {
+    message.error(error?.response?.data?.message || '连通测试失败')
+    connectivityModalOpen.value = false
+  } finally {
+    connectivityTesting.value = false
+  }
 }
 
 function parseTemplateMetricOptions(content: string): MetricOption[] {
@@ -927,13 +965,22 @@ onMounted(() => {
 
 <style scoped>
 .monitor-target-detail-page {
-  padding: 16px;
+  min-height: 100%;
 }
 
 .detail-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
   margin-bottom: 16px;
+}
+
+@media (max-width: 768px) {
+  .detail-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
 }
 </style>

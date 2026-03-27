@@ -83,7 +83,7 @@
               placeholder="输入标签键，如：instance, alertname"
               style="width: 100%"
             />
-            <div style="margin-top: 4px; color: #999; font-size: 12px;">
+            <div class="form-help">
               按这些标签的值进行分组，相同值的告警会被分到同一组
             </div>
           </a-form-item>
@@ -278,3 +278,11 @@ const reset = () => {
 
 onMounted(loadData)
 </script>
+
+<style scoped>
+.form-help {
+  margin-top: 4px;
+  color: var(--app-text-muted);
+  font-size: 12px;
+}
+</style>

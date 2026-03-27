@@ -190,6 +190,7 @@ metrics:
       url: ^_^url^_^
 
   - name: tablespace
+    viewMode: row
     i18n:
       zh-CN: 表空间
       en-US: Tablespace
@@ -416,6 +417,7 @@ metrics:
 
 
   - name: percentage
+    viewMode: row
     i18n:
       zh-CN: 表空间百分比
       en-US: Percentage
@@ -639,6 +641,7 @@ metrics:
       url: ^_^url^_^
 
   - name: cpu_stats
+    viewMode: row
     i18n:
       zh-CN: CPU状态
       en-US: CPU Stats
@@ -673,6 +676,7 @@ metrics:
       url: ^_^url^_^
 
   - name: mem_stats
+    viewMode: row
     i18n:
       zh-CN: 内存状态
       en-US: Memory Stats
@@ -746,6 +750,7 @@ metrics:
       url: ^_^url^_^
 
   - name: slow_query
+    viewMode: row
     i18n:
       zh-CN: 慢查询
       en-US: Slow Query
@@ -836,6 +841,7 @@ metrics:
       url: ^_^url^_^
 
   - name: users
+    viewMode: row
     i18n:
       zh-CN: 用户信息
       en-US: Users

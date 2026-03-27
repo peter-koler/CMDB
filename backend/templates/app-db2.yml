@@ -169,6 +169,7 @@ metrics:
 
   # Combined tablespace capacity and usage
   - name: tablespace_usage
+    viewMode: row
     i18n:
       zh-CN: 表空间使用率
       en-US: Tablespace Usage
@@ -245,6 +246,7 @@ metrics:
 
   # Sessions/Applications status distribution
   - name: sessions_status
+    viewMode: row
     i18n:
       zh-CN: 会话状态
       en-US: Session Status
@@ -341,6 +343,7 @@ metrics:
 
   # Slow Query / Top Statements (by Total CPU Time)
   - name: slow_query
+    viewMode: row
     i18n:
       zh-CN: 慢查询
       en-US: Slow Query

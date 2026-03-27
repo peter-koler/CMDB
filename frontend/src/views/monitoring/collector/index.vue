@@ -7,10 +7,10 @@
           <a-card size="small"><a-statistic title="总采集器" :value="collectors.length" /></a-card>
         </a-col>
         <a-col :xs="24" :sm="8">
-          <a-card size="small"><a-statistic title="在线" :value="onlineCount" :value-style="{ color: '#52c41a' }" /></a-card>
+          <a-card size="small"><a-statistic title="在线" :value="onlineCount" :value-style="{ color: 'var(--arco-success)' }" /></a-card>
         </a-col>
         <a-col :xs="24" :sm="8">
-          <a-card size="small"><a-statistic title="离线" :value="offlineCount" :value-style="{ color: '#f5222d' }" /></a-card>
+          <a-card size="small"><a-statistic title="离线" :value="offlineCount" :value-style="{ color: 'var(--arco-danger)' }" /></a-card>
         </a-col>
       </a-row>
 

@@ -452,7 +452,7 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border: 1px solid #f0f0f0;
+  border: 1px solid var(--app-border);
   border-radius: 8px;
   padding: 10px 12px;
   cursor: pointer;
@@ -460,13 +460,13 @@ onMounted(() => {
 }
 
 .type-list-item:hover {
-  border-color: #91caff;
-  background: #f6fbff;
+  border-color: color-mix(in srgb, var(--app-accent) 28%, var(--app-border) 72%);
+  background: color-mix(in srgb, var(--app-accent) 4%, var(--app-surface-card) 96%);
 }
 
 .type-list-item-active {
-  border-color: #1677ff;
-  background: #e6f4ff;
+  border-color: var(--app-accent);
+  background: color-mix(in srgb, var(--app-accent) 10%, var(--app-surface-card) 90%);
 }
 
 .type-main {
@@ -476,13 +476,13 @@ onMounted(() => {
 .type-name {
   font-size: 14px;
   font-weight: 500;
-  color: #1f1f1f;
+  color: var(--app-text-primary);
 }
 
 .type-code {
   margin-top: 2px;
   font-size: 12px;
-  color: #8c8c8c;
+  color: var(--app-text-muted);
 }
 
 @media (max-width: 768px) {

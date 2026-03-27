@@ -934,7 +934,7 @@ const collectCategoryCodes = (nodes: CategoryNode[]): Set<string> => {
 }
 
 const buildDisplayTree = (categoryNodes: CategoryNode[], includeUncategorized = true): TreeNode[] => {
-  const treeNodes = categoryNodes.map((cat) => {
+  const treeNodes: TreeNode[] = categoryNodes.map((cat): TreeNode => {
     const categoryChildren = buildDisplayTree(cat.children || [], false)
     const templateChildren = templates.value
       .filter((t) => t.category === cat.key)
