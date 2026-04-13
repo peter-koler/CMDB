@@ -1,6 +1,7 @@
 from app import db
 from datetime import datetime
 import json
+from app.utils.form_config_fields import extract_form_fields
 
 
 class CiInstance(db.Model):
@@ -78,17 +79,7 @@ class CiInstance(db.Model):
                 "icon_url": model_config.get("icon_url"),
                 "key_field_codes": model_config.get("key_field_codes", []),
                 "form_config": self.model.form_config,
-                "fields": [
-                    {
-                        "id": f.id,
-                        "code": f.code,
-                        "name": f.name,
-                        "field_type": f.field_type,
-                    }
-                    for f in self.model.fields
-                ]
-                if self.model.fields
-                else [],
+                "fields": extract_form_fields(self.model.form_config),
             }
         if self.department:
             data["department"] = {

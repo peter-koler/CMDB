@@ -258,9 +258,10 @@ import {
 } from '@/api/trigger'
 import { getModels, getModelDetail } from '@/api/cmdb'
 import { getRelationTypes } from '@/api/cmdb-relation'
+import { extractFieldsFromFormConfig } from '@/utils/formConfigFields'
 
 interface Field {
-  id: number
+  id?: string | number
   code: string
   name: string
   field_type: string
@@ -395,7 +396,12 @@ const fetchModelFields = async (modelId: number, isSource: boolean) => {
   try {
     const res = await getModelDetail(modelId)
     if (res.code === 200) {
-      const fields = res.data.fields || []
+      const fields = extractFieldsFromFormConfig(res.data?.form_config).map((field) => ({
+        id: field.id,
+        code: field.code,
+        name: field.name,
+        field_type: field.field_type
+      }))
       if (isSource) {
         sourceModelFields.value = fields
       } else {

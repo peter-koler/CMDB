@@ -191,23 +191,36 @@ func parseInfo(raw string) map[string]string {
 		if key == "" {
 			continue
 		}
-		// commandstats style: cmdstat_get:calls=2,usec=10,usec_per_call=5.00
-		if strings.Contains(value, "=") && strings.Contains(value, ",") {
+		// Keep raw value for template compatibility.
+		result[key] = value
+
+		// Expand key=value pairs for alert/field flexibility:
+		// - commandstats: cmdstat_get:calls=2,usec=10,usec_per_call=5.00
+		// - keyspace: db0:keys=2,expires=1,avg_ttl=0
+		// - errorstats: errorstat_ERR:count=3
+		if strings.Contains(value, "=") {
 			segments := strings.Split(value, ",")
-			expanded := false
 			for _, seg := range segments {
 				pair := strings.SplitN(strings.TrimSpace(seg), "=", 2)
 				if len(pair) != 2 {
 					continue
 				}
-				result[key+"_"+strings.TrimSpace(pair[0])] = strings.TrimSpace(pair[1])
-				expanded = true
-			}
-			if expanded {
-				continue
+				subKey := strings.TrimSpace(pair[0])
+				subVal := strings.TrimSpace(pair[1])
+				if subKey == "" {
+					continue
+				}
+				result[key+"_"+subKey] = subVal
 			}
 		}
-		result[key] = value
+
+		// Redis 7+ naming compatibility.
+		if key == "mem_clients_replica" && result["mem_clients_slaves"] == "" {
+			result["mem_clients_slaves"] = value
+		}
+		if key == "replica_expires_tracked_keys" && result["slave_expires_tracked_keys"] == "" {
+			result["slave_expires_tracked_keys"] = value
+		}
 	}
 	return result
 }

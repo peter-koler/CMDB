@@ -407,6 +407,20 @@ func (d *Dispatcher) collectWithRedisCache(ctx context.Context, collector protoc
 		return collector.Collect(ctx, task)
 	}
 	if cached, ok := redisCache.Get(key); ok {
+		if needsRedisSectionFallback(task, cached) {
+			fields, msg, err := collector.Collect(ctx, task)
+			if err == nil {
+				merged := cloneStringMap(cached)
+				if merged == nil {
+					merged = map[string]string{}
+				}
+				for k, v := range fields {
+					merged[k] = v
+				}
+				redisCache.Set(key, merged)
+				return materializeRedisFields(task, merged), msg, nil
+			}
+		}
 		return materializeRedisFields(task, cached), "ok(cache)", nil
 	}
 
@@ -419,8 +433,34 @@ func (d *Dispatcher) collectWithRedisCache(ctx context.Context, collector protoc
 		// Fallback to task-level section collect to keep compatibility.
 		return collector.Collect(ctx, task)
 	}
+	if needsRedisSectionFallback(task, fields) {
+		sectionFields, sectionMsg, sectionErr := collector.Collect(ctx, task)
+		if sectionErr == nil {
+			for k, v := range sectionFields {
+				fields[k] = v
+			}
+			msg = sectionMsg
+		}
+	}
 	redisCache.Set(key, fields)
 	return materializeRedisFields(task, fields), msg, nil
+}
+
+func needsRedisSectionFallback(task model.MetricsTask, fields map[string]string) bool {
+	section := strings.TrimSpace(strings.ToLower(task.Params["section"]))
+	if section == "" || len(task.FieldSpecs) == 0 {
+		return false
+	}
+	for _, spec := range task.FieldSpecs {
+		field := strings.TrimSpace(spec.Field)
+		if field == "" {
+			continue
+		}
+		if _, ok := fields[field]; ok {
+			return false
+		}
+	}
+	return true
 }
 
 func (d *Dispatcher) collectWithJDBCCache(ctx context.Context, collector protocol.Collector, task model.MetricsTask, jdbcCache *jdbcCycleCache) (map[string]string, string, error) {

@@ -15,10 +15,12 @@
           <a-col :xs="24" :sm="12" :md="8" :lg="5">
             <a-form-item label="模型">
               <a-select
-                v-model:value="searchModelId"
-                placeholder="请选择模型"
+                v-model:value="searchModelIds"
+                mode="multiple"
+                placeholder="请选择模型（可多选）"
                 style="width: 100%"
                 allowClear
+                :max-tag-count="2"
               >
                 <a-select-option v-for="model in models" :key="model.id" :value="model.id">
                   {{ model.name }}
@@ -29,12 +31,14 @@
           <a-col :xs="24" :sm="12" :md="8" :lg="5">
             <a-form-item label="起点CI">
               <a-select
-                v-model:value="searchCiId"
-                placeholder="按关键属性选择起点"
+                v-model:value="searchCiIds"
+                mode="multiple"
+                placeholder="按关键属性选择起点（可多选）"
                 style="width: 100%"
                 allowClear
                 show-search
                 option-filter-prop="label"
+                :max-tag-count="2"
               >
                 <a-select-option
                   v-for="ci in filteredCandidateCis"
@@ -49,12 +53,13 @@
           </a-col>
           <a-col :xs="24" :sm="12" :md="8" :lg="4">
             <a-form-item label="深度">
-              <a-select v-model:value="relationDepth" style="width: 100%">
-                <a-select-option :value="1">1层</a-select-option>
-                <a-select-option :value="2">2层</a-select-option>
-                <a-select-option :value="3">3层</a-select-option>
-                <a-select-option :value="4">4层</a-select-option>
-              </a-select>
+              <a-input-number
+                v-model:value="relationDepth"
+                :min="1"
+                :max="TOPOLOGY_DEPTH_LIMIT"
+                :step="1"
+                style="width: 100%"
+              />
             </a-form-item>
           </a-col>
           <a-col :xs="24" :sm="12" :md="8" :lg="5">
@@ -112,7 +117,13 @@
           </a-button>
         </a-space>
       </template>
-      <div ref="graphContainer" class="graph-container"></div>
+      <div v-if="!hasSearched" class="topology-empty-state">
+        <a-empty description="请先选择模型/起点CI并点击搜索以展示拓扑图" />
+      </div>
+      <div v-else-if="!nodes.length" class="topology-empty-state">
+        <a-empty description="未查询到符合条件的拓扑关系" />
+      </div>
+      <div v-else ref="graphContainer" class="graph-container"></div>
     </a-card>
 
     <CiDetailDrawer
@@ -127,39 +138,34 @@
 import { ref, onMounted, onUnmounted, watch, nextTick, computed, createApp, h } from 'vue'
 import { message } from 'ant-design-vue'
 import {
-  ApiOutlined,
-  AppstoreOutlined,
-  CloudServerOutlined,
-  ClusterOutlined,
-  ContainerOutlined,
-  DatabaseOutlined,
-  DeploymentUnitOutlined,
   SearchOutlined,
   ReloadOutlined,
   SyncOutlined,
   ZoomInOutlined,
   ZoomOutOutlined,
   FullscreenOutlined,
-  DownloadOutlined,
-  GlobalOutlined,
-  HddOutlined,
-  LaptopOutlined
+  DownloadOutlined
 } from '@ant-design/icons-vue'
 import { Graph } from '@antv/g6'
 import { getTopology, exportTopology } from '@/api/cmdb-relation'
 import { getModels } from '@/api/cmdb'
 import { getInstances } from '@/api/ci'
 import CiDetailDrawer from '@/views/cmdb/instance/components/CiDetailDrawer.vue'
+import { getModelIconAssetUrl, getModelIconComponent } from '@/utils/cmdbModelIcons'
+
+const TOPOLOGY_DEPTH_LIMIT = Math.max(1, Number((import.meta as any)?.env?.VITE_TOPOLOGY_DEPTH_LIMIT || 10) || 10)
 
 const loading = ref(false)
 const exportLoading = ref(false)
 const searchKeyword = ref('')
-const searchModelId = ref<number | null>(null)
-const searchCiId = ref<number | null>(null)
+const searchModelIds = ref<number[]>([])
+const searchCiIds = ref<number[]>([])
 const relationDepth = ref(1)
-const layout = ref('force')
+const layout = ref('dagre')
 const nodes = ref<any[]>([])
 const edges = ref<any[]>([])
+const hasSearched = ref(false)
+const selectedNodeId = ref<string | null>(null)
 const models = ref<any[]>([])
 const candidateCis = ref<any[]>([])
 const detailDrawerVisible = ref(false)
@@ -168,18 +174,6 @@ const graphContainer = ref<HTMLElement>()
 let graph: any = null
 
 const modelColorMap: Record<number, string> = {}
-const iconComponentMap: Record<string, any> = {
-  AppstoreOutlined,
-  DatabaseOutlined,
-  CloudServerOutlined,
-  ClusterOutlined,
-  HddOutlined,
-  ApiOutlined,
-  DeploymentUnitOutlined,
-  ContainerOutlined,
-  LaptopOutlined,
-  GlobalOutlined
-}
 
 const modelMap = computed<Record<number, any>>(() => {
   const map: Record<number, any> = {}
@@ -233,13 +227,14 @@ const getCiDisplayText = (ci: any): string => {
 
 const filteredCandidateCis = computed(() => {
   const list = candidateCis.value || []
-  if (!searchModelId.value) return list
-  return list.filter((ci) => ci.model_id === searchModelId.value)
+  if (!searchModelIds.value.length) return list
+  const modelIdSet = new Set(searchModelIds.value)
+  return list.filter((ci) => modelIdSet.has(ci.model_id))
 })
 
 const getNodeIconComponent = (node: any) => {
   const modelIcon = modelMap.value[node?.model_id]?.icon || node?.model_icon
-  return iconComponentMap[modelIcon] || AppstoreOutlined
+  return getModelIconComponent(modelIcon)
 }
 
 const getNodeIconUrl = (node: any) => {
@@ -275,7 +270,7 @@ const builtinIconDataUrlCache: Record<string, string> = {}
 const iconUrlStatus = ref<Record<string, 'ok' | 'fail'>>({})
 
 const getAntdIconSvgMarkup = (iconName?: string) => {
-  const iconComponent = iconComponentMap[iconName || ''] || AppstoreOutlined
+  const iconComponent = getModelIconComponent(iconName)
   const container = document.createElement('div')
   const app = createApp({
     render() {
@@ -315,6 +310,11 @@ const getBuiltinIconDataUrl = (iconName?: string) => {
   const cacheKey = iconName || 'AppstoreOutlined'
   if (builtinIconDataUrlCache[cacheKey]) {
     return builtinIconDataUrlCache[cacheKey]
+  }
+  const assetUrl = getModelIconAssetUrl(cacheKey)
+  if (assetUrl) {
+    builtinIconDataUrlCache[cacheKey] = assetUrl
+    return assetUrl
   }
   const svg = getAntdIconSvgMarkup(cacheKey)
   const dataUrl = svg
@@ -376,38 +376,41 @@ const applyGraphData = (data: { nodes: any[]; edges: any[] }) => {
 const initGraph = () => {
   if (!graphContainer.value) return
 
+  if (graph) {
+    graph.destroy?.()
+    graph = null
+  }
+
   graph = new Graph({
     container: graphContainer.value,
     width: graphContainer.value.clientWidth,
     height: graphContainer.value.clientHeight - 24,
     behaviors: ['drag-canvas', 'zoom-canvas', 'drag-element'],
     defaultNode: {
-      size: 40,
+      type: 'circle',
+      size: 52,
       style: {
         lineWidth: 2,
-        stroke: getThemeColor('--app-surface-card', '#ffffff')
+        stroke: '#bcd8ff',
+        fill: '#ffffff'
       },
-      labelCfg: {
-        style: {
-          fill: getThemeColor('--app-text-primary', '#1f1f1f'),
-          fontSize: 12
-        },
-        position: 'bottom'
-      }
     },
     defaultEdge: {
       type: 'cubic-horizontal',
       style: {
-        stroke: getThemeColor('--app-accent-soft', '#91d5ff'),
+        stroke: '#3b82f6',
         lineWidth: 2,
-        endArrow: true
+        endArrow: true,
+        opacity: 0.9
       }
     },
     layout: {
       type: layout.value,
       preventOverlap: true,
-      nodeSpacing: 100,
-      linkDistance: 150
+      rankdir: 'LR',
+      nodesep: 60,
+      ranksep: 140,
+      nodeSize: 72
     }
   } as any)
 
@@ -415,42 +418,132 @@ const initGraph = () => {
     const node = evt?.item || evt?.target
     if (node) {
       const model = typeof node.getModel === 'function' ? node.getModel() : node
-      currentInstanceId.value = Number(model?.id)
-      detailDrawerVisible.value = true
+      const nodeId = String(model?.id || '')
+      selectedNodeId.value = nodeId || null
+      void renderGraph()
     }
   })
 
-  renderGraph()
+  graph.on('node:dblclick', (evt: any) => {
+    const node = evt?.item || evt?.target
+    if (!node) return
+    const model = typeof node.getModel === 'function' ? node.getModel() : node
+    const ciId = Number(model?.ci_id ?? String(model?.id || '').replace(/^ci-/, ''))
+    currentInstanceId.value = Number.isNaN(ciId) ? null : ciId
+    detailDrawerVisible.value = true
+  })
+
+  graph.on('canvas:click', () => {
+    selectedNodeId.value = null
+    void renderGraph()
+  })
+
+  renderGraph({ fit: true })
 }
 
-const renderGraph = () => {
+const applyTopologyFocusState = async (focusNodeId: string | null) => {
+  if (!graph || typeof graph.setItemState !== 'function' || typeof graph.findById !== 'function') return
+  try {
+    const nodeIds = nodes.value.map((node) => `ci-${String(node.id)}`)
+    const edgeIds = edges.value.map((edge, index) => `rel-${String(edge.id || index)}`)
+
+    nodeIds.forEach((id) => {
+      const item = graph.findById(id)
+      if (!item) return
+      graph.setItemState(item, 'active', false)
+      graph.setItemState(item, 'inactive', false)
+    })
+    edgeIds.forEach((id) => {
+      const item = graph.findById(id)
+      if (!item) return
+      graph.setItemState(item, 'active', false)
+      graph.setItemState(item, 'inactive', false)
+    })
+    if (!focusNodeId) return
+
+    const activeNodeIds = new Set<string>([focusNodeId])
+    const activeEdgeIds = new Set<string>()
+    edges.value.forEach((edge, index) => {
+      const edgeId = `rel-${String(edge.id || index)}`
+      const sourceId = `ci-${String(edge.source)}`
+      const targetId = `ci-${String(edge.target)}`
+      if (sourceId === focusNodeId || targetId === focusNodeId) {
+        activeEdgeIds.add(edgeId)
+        activeNodeIds.add(sourceId)
+        activeNodeIds.add(targetId)
+      }
+    })
+
+    nodeIds.forEach((id) => {
+      const item = graph.findById(id)
+      if (!item) return
+      graph.setItemState(item, activeNodeIds.has(id) ? 'active' : 'inactive', true)
+    })
+    edgeIds.forEach((id) => {
+      const item = graph.findById(id)
+      if (!item) return
+      graph.setItemState(item, activeEdgeIds.has(id) ? 'active' : 'inactive', true)
+    })
+  } catch (error) {
+    console.warn('applyTopologyFocusState failed', error)
+  }
+}
+
+const renderGraph = async ({ fit = false }: { fit?: boolean } = {}) => {
   if (!graph) return
+  const focusedNodeId = selectedNodeId.value
+  const activeNodeIdSet = new Set<string>()
+  const activeEdgeIdSet = new Set<string>()
+  if (focusedNodeId) {
+    activeNodeIdSet.add(focusedNodeId)
+    edges.value.forEach((edge, index) => {
+      const edgeId = `rel-${String(edge.id || index)}`
+      const sourceId = `ci-${String(edge.source)}`
+      const targetId = `ci-${String(edge.target)}`
+      if (sourceId === focusedNodeId || targetId === focusedNodeId) {
+        activeEdgeIdSet.add(edgeId)
+        activeNodeIdSet.add(sourceId)
+        activeNodeIdSet.add(targetId)
+      }
+    })
+  }
 
   const graphNodes = nodes.value.map((node) => ({
-    id: String(node.id),
+    id: `ci-${String(node.id)}`,
+    ci_id: Number(node.id),
     model_id: node.model_id,
-    type: 'image',
+    type: 'circle',
     draggable: true,
     style: {
-      img: getGraphNodeIconSrc(node),
-      src: getGraphNodeIconSrc(node),
-      size: 36,
-      lineWidth: 0,
+      opacity: focusedNodeId && !activeNodeIdSet.has(`ci-${String(node.id)}`) ? 0.2 : 1,
+      size: 58,
+      fill: '#ffffff',
+      stroke: node.has_open_alert ? '#ef4444' : (focusedNodeId && activeNodeIdSet.has(`ci-${String(node.id)}`) ? '#2563eb' : '#bcd8ff'),
+      lineWidth: node.has_open_alert ? 2.6 : (focusedNodeId && activeNodeIdSet.has(`ci-${String(node.id)}`) ? 2.4 : 1.8),
+      icon: true,
+      iconSrc: getGraphNodeIconSrc(node),
+      iconWidth: 22,
+      iconHeight: 22,
       labelText: getNodePrimaryText(node),
       labelPlacement: 'bottom',
       labelFill: getThemeColor('--app-text-primary', '#1f1f1f'),
-      labelFontSize: 12
+      labelFontSize: 12,
+      shadowColor: node.has_open_alert ? 'rgba(239, 68, 68, 0.42)' : 'rgba(59, 130, 246, 0.24)',
+      shadowBlur: node.has_open_alert ? 20 : (focusedNodeId && activeNodeIdSet.has(`ci-${String(node.id)}`) ? 18 : 14),
     },
     label: getNodePrimaryText(node)
   }))
 
   const graphEdges = edges.value.map((edge, index) => ({
-    id: String(edge.id || index),
-    source: String(edge.source),
-    target: String(edge.target),
+    id: `rel-${String(edge.id || index)}`,
+    source: `ci-${String(edge.source)}`,
+    target: `ci-${String(edge.target)}`,
     style: {
       endArrow: edge.direction === 'directed' ? true : false,
-      labelText: edge.relation_type_name || ''
+      labelText: edge.relation_type_name || '',
+      stroke: focusedNodeId && activeEdgeIdSet.has(`rel-${String(edge.id || index)}`) ? '#1d4ed8' : '#3b82f6',
+      lineWidth: focusedNodeId && activeEdgeIdSet.has(`rel-${String(edge.id || index)}`) ? 3.4 : 2,
+      opacity: focusedNodeId ? (activeEdgeIdSet.has(`rel-${String(edge.id || index)}`) ? 1 : 0.12) : 0.88
     },
     label: edge.relation_type_name || ''
   }))
@@ -459,14 +552,25 @@ const renderGraph = () => {
     nodes: graphNodes,
     edges: graphEdges
   })
+
+  if (fit && typeof graph.fitView === 'function') {
+    graph.fitView()
+  }
+}
+
+const validateDepthLimit = () => {
+  const depth = Number(relationDepth.value || 1)
+  if (depth <= TOPOLOGY_DEPTH_LIMIT) return true
+  message.warning(`当前深度为 ${depth}，已超出上限 ${TOPOLOGY_DEPTH_LIMIT}，请调整后再操作`)
+  return false
 }
 
 const fetchTopology = async () => {
   loading.value = true
   try {
     const res = await getTopology({
-      model_id: searchModelId.value,
-      ci_id: searchCiId.value,
+      model_ids: searchModelIds.value.join(','),
+      ci_ids: searchCiIds.value.join(','),
       depth: relationDepth.value,
       keyword: searchKeyword.value
     })
@@ -477,12 +581,16 @@ const fetchTopology = async () => {
         source_name: nodes.value.find(n => n.id === edge.source)?.name || edge.source,
         target_name: nodes.value.find(n => n.id === edge.target)?.name || edge.target
       }))
-      nextTick(() => {
-        renderGraph()
-      })
+      await nextTick()
+      if (!graph && graphContainer.value) {
+        initGraph()
+      } else {
+        await renderGraph({ fit: true })
+      }
     }
-  } catch (error) {
+  } catch (error: any) {
     console.error(error)
+    message.error(error?.response?.data?.message || '拓扑查询失败')
   } finally {
     loading.value = false
   }
@@ -514,32 +622,56 @@ const fetchCandidateCis = async () => {
 
 const handleNodeDeleted = () => {
   detailDrawerVisible.value = false
-  fetchTopology()
+  if (hasSearched.value) {
+    void fetchTopology()
+  }
 }
 
 const handleSearch = () => {
-  fetchTopology()
+  if (!validateDepthLimit()) return
+  hasSearched.value = true
+  selectedNodeId.value = null
+  void nextTick(async () => {
+    if (!graph && graphContainer.value) {
+      initGraph()
+    }
+    await fetchTopology()
+  })
 }
 
 const handleReset = () => {
   searchKeyword.value = ''
-  searchModelId.value = null
-  searchCiId.value = null
+  searchModelIds.value = []
+  searchCiIds.value = []
   relationDepth.value = 1
-  fetchTopology()
+  hasSearched.value = false
+  selectedNodeId.value = null
+  nodes.value = []
+  edges.value = []
+  if (graph) {
+    graph.destroy?.()
+    graph = null
+  }
 }
 
 const handleRefresh = () => {
-  fetchTopology()
+  if (!hasSearched.value) return
+  if (!validateDepthLimit()) return
+  void fetchTopology()
 }
 
 const handleExport = async () => {
+  if (!hasSearched.value) {
+    message.warning('请先搜索拓扑后再导出')
+    return
+  }
+  if (!validateDepthLimit()) return
   exportLoading.value = true
   try {
     const exported = await exportTopology({
       format: 'csv',
-      model_id: searchModelId.value,
-      ci_id: searchCiId.value,
+      model_ids: searchModelIds.value.join(','),
+      ci_ids: searchCiIds.value.join(','),
       depth: relationDepth.value,
       keyword: searchKeyword.value
     }) as unknown
@@ -609,38 +741,40 @@ const handleResize = () => {
 
 watch(layout, () => {
   if (graph) {
-    const layoutOptions = {
-      type: layout.value,
-      preventOverlap: true,
-      nodeSpacing: 100,
-      linkDistance: 150
-    }
+    const layoutOptions = layout.value === 'dagre'
+      ? {
+          type: 'dagre',
+          rankdir: 'LR',
+          nodesep: 60,
+          ranksep: 140,
+          nodeSize: 72
+        }
+      : {
+          type: layout.value,
+          preventOverlap: true,
+          nodeSpacing: 80,
+          linkDistance: 130
+        }
     if (typeof graph.updateLayout === 'function') {
       graph.updateLayout(layoutOptions)
     } else if (typeof graph.setLayout === 'function') {
       graph.setLayout(layoutOptions)
       if (typeof graph.render === 'function') {
-        graph.render()
+        void graph.render()
       }
     }
   }
 })
 
-watch(searchModelId, () => {
-  if (!searchCiId.value) return
-  const exists = filteredCandidateCis.value.some((ci) => ci.id === searchCiId.value)
-  if (!exists) {
-    searchCiId.value = null
-  }
+watch(searchModelIds, () => {
+  if (!searchCiIds.value.length) return
+  const existsSet = new Set(filteredCandidateCis.value.map((ci) => ci.id))
+  searchCiIds.value = searchCiIds.value.filter((ciId) => existsSet.has(ciId))
 })
 
 onMounted(() => {
-  fetchModels()
-  fetchCandidateCis()
-  nextTick(() => {
-    initGraph()
-    fetchTopology()
-  })
+  void fetchModels()
+  void fetchCandidateCis()
   window.addEventListener('resize', handleResize)
 })
 
@@ -704,5 +838,12 @@ onUnmounted(() => {
 .graph-container {
   flex: 1;
   min-height: 400px;
+}
+
+.topology-empty-state {
+  min-height: 420px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 </style>

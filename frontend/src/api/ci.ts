@@ -170,3 +170,11 @@ export const getBatchEditFields = (modelId: number) => {
     params: { model_id: modelId }
   })
 }
+
+export const getMonitoringTargetCiOptions = (params?: Record<string, any>) => {
+  return request({
+    url: '/monitoring/target-ci-options',
+    method: 'GET',
+    params
+  })
+}

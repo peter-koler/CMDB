@@ -14,8 +14,6 @@ class ModelRegion(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
     
-    fields = db.relationship('ModelField', backref='region', lazy='dynamic')
-    
     def to_dict(self):
         return {
             'id': self.id,

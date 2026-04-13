@@ -20,25 +20,6 @@
       <a-spin :spinning="loading">
         <a-empty v-if="!targetDetail" description="监控任务不存在或已删除" />
         <a-tabs v-else v-model:activeKey="detailTab">
-          <a-tab-pane key="basic" tab="基本信息">
-            <a-descriptions bordered :column="{ xs: 1, sm: 1, md: 2 }" size="small">
-              <a-descriptions-item label="任务ID">{{ targetDetail.id }}</a-descriptions-item>
-              <a-descriptions-item label="任务标识">{{ targetDetail.job_id || '-' }}</a-descriptions-item>
-              <a-descriptions-item label="名称">{{ targetDetail.name || '-' }}</a-descriptions-item>
-              <a-descriptions-item label="模板(app)">{{ targetDetail.app || '-' }}</a-descriptions-item>
-              <a-descriptions-item label="CI编码">{{ targetDetail.ci_code || '-' }}</a-descriptions-item>
-              <a-descriptions-item label="CI名称">{{ targetDetail.ci_name || '-' }}</a-descriptions-item>
-              <a-descriptions-item label="目标地址">{{ targetDetail.target || '-' }}</a-descriptions-item>
-              <a-descriptions-item label="采集间隔">{{ normalizedInterval(targetDetail) }}s</a-descriptions-item>
-              <a-descriptions-item label="状态">
-                <a-tag :color="targetDetail.enabled === false ? 'default' : 'green'">
-                  {{ targetDetail.enabled === false ? 'disabled' : 'enabled' }}
-                </a-tag>
-              </a-descriptions-item>
-              <a-descriptions-item label="创建时间">{{ targetDetail.created_at || '-' }}</a-descriptions-item>
-            </a-descriptions>
-          </a-tab-pane>
-
           <a-tab-pane key="metrics" tab="指标">
             <MonitorMetricsPanel
               v-if="targetDetail"
@@ -136,6 +117,25 @@
                 </a-table-column>
               </a-table>
             </a-space>
+          </a-tab-pane>
+
+          <a-tab-pane key="basic" tab="基本信息">
+            <a-descriptions bordered :column="{ xs: 1, sm: 1, md: 2 }" size="small">
+              <a-descriptions-item label="任务ID">{{ targetDetail.id }}</a-descriptions-item>
+              <a-descriptions-item label="任务标识">{{ targetDetail.job_id || '-' }}</a-descriptions-item>
+              <a-descriptions-item label="名称">{{ targetDetail.name || '-' }}</a-descriptions-item>
+              <a-descriptions-item label="模板(app)">{{ targetDetail.app || '-' }}</a-descriptions-item>
+              <a-descriptions-item label="CI编码">{{ targetDetail.ci_code || '-' }}</a-descriptions-item>
+              <a-descriptions-item label="CI名称">{{ targetDetail.ci_name || '-' }}</a-descriptions-item>
+              <a-descriptions-item label="目标地址">{{ targetDetail.target || '-' }}</a-descriptions-item>
+              <a-descriptions-item label="采集间隔">{{ normalizedInterval(targetDetail) }}s</a-descriptions-item>
+              <a-descriptions-item label="状态">
+                <a-tag :color="targetDetail.enabled === false ? 'default' : 'green'">
+                  {{ targetDetail.enabled === false ? 'disabled' : 'enabled' }}
+                </a-tag>
+              </a-descriptions-item>
+              <a-descriptions-item label="创建时间">{{ targetDetail.created_at || '-' }}</a-descriptions-item>
+            </a-descriptions>
           </a-tab-pane>
         </a-tabs>
       </a-spin>
@@ -384,7 +384,7 @@ const userStore = useUserStore()
 
 const loading = ref(false)
 const targetDetail = ref<MonitoringTarget | null>(null)
-const detailTab = ref<'basic' | 'metrics' | 'alerts'>('basic')
+const detailTab = ref<'basic' | 'metrics' | 'alerts'>('metrics')
 const metricsPanelVersion = ref(0)
 const connectivityModalOpen = ref(false)
 const connectivityTesting = ref(false)
@@ -925,7 +925,7 @@ function goBack() {
 watch(
   () => route.params.id,
   async () => {
-    detailTab.value = 'basic'
+    detailTab.value = 'metrics'
     await loadTargetDetail()
   },
   { immediate: true }

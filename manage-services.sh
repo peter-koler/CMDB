@@ -36,6 +36,15 @@ RUNTIME_LOG_DIR="${RUNTIME_LOG_DIR:-$PROJECT_ROOT/logs}"
 MANAGER_LOG="${MANAGER_LOG:-$RUNTIME_LOG_DIR/manager-go-runtime.log}"
 COLLECTOR_LOG="${COLLECTOR_LOG:-$RUNTIME_LOG_DIR/collector-go-runtime.log}"
 
+PROXY_ENV_UNSET=(
+    -u HTTP_PROXY
+    -u HTTPS_PROXY
+    -u ALL_PROXY
+    -u http_proxy
+    -u https_proxy
+    -u all_proxy
+)
+
 # 显示帮助信息
 show_help() {
     echo -e "${BLUE}监控服务管理脚本${NC}"
@@ -101,7 +110,7 @@ start_manager() {
     # 强制重新编译
     echo -e "${YELLOW}正在编译 manager-go...${NC}"
     if [ -f "./cmd/manager/main.go" ]; then
-        go build -o manager-go ./cmd/manager
+        env "${PROXY_ENV_UNSET[@]}" go build -o manager-go ./cmd/manager
     else
         echo -e "${RED}错误: 未找到 manager-go 源代码${NC}"
         return 1
@@ -109,7 +118,7 @@ start_manager() {
     
     echo -e "${BLUE}使用配置文件: $MANAGER_CONFIG${NC}"
     echo -e "${BLUE}日志文件: $MANAGER_LOG${NC}"
-    nohup ./manager-go -config "$MANAGER_CONFIG" > "$MANAGER_LOG" 2>&1 &
+    nohup env "${PROXY_ENV_UNSET[@]}" ./manager-go -config "$MANAGER_CONFIG" > "$MANAGER_LOG" 2>&1 &
     
     local new_pid=$!
     echo $new_pid > "$MANAGER_PID_FILE"
@@ -184,7 +193,7 @@ start_collector() {
                 return 1
             fi
         fi
-        go build "${build_args[@]}" -o collector-go ./cmd/collector
+        env "${PROXY_ENV_UNSET[@]}" go build "${build_args[@]}" -o collector-go ./cmd/collector
     else
         echo -e "${RED}错误: 未找到 collector-go 源代码${NC}"
         return 1
@@ -192,7 +201,7 @@ start_collector() {
     
     echo -e "${BLUE}使用配置文件: $COLLECTOR_CONFIG${NC}"
     echo -e "${BLUE}日志文件: $COLLECTOR_LOG${NC}"
-    nohup ./collector-go -config "$COLLECTOR_CONFIG" > "$COLLECTOR_LOG" 2>&1 &
+    nohup env "${PROXY_ENV_UNSET[@]}" ./collector-go -config "$COLLECTOR_CONFIG" > "$COLLECTOR_LOG" 2>&1 &
     
     local new_pid=$!
     echo $new_pid > "$COLLECTOR_PID_FILE"

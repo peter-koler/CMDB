@@ -6,7 +6,6 @@ from app.models.password_history import PasswordHistory
 from app.models.model_category import ModelCategory
 from app.models.cmdb_model import CmdbModel, ModelType
 from app.models.model_region import ModelRegion
-from app.models.model_field import ModelField
 from app.models.department import Department, DepartmentUser, DepartmentRole
 from app.models.role import Role, UserRole
 from app.models.ci_instance import CiInstance, CiHistory, CodeSequence
@@ -66,7 +65,6 @@ __all__ = [
     "CmdbModel",
     "ModelType",
     "ModelRegion",
-    "ModelField",
     "Department",
     "DepartmentUser",
     "DepartmentRole",

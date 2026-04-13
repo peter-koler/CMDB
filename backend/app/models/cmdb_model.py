@@ -2,6 +2,7 @@ from app import db
 from datetime import datetime
 from sqlalchemy import event
 import json
+from app.utils.form_config_fields import extract_form_fields
 
 
 class CmdbModel(db.Model):
@@ -31,14 +32,6 @@ class CmdbModel(db.Model):
     regions = db.relationship(
         "ModelRegion", backref="model", lazy="dynamic", cascade="all, delete-orphan"
     )
-    fields = db.relationship(
-        "ModelField",
-        backref="model",
-        lazy="dynamic",
-        cascade="all, delete-orphan",
-        foreign_keys="ModelField.model_id",
-    )
-
     def get_config(self):
         try:
             return json.loads(self.config) if self.config else {}
@@ -81,7 +74,7 @@ class CmdbModel(db.Model):
     def to_full_dict(self):
         data = self.to_dict()
         data["regions"] = [region.to_dict() for region in self.regions]
-        data["fields"] = [field.to_dict() for field in self.fields.all()]
+        data["fields"] = extract_form_fields(self.form_config)
         return data
 
     def save(self):

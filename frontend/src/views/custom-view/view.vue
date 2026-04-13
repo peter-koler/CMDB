@@ -237,6 +237,7 @@ import { getModels, getModelDetail } from '@/api/cmdb'
 import { getInstances, deleteInstance, batchDeleteInstances, exportInstances, importInstances, getImportTemplate } from '@/api/ci'
 import CiDetailDrawer from '@/views/cmdb/instance/components/CiDetailDrawer.vue'
 import CiInstanceModal from '@/views/cmdb/instance/components/CiInstanceModal.vue'
+import { extractFieldsFromFormConfig } from '@/utils/formConfigFields'
 
 const route = useRoute()
 
@@ -466,37 +467,16 @@ const fetchModelFields = async (modelId: number | string | null) => {
   try {
     const res = await getModelDetail(Number(modelId))
     if (res.code === 200 && res.data.form_config) {
-      let formConfig = res.data.form_config
-      if (typeof formConfig === 'string') {
-        formConfig = JSON.parse(formConfig)
-      }
-      const fields: any[] = []
-      if (Array.isArray(formConfig)) {
-        formConfig.forEach((item: any) => {
-          if (item.controlType === 'group' && item.children) {
-            item.children.forEach((child: any) => {
-              if (child.props && child.props.code) {
-                fields.push({
-                  code: child.props.code,
-                  name: child.props.label || child.props.code,
-                  ...child.props
-                })
-              }
-            })
-          } else if (item.props && item.props.code) {
-            fields.push({
-              code: item.props.code,
-              name: item.props.label || item.props.code,
-              ...item.props
-            })
-          }
-        })
-      }
-      currentModelFields.value = fields
+      currentModelFields.value = extractFieldsFromFormConfig(res.data.form_config)
+      buildColumns()
+    } else {
+      currentModelFields.value = []
       buildColumns()
     }
   } catch (error) {
     console.error(error)
+    currentModelFields.value = []
+    buildColumns()
   }
 }
 

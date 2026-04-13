@@ -39,12 +39,6 @@ class RelationType(db.Model):
             "source_label": self.source_label,
             "target_label": self.target_label,
             "direction": self.direction,
-            "source_model_ids": json.loads(self.source_model_ids)
-            if self.source_model_ids
-            else [],
-            "target_model_ids": json.loads(self.target_model_ids)
-            if self.target_model_ids
-            else [],
             "cardinality": self.cardinality,
             "allow_self_loop": self.allow_self_loop,
             "description": self.description,
@@ -157,6 +151,8 @@ class RelationTrigger(db.Model):
     trigger_condition = db.Column(db.Text, nullable=False)
 
     is_active = db.Column(db.Boolean, default=True)
+    batch_scan_enabled = db.Column(db.Boolean, default=False)
+    batch_scan_cron = db.Column(db.String(100), nullable=True)
     description = db.Column(db.Text)
 
     created_at = db.Column(db.DateTime, default=datetime.now)
@@ -185,6 +181,8 @@ class RelationTrigger(db.Model):
             if self.trigger_condition
             else {},
             "is_active": self.is_active,
+            "batch_scan_enabled": self.batch_scan_enabled,
+            "batch_scan_cron": self.batch_scan_cron or "",
             "description": self.description,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }

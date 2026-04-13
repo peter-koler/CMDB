@@ -1,4 +1,3 @@
-import json
 from typing import Any
 
 from sqlalchemy.exc import IntegrityError
@@ -13,21 +12,6 @@ class RelationServiceError(Exception):
         super().__init__(message)
         self.message = message
         self.status_code = status_code
-
-
-def _parse_json_array(value: Any) -> list[int]:
-    if not value:
-        return []
-    if isinstance(value, list):
-        return value
-    if isinstance(value, str):
-        try:
-            data = json.loads(value)
-            return data if isinstance(data, list) else []
-        except Exception:
-            return []
-    return []
-
 
 def parse_relation_style(value: Any) -> dict:
     if not value:
@@ -76,17 +60,7 @@ def validate_relation_constraints(
     if not relation_type.allow_self_loop and source_ci.id == target_ci.id:
         raise RelationServiceError("不允许创建自环关系", 400)
 
-    # 3. 模型白名单检查
-    source_model_ids = _parse_json_array(relation_type.source_model_ids)
-    target_model_ids = _parse_json_array(relation_type.target_model_ids)
-
-    if source_model_ids and source_ci.model_id not in source_model_ids:
-        raise RelationServiceError("该关系类型不允许此源模型", 400)
-
-    if target_model_ids and target_ci.model_id not in target_model_ids:
-        raise RelationServiceError("该关系类型不允许此目标模型", 400)
-
-    # 4. 基数限制检查
+    # 3. 基数限制检查
     if relation_type.cardinality == "one_one":
         source_query = CmdbRelation.query.filter_by(
             source_ci_id=source_ci.id, relation_type_id=relation_type.id

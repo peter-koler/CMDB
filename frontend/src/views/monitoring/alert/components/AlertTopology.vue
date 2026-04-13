@@ -22,20 +22,9 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch, createApp, h } from 'vue'
 import { Graph } from '@antv/g6'
-import {
-  AppstoreOutlined,
-  DatabaseOutlined,
-  CloudServerOutlined,
-  ClusterOutlined,
-  HddOutlined,
-  ApiOutlined,
-  DeploymentUnitOutlined,
-  ContainerOutlined,
-  LaptopOutlined,
-  GlobalOutlined
-} from '@ant-design/icons-vue'
 import { getInstanceDetail } from '@/api/ci'
 import { getInstanceRelations } from '@/api/cmdb-relation'
+import { getModelIconAssetUrl, getModelIconComponent } from '@/utils/cmdbModelIcons'
 
 const props = defineProps<{
   ciId?: number
@@ -51,23 +40,10 @@ const graphEdges = ref<any[]>([])
 const selectedTopologyNode = ref<any>(null)
 let graph: any = null
 
-const iconComponentMap: Record<string, any> = {
-  AppstoreOutlined,
-  DatabaseOutlined,
-  CloudServerOutlined,
-  ClusterOutlined,
-  HddOutlined,
-  ApiOutlined,
-  DeploymentUnitOutlined,
-  ContainerOutlined,
-  LaptopOutlined,
-  GlobalOutlined
-}
-
 const builtinIconDataUrlCache: Record<string, string> = {}
 
 const getAntdIconSvgMarkup = (iconName?: string) => {
-  const iconComponent = iconComponentMap[iconName || ''] || AppstoreOutlined
+  const iconComponent = getModelIconComponent(iconName)
   const container = document.createElement('div')
   const app = createApp({
     render() {
@@ -107,6 +83,11 @@ const getBuiltinIconDataUrl = (iconName?: string) => {
   const cacheKey = iconName || 'AppstoreOutlined'
   if (builtinIconDataUrlCache[cacheKey]) {
     return builtinIconDataUrlCache[cacheKey]
+  }
+  const assetUrl = getModelIconAssetUrl(cacheKey)
+  if (assetUrl) {
+    builtinIconDataUrlCache[cacheKey] = assetUrl
+    return assetUrl
   }
   const svg = getAntdIconSvgMarkup(cacheKey)
   const dataUrl = svg ? toSvgBase64DataUrl(svg) : ''

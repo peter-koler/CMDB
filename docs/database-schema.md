@@ -132,23 +132,7 @@
 | created_at | DATETIME | 创建时间 |
 | updated_at | DATETIME | 更新时间 |
 
-### 2.4 model_fields - 模型字段表
-| 字段名 | 类型 | 说明 |
-|--------|------|------|
-| id | INTEGER | 主键 |
-| model_id | INTEGER | 模型ID |
-| name | VARCHAR(100) | 字段名称 |
-| code | VARCHAR(50) | 字段代码 |
-| field_type | VARCHAR(50) | 字段类型 |
-| required | BOOLEAN | 是否必填 |
-| unique | BOOLEAN | 是否唯一 |
-| default_value | VARCHAR(255) | 默认值 |
-| options | TEXT | 选项(JSON) |
-| sort_order | INTEGER | 排序 |
-| created_at | DATETIME | 创建时间 |
-| updated_at | DATETIME | 更新时间 |
-
-### 2.5 model_regions - 区域表
+### 2.4 model_regions - 区域表
 | 字段名 | 类型 | 说明 |
 |--------|------|------|
 | id | INTEGER | 主键 |
@@ -159,7 +143,7 @@
 | created_at | DATETIME | 创建时间 |
 | updated_at | DATETIME | 更新时间 |
 
-### 2.6 ci_instances - CI实例表
+### 2.5 ci_instances - CI实例表
 | 字段名 | 类型 | 说明 |
 |--------|------|------|
 | id | INTEGER | 主键 |
@@ -173,7 +157,7 @@
 | updated_at | DATETIME | 更新时间 |
 | created_by | VARCHAR(100) | 创建者 |
 
-### 2.7 ci_history - CI变更历史表
+### 2.6 ci_history - CI变更历史表
 | 字段名 | 类型 | 说明 |
 |--------|------|------|
 | id | INTEGER | 主键 |

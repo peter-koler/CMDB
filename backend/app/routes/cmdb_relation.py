@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify, Response
+from flask import Blueprint, request, jsonify, Response, current_app
 from datetime import datetime
 from collections import deque
 import csv
@@ -9,7 +9,10 @@ from app.models.cmdb_relation import (
     RelationTrigger,
     TriggerExecutionLog,
 )
+from app.services.trigger_service import process_trigger_for_model
+from app.tasks.scheduler import add_trigger_scan_job, get_scheduled_jobs, remove_trigger_scan_job
 from app.models.ci_instance import CiInstance
+from app.models.hertzbeat_models import SingleAlert, Monitor
 from app.models.department import Department
 from app.models.role import UserRole, Role
 from app.services.relation_service import (
@@ -21,6 +24,7 @@ from app.utils.auth import token_required, admin_required
 from app.utils.decorators import log_operation
 from app import db
 import json
+from apscheduler.triggers.cron import CronTrigger
 
 cmdb_relation_bp = Blueprint('cmdb_relation', __name__, url_prefix='/api/v1/cmdb')
 
@@ -179,6 +183,194 @@ def _build_ci_node(ci, is_center=False):
     }
 
 
+def _parse_id_list_param(name, single_name=None):
+    values = []
+    raw_values = request.args.getlist(name)
+    if not raw_values and single_name:
+        single = request.args.get(single_name)
+        if single is not None:
+            raw_values = [single]
+    for raw in raw_values:
+        if raw is None:
+            continue
+        text = str(raw).strip()
+        if not text:
+            continue
+        for part in [segment.strip() for segment in text.split(',')]:
+            if not part:
+                continue
+            try:
+                values.append(int(part))
+            except (TypeError, ValueError):
+                continue
+    output = []
+    seen = set()
+    for value in values:
+        if value <= 0 or value in seen:
+            continue
+        seen.add(value)
+        output.append(value)
+    return output
+
+
+def _collect_open_alert_ci_ids(ci_nodes):
+    ci_id_set = set()
+    ci_code_to_id = {}
+    ci_code_lower_to_id = {}
+    ci_name_lower_to_id = {}
+    for node in (ci_nodes or []):
+        try:
+            ci_id = int(node.get('id') or 0)
+        except (TypeError, ValueError):
+            ci_id = 0
+        if ci_id <= 0:
+            continue
+        ci_id_set.add(ci_id)
+        code = str(node.get('code') or '').strip()
+        if code:
+            ci_code_to_id[code] = ci_id
+            ci_code_lower_to_id[code.lower()] = ci_id
+        name = str(node.get('name') or '').strip()
+        if name:
+            ci_name_lower_to_id[name.lower()] = ci_id
+    if not ci_id_set:
+        return set()
+    open_alert_ci_ids = set()
+    alerts = SingleAlert.query.filter_by(status='firing').all()
+    monitor_ci_binding_cache = {}
+    for alert in alerts:
+        annotations = alert.annotations if hasattr(alert, 'annotations') else {}
+        labels = alert.labels if hasattr(alert, 'labels') else {}
+        if not isinstance(annotations, dict):
+            annotations = {}
+        if not isinstance(labels, dict):
+            labels = {}
+
+        ci_id_candidates = [
+            annotations.get('ci_id'),
+            annotations.get('ci.id'),
+            annotations.get('ciId'),
+            labels.get('ci_id'),
+            labels.get('ci.id'),
+            labels.get('ciId'),
+        ]
+        matched = False
+        for candidate in ci_id_candidates:
+            try:
+                ci_id = int(candidate or 0)
+            except (TypeError, ValueError):
+                ci_id = 0
+            if ci_id > 0 and ci_id in ci_id_set:
+                open_alert_ci_ids.add(ci_id)
+                matched = True
+                break
+        if matched:
+            continue
+
+        ci_code_candidates = [
+            annotations.get('ci_code'),
+            annotations.get('ci.code'),
+            annotations.get('ciCode'),
+            annotations.get('ci_name'),
+            annotations.get('ci.name'),
+            annotations.get('ciName'),
+            labels.get('ci_code'),
+            labels.get('ci.code'),
+            labels.get('ciCode'),
+            labels.get('ci_name'),
+            labels.get('ci.name'),
+            labels.get('ciName'),
+        ]
+        for candidate in ci_code_candidates:
+            code = str(candidate or '').strip()
+            if not code:
+                continue
+            ci_id = (
+                ci_code_to_id.get(code)
+                or ci_code_lower_to_id.get(code.lower())
+                or ci_name_lower_to_id.get(code.lower())
+            )
+            if ci_id:
+                open_alert_ci_ids.add(ci_id)
+                matched = True
+                break
+        if matched:
+            continue
+
+        content_text = str(getattr(alert, 'content', '') or '').strip()
+        if content_text:
+            lowered_content = content_text.lower()
+            for code, ci_id in ci_code_to_id.items():
+                if code and code.lower() in lowered_content:
+                    open_alert_ci_ids.add(ci_id)
+                    matched = True
+                    break
+            if matched:
+                continue
+            for name_lower, ci_id in ci_name_lower_to_id.items():
+                if name_lower and name_lower in lowered_content:
+                    open_alert_ci_ids.add(ci_id)
+                    break
+        if matched:
+            continue
+
+        monitor_id_candidates = [
+            annotations.get('monitor_id'),
+            annotations.get('monitor.id'),
+            annotations.get('monitorId'),
+            labels.get('monitor_id'),
+            labels.get('monitor.id'),
+            labels.get('monitorId'),
+        ]
+        monitor_id = 0
+        for candidate in monitor_id_candidates:
+            try:
+                monitor_id = int(candidate or 0)
+            except (TypeError, ValueError):
+                monitor_id = 0
+            if monitor_id > 0:
+                break
+        if monitor_id <= 0:
+            continue
+        if monitor_id in monitor_ci_binding_cache:
+            mapped_ci_id = monitor_ci_binding_cache[monitor_id]
+        else:
+            mapped_ci_id = 0
+            monitor_row = Monitor.query.get(monitor_id)
+            if monitor_row:
+                try:
+                    monitor_annotations = json.loads(monitor_row.annotations_json or '{}')
+                except Exception:
+                    monitor_annotations = {}
+                if isinstance(monitor_annotations, dict):
+                    try:
+                        candidate_ci_id = int(monitor_annotations.get('ci_id') or 0)
+                    except (TypeError, ValueError):
+                        candidate_ci_id = 0
+                    if candidate_ci_id > 0:
+                        mapped_ci_id = candidate_ci_id
+                    else:
+                        candidate_ci_code = str(monitor_annotations.get('ci_code') or '').strip()
+                        if candidate_ci_code:
+                            mapped_ci_id = (
+                                ci_code_to_id.get(candidate_ci_code)
+                                or ci_code_lower_to_id.get(candidate_ci_code.lower())
+                                or 0
+                            )
+            monitor_ci_binding_cache[monitor_id] = mapped_ci_id
+        if mapped_ci_id and mapped_ci_id in ci_id_set:
+            open_alert_ci_ids.add(mapped_ci_id)
+    return open_alert_ci_ids
+
+
+def _get_topology_depth_limit():
+    try:
+        depth_limit = int(current_app.config.get('CMDB_TOPOLOGY_MAX_DEPTH', 10))
+    except (TypeError, ValueError):
+        depth_limit = 10
+    return max(1, depth_limit)
+
+
 def _collect_relations_by_depth(start_ci_id, max_depth, current_user, scope, dept_ids):
     visited_nodes = {start_ci_id: 0}
     visited_relations = set()
@@ -217,36 +409,49 @@ def _collect_relations_by_depth(start_ci_id, max_depth, current_user, scope, dep
     return relation_list
 
 
-def _build_topology_data(all_relations, model_id=None, keyword='', limit_nodes=True):
+def _match_ci_keyword(ci, keyword=''):
+    kw = keyword.lower().strip() if keyword else ''
+    if not kw:
+        return True
+    name = (ci.name or '').lower()
+    code = (ci.code or '').lower()
+    if kw in name or kw in code:
+        return True
+
+    try:
+        attrs = ci.get_attribute_values() or {}
+    except Exception:
+        attrs = {}
+    for value in attrs.values():
+        if value is None:
+            continue
+        if isinstance(value, (list, tuple)):
+            text = ','.join([str(v) for v in value if v is not None]).lower()
+        elif isinstance(value, dict):
+            text = json.dumps(value, ensure_ascii=False).lower()
+        else:
+            text = str(value).lower()
+        if kw in text:
+            return True
+    return False
+
+
+def _build_topology_data(all_relations, model_id=None, model_ids=None, keyword='', limit_nodes=True):
     nodes = []
     edges = []
     node_ids = set()
     kw = keyword.lower().strip() if keyword else ''
-
-    def _match_ci_keyword(ci):
-        if not kw:
-            return True
-        name = (ci.name or '').lower()
-        code = (ci.code or '').lower()
-        if kw in name or kw in code:
-            return True
-
-        try:
-            attrs = ci.get_attribute_values() or {}
-        except Exception:
-            attrs = {}
-        for value in attrs.values():
-            if value is None:
+    model_id_set = set()
+    if model_ids:
+        for value in model_ids:
+            try:
+                ivalue = int(value)
+            except (TypeError, ValueError):
                 continue
-            if isinstance(value, (list, tuple)):
-                text = ','.join([str(v) for v in value if v is not None]).lower()
-            elif isinstance(value, dict):
-                text = json.dumps(value, ensure_ascii=False).lower()
-            else:
-                text = str(value).lower()
-            if kw in text:
-                return True
-        return False
+            if ivalue > 0:
+                model_id_set.add(ivalue)
+    elif model_id:
+        model_id_set = {model_id}
 
     for rel in all_relations:
         source_ci = rel.source_ci
@@ -255,12 +460,12 @@ def _build_topology_data(all_relations, model_id=None, keyword='', limit_nodes=T
         if not source_ci or not target_ci:
             continue
 
-        if model_id and source_ci.model_id != model_id and target_ci.model_id != model_id:
+        if model_id_set and source_ci.model_id not in model_id_set and target_ci.model_id not in model_id_set:
             continue
 
         if kw:
-            source_match = _match_ci_keyword(source_ci)
-            target_match = _match_ci_keyword(target_ci)
+            source_match = _match_ci_keyword(source_ci, kw)
+            target_match = _match_ci_keyword(target_ci, kw)
             if not source_match and not target_match:
                 continue
 
@@ -347,8 +552,8 @@ def create_relation_type():
         source_label=data.get('source_label', ''),
         target_label=data.get('target_label', ''),
         direction=data.get('direction', 'directed'),
-        source_model_ids=json.dumps(data.get('source_model_ids', [])),
-        target_model_ids=json.dumps(data.get('target_model_ids', [])),
+        source_model_ids='[]',
+        target_model_ids='[]',
         cardinality=data.get('cardinality', 'many_many'),
         allow_self_loop=data.get('allow_self_loop', False),
         description=data.get('description', ''),
@@ -393,11 +598,8 @@ def update_relation_type(id):
     relation_type.source_label = data.get('source_label', relation_type.source_label)
     relation_type.target_label = data.get('target_label', relation_type.target_label)
     relation_type.direction = data.get('direction', relation_type.direction)
-    
-    if 'source_model_ids' in data:
-        relation_type.source_model_ids = json.dumps(data['source_model_ids'])
-    if 'target_model_ids' in data:
-        relation_type.target_model_ids = json.dumps(data['target_model_ids'])
+    relation_type.source_model_ids = '[]'
+    relation_type.target_model_ids = '[]'
     
     relation_type.cardinality = data.get('cardinality', relation_type.cardinality)
     relation_type.allow_self_loop = data.get('allow_self_loop', relation_type.allow_self_loop)
@@ -656,32 +858,48 @@ def delete_relation(id):
 @token_required
 def get_topology():
     """获取拓扑图数据"""
-    model_id = request.args.get('model_id', type=int)
-    ci_id = request.args.get('ci_id', type=int)
+    model_ids = _parse_id_list_param('model_ids', single_name='model_id')
+    ci_ids = _parse_id_list_param('ci_ids', single_name='ci_id')
     keyword = request.args.get('keyword', '')
     depth = request.args.get('depth', 1, type=int)
-    depth = max(1, min(4, depth))
+    depth = max(1, depth)
+    depth_limit = _get_topology_depth_limit()
+    if depth > depth_limit:
+        return jsonify({
+            'code': 400,
+            'message': f'深度不能超过 {depth_limit} 层'
+        }), 400
     
     current_user = request.current_user
     scope = _get_user_data_scope(current_user)
     dept_ids = _get_accessible_department_ids(current_user, scope)
     
-    # 如果指定了 CI ID，从该 CI 开始按 depth 展开
-    if ci_id:
-        all_relations = _collect_relations_by_depth(
-            start_ci_id=ci_id,
-            max_depth=depth,
-            current_user=current_user,
-            scope=scope,
-            dept_ids=dept_ids,
-        )
-        
-        center_ci = CiInstance.query.get(ci_id)
-        if center_ci:
-            if not _can_access_instance(center_ci, current_user, scope, dept_ids):
+    # 如果指定了 CI ID，从这些 CI 开始按 depth 展开并去重
+    if ci_ids:
+        all_relations = []
+        center_cis = []
+        relation_ids = set()
+        for ci_id in ci_ids:
+            center_ci = CiInstance.query.get(ci_id)
+            if center_ci and not _can_access_instance(center_ci, current_user, scope, dept_ids):
                 return jsonify({'code': 403, 'message': '无权限查看此CI'}), 403
+            if center_ci:
+                center_cis.append(center_ci)
+            related_relations = _collect_relations_by_depth(
+                start_ci_id=ci_id,
+                max_depth=depth,
+                current_user=current_user,
+                scope=scope,
+                dept_ids=dept_ids,
+            )
+            for rel in related_relations:
+                if rel.id in relation_ids:
+                    continue
+                relation_ids.add(rel.id)
+                all_relations.append(rel)
     else:
         all_relations = []
+        center_cis = []
         for rel in CmdbRelation.query.all():
             if not rel.source_ci or not rel.target_ci:
                 continue
@@ -693,17 +911,49 @@ def get_topology():
 
     topology_nodes, topology_edges = _build_topology_data(
         all_relations=all_relations,
-        model_id=model_id,
+        model_ids=model_ids,
         keyword=keyword,
+        limit_nodes=not bool(model_ids or ci_ids),
     )
 
     # 指定起点时保留中心节点，即使其没有命中过滤
-    if ci_id:
-        center_exists = any(n['id'] == ci_id for n in topology_nodes)
-        center_ci = CiInstance.query.get(ci_id)
-        if center_ci and not center_exists:
+    if center_cis:
+        existing_ids = {n['id'] for n in topology_nodes}
+        for center_ci in center_cis:
+            if center_ci.id in existing_ids:
+                continue
             topology_nodes.insert(0, _build_ci_node(center_ci, is_center=True))
-            topology_nodes = topology_nodes[:500]
+            existing_ids.add(center_ci.id)
+
+    # 补齐无关系的 CI：用户筛选后应展示命中的全部 CI，而不仅是有关系的 CI
+    if model_ids or ci_ids:
+        ci_query = CiInstance.query
+        if model_ids and ci_ids:
+            ci_query = ci_query.filter(
+                db.or_(
+                    CiInstance.model_id.in_(model_ids),
+                    CiInstance.id.in_(ci_ids),
+                )
+            )
+        elif model_ids:
+            ci_query = ci_query.filter(CiInstance.model_id.in_(model_ids))
+        elif ci_ids:
+            ci_query = ci_query.filter(CiInstance.id.in_(ci_ids))
+
+        existing_ids = {n['id'] for n in topology_nodes}
+        for ci in ci_query.all():
+            if not _can_access_instance(ci, current_user, scope, dept_ids):
+                continue
+            if not _match_ci_keyword(ci, keyword):
+                continue
+            if ci.id in existing_ids:
+                continue
+            topology_nodes.append(_build_ci_node(ci, is_center=False))
+            existing_ids.add(ci.id)
+
+    open_alert_ci_ids = _collect_open_alert_ci_ids(topology_nodes)
+    for node in topology_nodes:
+        node['has_open_alert'] = node.get('id') in open_alert_ci_ids
     
     return jsonify({
         'code': 200,
@@ -720,11 +970,17 @@ def get_topology():
 def export_topology():
     """导出拓扑图数据（CSV）"""
     export_format = request.args.get('format', 'csv')
-    model_id = request.args.get('model_id', type=int)
-    ci_id = request.args.get('ci_id', type=int)
+    model_ids = _parse_id_list_param('model_ids', single_name='model_id')
+    ci_ids = _parse_id_list_param('ci_ids', single_name='ci_id')
     keyword = request.args.get('keyword', '')
     depth = request.args.get('depth', 1, type=int)
-    depth = max(1, min(4, depth))
+    depth = max(1, depth)
+    depth_limit = _get_topology_depth_limit()
+    if depth > depth_limit:
+        return jsonify({
+            'code': 400,
+            'message': f'深度不能超过 {depth_limit} 层'
+        }), 400
 
     if export_format not in ['csv', 'excel']:
         return jsonify({'code': 400, 'message': '不支持的导出格式'}), 400
@@ -733,17 +989,25 @@ def export_topology():
     scope = _get_user_data_scope(current_user)
     dept_ids = _get_accessible_department_ids(current_user, scope)
 
-    if ci_id:
-        center_ci = CiInstance.query.get(ci_id)
-        if center_ci and not _can_access_instance(center_ci, current_user, scope, dept_ids):
-            return jsonify({'code': 403, 'message': '无权限查看此CI'}), 403
-        all_relations = _collect_relations_by_depth(
-            start_ci_id=ci_id,
-            max_depth=depth,
-            current_user=current_user,
-            scope=scope,
-            dept_ids=dept_ids,
-        )
+    if ci_ids:
+        all_relations = []
+        relation_ids = set()
+        for ci_id in ci_ids:
+            center_ci = CiInstance.query.get(ci_id)
+            if center_ci and not _can_access_instance(center_ci, current_user, scope, dept_ids):
+                return jsonify({'code': 403, 'message': '无权限查看此CI'}), 403
+            related_relations = _collect_relations_by_depth(
+                start_ci_id=ci_id,
+                max_depth=depth,
+                current_user=current_user,
+                scope=scope,
+                dept_ids=dept_ids,
+            )
+            for rel in related_relations:
+                if rel.id in relation_ids:
+                    continue
+                relation_ids.add(rel.id)
+                all_relations.append(rel)
     else:
         all_relations = []
         for rel in CmdbRelation.query.all():
@@ -757,7 +1021,7 @@ def export_topology():
 
     _, edges = _build_topology_data(
         all_relations=all_relations,
-        model_id=model_id,
+        model_ids=model_ids,
         keyword=keyword,
         limit_nodes=False,
     )
@@ -828,21 +1092,60 @@ def get_relation_triggers():
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 20, type=int)
     keyword = request.args.get('keyword', '')
+    model_id = request.args.get('model_id', type=int)
+    active_only = request.args.get('active_only')
     
     query = RelationTrigger.query
     
     if keyword:
         query = query.filter(RelationTrigger.name.contains(keyword))
+    if model_id:
+        query = query.filter(
+            db.or_(
+                RelationTrigger.source_model_id == model_id,
+                RelationTrigger.target_model_id == model_id
+            )
+        )
+    if active_only not in (None, ""):
+        is_active = str(active_only).strip().lower() in {"1", "true", "yes", "on"}
+        query = query.filter(RelationTrigger.is_active.is_(is_active))
     
     pagination = query.order_by(RelationTrigger.created_at.desc()).paginate(
         page=page, per_page=per_page, error_out=False
     )
+
+    scheduled_jobs = get_scheduled_jobs()
+    trigger_next_run_map = {
+        job["trigger_id"]: job.get("next_run_time")
+        for job in scheduled_jobs
+        if job.get("job_type") == "trigger" and job.get("trigger_id") is not None
+    }
+    trigger_ids = [rt.id for rt in pagination.items]
+    latest_logs = {}
+    if trigger_ids:
+        latest_log_rows = (
+            TriggerExecutionLog.query
+            .filter(TriggerExecutionLog.trigger_id.in_(trigger_ids))
+            .order_by(TriggerExecutionLog.trigger_id.asc(), TriggerExecutionLog.created_at.desc())
+            .all()
+        )
+        for row in latest_log_rows:
+            if row.trigger_id not in latest_logs:
+                latest_logs[row.trigger_id] = row
     
     return jsonify({
         'code': 200,
         'message': 'success',
         'data': {
-            'items': [rt.to_dict() for rt in pagination.items],
+            'items': [
+                {
+                    **rt.to_dict(),
+                    'next_run_at': trigger_next_run_map.get(rt.id),
+                    'last_run_at': latest_logs[rt.id].created_at.isoformat() if latest_logs.get(rt.id) and latest_logs[rt.id].created_at else None,
+                    'last_run_status': latest_logs[rt.id].status if latest_logs.get(rt.id) else 'none',
+                }
+                for rt in pagination.items
+            ],
             'total': pagination.total,
             'page': page,
             'per_page': per_page
@@ -860,6 +1163,16 @@ def create_relation_trigger():
     
     if not data.get('name'):
         return jsonify({'code': 400, 'message': '名称不能为空'}), 400
+
+    batch_scan_enabled = data.get('batch_scan_enabled', False)
+    batch_scan_cron = (data.get('batch_scan_cron') or '').strip()
+    if batch_scan_cron:
+        try:
+            CronTrigger.from_crontab(batch_scan_cron)
+        except Exception as exc:
+            return jsonify({'code': 400, 'message': f'无效的 Cron 表达式: {exc}'}), 400
+    if batch_scan_enabled and not batch_scan_cron:
+        return jsonify({'code': 400, 'message': '启用定期扫描时 Cron 表达式不能为空'}), 400
     
     trigger = RelationTrigger(
         name=data['name'],
@@ -869,9 +1182,14 @@ def create_relation_trigger():
         trigger_type=data.get('trigger_type', 'reference'),
         trigger_condition=json.dumps(data.get('trigger_condition', {})),
         is_active=data.get('is_active', True),
+        batch_scan_enabled=batch_scan_enabled,
+        batch_scan_cron=batch_scan_cron,
         description=data.get('description', '')
     )
     trigger.save()
+
+    if trigger.is_active and trigger.batch_scan_enabled and trigger.batch_scan_cron:
+        add_trigger_scan_job(trigger.id, trigger.batch_scan_cron)
     
     return jsonify({
         'code': 200,
@@ -911,9 +1229,30 @@ def update_relation_trigger(id):
         trigger.trigger_condition = json.dumps(data['trigger_condition'])
     
     trigger.is_active = data.get('is_active', trigger.is_active)
+    batch_scan_enabled = trigger.batch_scan_enabled
+    batch_scan_cron = trigger.batch_scan_cron or ''
+    if 'batch_scan_enabled' in data:
+        trigger.batch_scan_enabled = data.get('batch_scan_enabled', False)
+        batch_scan_enabled = trigger.batch_scan_enabled
+    if 'batch_scan_cron' in data:
+        cron = (data.get('batch_scan_cron') or '').strip()
+        if cron:
+            try:
+                CronTrigger.from_crontab(cron)
+            except Exception as exc:
+                return jsonify({'code': 400, 'message': f'无效的 Cron 表达式: {exc}'}), 400
+        trigger.batch_scan_cron = cron
+        batch_scan_cron = cron
+    if batch_scan_enabled and not batch_scan_cron:
+        return jsonify({'code': 400, 'message': '启用定期扫描时 Cron 表达式不能为空'}), 400
     trigger.description = data.get('description', trigger.description)
     
     trigger.save()
+
+    if trigger.is_active and trigger.batch_scan_enabled and trigger.batch_scan_cron:
+        add_trigger_scan_job(trigger.id, trigger.batch_scan_cron)
+    else:
+        remove_trigger_scan_job(trigger.id)
     
     return jsonify({
         'code': 200,
@@ -929,6 +1268,7 @@ def update_relation_trigger(id):
 def delete_relation_trigger(id):
     """删除触发器"""
     trigger = RelationTrigger.query.get_or_404(id)
+    remove_trigger_scan_job(id)
     TriggerExecutionLog.query.filter_by(trigger_id=id).delete(
         synchronize_session=False
     )
@@ -949,9 +1289,33 @@ def toggle_relation_trigger(id):
     trigger = RelationTrigger.query.get_or_404(id)
     trigger.is_active = not trigger.is_active
     trigger.save()
+
+    if trigger.is_active and trigger.batch_scan_enabled and trigger.batch_scan_cron:
+        add_trigger_scan_job(trigger.id, trigger.batch_scan_cron)
+    else:
+        remove_trigger_scan_job(trigger.id)
     
     return jsonify({
         'code': 200,
         'message': '更新成功',
         'data': trigger.to_dict()
+    })
+
+
+@cmdb_relation_bp.route('/relation-triggers/<int:id>/execute', methods=['POST'])
+@token_required
+@admin_required
+@log_operation(operation_type='UPDATE', operation_object='relation_trigger')
+def execute_relation_trigger(id):
+    """立即执行当前触发器，重建源模型下实例关系"""
+    trigger = RelationTrigger.query.get_or_404(id)
+    result = process_trigger_for_model(trigger)
+    return jsonify({
+        'code': 200,
+        'message': '执行完成',
+        'data': {
+            'trigger_id': trigger.id,
+            'trigger_name': trigger.name,
+            **result,
+        }
     })

@@ -58,7 +58,7 @@ const clonePolicies = (policies: readonly DefaultPolicyItem[]): DefaultPolicyIte
   policies.map((item) => ({ ...item, labels: item.labels ? { ...item.labels } : undefined }))
 
 export const REDIS_DEFAULT_POLICY: DefaultPolicyItem[] = [
-  { key: 'redis_unavailable', name: '实例不可用', type: 'realtime_metric', metric: 'redis_server_up', operator: '==', threshold: 0, level: 'critical', period: 60, times: 1, mode: 'core', enabled: true, expr: 'redis_server_up == 0' },
+  { key: 'redis_unavailable', name: '实例不可用', type: 'realtime_metric', metric: 'server', operator: '==', threshold: 0, level: 'critical', period: 60, times: 1, mode: 'core', enabled: true, expr: 'server == 0' },
   { key: 'redis_memory_usage_high', name: '内存使用率过高', type: 'periodic_metric', metric: 'used_memory', operator: '>', threshold: 85, level: 'warning', period: 300, times: 1, mode: 'core', enabled: true, expr: '(maxmemory > 0) && ((used_memory / maxmemory) * 100 > 85)' },
   { key: 'redis_memory_fragmentation_high', name: '内存碎片严重', type: 'periodic_metric', metric: 'mem_fragmentation_ratio', operator: '>', threshold: 2.0, level: 'warning', period: 600, times: 1, mode: 'core', enabled: true, expr: 'mem_fragmentation_ratio > 2.0' },
   { key: 'redis_connections_saturated', name: '连接数饱和', type: 'realtime_metric', metric: 'connected_clients', operator: '>', threshold: 90, level: 'critical', period: 300, times: 1, mode: 'core', enabled: true, expr: '(maxclients > 0) && ((connected_clients / maxclients) * 100 > 90)' },

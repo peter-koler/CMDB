@@ -503,7 +503,7 @@ const resolveBreadcrumbFallbackIcon = (routeName: string) => {
   if (routeName === 'CustomViewDisplay' || routeName === 'CustomViewDesign') {
     return AppstoreOutlined
   }
-  if (routeName === 'MonitoringTargetDetail') {
+  if (routeName === 'MonitoringTargetDetail' || routeName === 'MonitoringTargetCreate' || routeName === 'MonitoringTargetEdit') {
     return DesktopOutlined
   }
   if (routeName === 'MonitoringAlertDetail') {
@@ -526,7 +526,7 @@ const resolveVirtualBreadcrumbs = () => {
   if (routeName === 'CustomViewDesign') {
     return [{ key: 'custom-view-parent', title: '视图管理', path: '/system/custom-view', icon: AppstoreOutlined }]
   }
-  if (routeName === 'MonitoringTargetDetail') {
+  if (routeName === 'MonitoringTargetDetail' || routeName === 'MonitoringTargetCreate' || routeName === 'MonitoringTargetEdit') {
     return [{ key: 'monitoring-list-parent', title: '监控列表', path: '/monitoring/list', icon: DesktopOutlined }]
   }
   if (routeName === 'MonitoringAlertDetail') {

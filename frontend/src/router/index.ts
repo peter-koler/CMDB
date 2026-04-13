@@ -157,6 +157,18 @@ const routes = [
             meta: { title: '监控列表', icon: 'DesktopOutlined', permission: 'monitoring:list' }
           },
           {
+            path: 'target/create',
+            name: 'MonitoringTargetCreate',
+            component: () => import('@/views/monitoring/target/form.vue'),
+            meta: { title: '新增监控任务', permission: 'monitoring:list', hideInMenu: true }
+          },
+          {
+            path: 'target/:id/edit',
+            name: 'MonitoringTargetEdit',
+            component: () => import('@/views/monitoring/target/form.vue'),
+            meta: { title: '编辑监控任务', permission: 'monitoring:list', hideInMenu: true }
+          },
+          {
             path: 'target/:id',
             name: 'MonitoringTargetDetail',
             component: () => import('@/views/monitoring/target/detail.vue'),

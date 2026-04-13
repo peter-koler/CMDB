@@ -1264,51 +1264,397 @@ metrics:
         i18n:
           zh-CN: SET 命令统计
           en-US: SET COMMAND STAT
+      - field: cmdstat_set_calls
+        type: 0
+        i18n:
+          zh-CN: SET 调用次数
+          en-US: SET CALLS
+      - field: cmdstat_set_usec
+        type: 0
+        unit: us
+        i18n:
+          zh-CN: SET 总耗时
+          en-US: SET TOTAL TIME
+      - field: cmdstat_set_usec_per_call
+        type: 0
+        unit: us
+        i18n:
+          zh-CN: SET 平均耗时
+          en-US: SET AVG TIME
       - field: cmdstat_get
         type: 1
         i18n:
           zh-CN: GET 命令统计
           en-US: GET COMMAND STAT
+      - field: cmdstat_get_calls
+        type: 0
+        i18n:
+          zh-CN: GET 调用次数
+          en-US: GET CALLS
+      - field: cmdstat_get_usec
+        type: 0
+        unit: us
+        i18n:
+          zh-CN: GET 总耗时
+          en-US: GET TOTAL TIME
+      - field: cmdstat_get_usec_per_call
+        type: 0
+        unit: us
+        i18n:
+          zh-CN: GET 平均耗时
+          en-US: GET AVG TIME
       - field: cmdstat_setnx
         type: 1
         i18n:
           zh-CN: SETNX 命令统计
           en-US: SETNX COMMAND STAT
+      - field: cmdstat_setnx_calls
+        type: 0
+        i18n:
+          zh-CN: SETNX 调用次数
+          en-US: SETNX CALLS
+      - field: cmdstat_setnx_usec
+        type: 0
+        unit: us
+        i18n:
+          zh-CN: SETNX 总耗时
+          en-US: SETNX TOTAL TIME
+      - field: cmdstat_setnx_usec_per_call
+        type: 0
+        unit: us
+        i18n:
+          zh-CN: SETNX 平均耗时
+          en-US: SETNX AVG TIME
       - field: cmdstat_hset
         type: 1
         i18n:
           zh-CN: HSET 命令统计
           en-US: HSET COMMAND STAT
+      - field: cmdstat_hset_calls
+        type: 0
+        i18n:
+          zh-CN: HSET 调用次数
+          en-US: HSET CALLS
+      - field: cmdstat_hset_usec
+        type: 0
+        unit: us
+        i18n:
+          zh-CN: HSET 总耗时
+          en-US: HSET TOTAL TIME
+      - field: cmdstat_hset_usec_per_call
+        type: 0
+        unit: us
+        i18n:
+          zh-CN: HSET 平均耗时
+          en-US: HSET AVG TIME
       - field: cmdstat_hget
         type: 1
         i18n:
           zh-CN: HGET 命令统计
           en-US: HGET COMMAND STAT
+      - field: cmdstat_hget_calls
+        type: 0
+        i18n:
+          zh-CN: HGET 调用次数
+          en-US: HGET CALLS
+      - field: cmdstat_hget_usec
+        type: 0
+        unit: us
+        i18n:
+          zh-CN: HGET 总耗时
+          en-US: HGET TOTAL TIME
+      - field: cmdstat_hget_usec_per_call
+        type: 0
+        unit: us
+        i18n:
+          zh-CN: HGET 平均耗时
+          en-US: HGET AVG TIME
       - field: cmdstat_lpush
         type: 1
         i18n:
           zh-CN: LPUSH 命令统计
           en-US: LPUSH COMMAND STAT
+      - field: cmdstat_lpush_calls
+        type: 0
+        i18n:
+          zh-CN: LPUSH 调用次数
+          en-US: LPUSH CALLS
+      - field: cmdstat_lpush_usec
+        type: 0
+        unit: us
+        i18n:
+          zh-CN: LPUSH 总耗时
+          en-US: LPUSH TOTAL TIME
+      - field: cmdstat_lpush_usec_per_call
+        type: 0
+        unit: us
+        i18n:
+          zh-CN: LPUSH 平均耗时
+          en-US: LPUSH AVG TIME
       - field: cmdstat_rpush
         type: 1
         i18n:
           zh-CN: RPUSH 命令统计
           en-US: RPUSH COMMAND STAT
+      - field: cmdstat_rpush_calls
+        type: 0
+        i18n:
+          zh-CN: RPUSH 调用次数
+          en-US: RPUSH CALLS
+      - field: cmdstat_rpush_usec
+        type: 0
+        unit: us
+        i18n:
+          zh-CN: RPUSH 总耗时
+          en-US: RPUSH TOTAL TIME
+      - field: cmdstat_rpush_usec_per_call
+        type: 0
+        unit: us
+        i18n:
+          zh-CN: RPUSH 平均耗时
+          en-US: RPUSH AVG TIME
       - field: cmdstat_lpop
         type: 1
         i18n:
           zh-CN: LPOP 命令统计
           en-US: LPOP COMMAND STAT
+      - field: cmdstat_lpop_calls
+        type: 0
+        i18n:
+          zh-CN: LPOP 调用次数
+          en-US: LPOP CALLS
+      - field: cmdstat_lpop_usec
+        type: 0
+        unit: us
+        i18n:
+          zh-CN: LPOP 总耗时
+          en-US: LPOP TOTAL TIME
+      - field: cmdstat_lpop_usec_per_call
+        type: 0
+        unit: us
+        i18n:
+          zh-CN: LPOP 平均耗时
+          en-US: LPOP AVG TIME
       - field: cmdstat_rpop
         type: 1
         i18n:
           zh-CN: RPOP 命令统计
           en-US: RPOP COMMAND STAT
+      - field: cmdstat_rpop_calls
+        type: 0
+        i18n:
+          zh-CN: RPOP 调用次数
+          en-US: RPOP CALLS
+      - field: cmdstat_rpop_usec
+        type: 0
+        unit: us
+        i18n:
+          zh-CN: RPOP 总耗时
+          en-US: RPOP TOTAL TIME
+      - field: cmdstat_rpop_usec_per_call
+        type: 0
+        unit: us
+        i18n:
+          zh-CN: RPOP 平均耗时
+          en-US: RPOP AVG TIME
       - field: cmdstat_llen
         type: 1
         i18n:
           zh-CN: LLEN 命令统计
           en-US: LLEN COMMAND STAT
+      - field: cmdstat_llen_calls
+        type: 0
+        i18n:
+          zh-CN: LLEN 调用次数
+          en-US: LLEN CALLS
+      - field: cmdstat_llen_usec
+        type: 0
+        unit: us
+        i18n:
+          zh-CN: LLEN 总耗时
+          en-US: LLEN TOTAL TIME
+      - field: cmdstat_llen_usec_per_call
+        type: 0
+        unit: us
+        i18n:
+          zh-CN: LLEN 平均耗时
+          en-US: LLEN AVG TIME
+      - field: cmdstat_setex
+        type: 1
+        i18n:
+          zh-CN: SETEX 命令统计
+          en-US: SETEX COMMAND STAT
+      - field: cmdstat_setex_calls
+        type: 0
+        i18n:
+          zh-CN: SETEX 调用次数
+          en-US: SETEX CALLS
+      - field: cmdstat_setex_usec
+        type: 0
+        unit: us
+        i18n:
+          zh-CN: SETEX 总耗时
+          en-US: SETEX TOTAL TIME
+      - field: cmdstat_setex_usec_per_call
+        type: 0
+        unit: us
+        i18n:
+          zh-CN: SETEX 平均耗时
+          en-US: SETEX AVG TIME
+      - field: cmdstat_eval
+        type: 1
+        i18n:
+          zh-CN: EVAL 命令统计
+          en-US: EVAL COMMAND STAT
+      - field: cmdstat_eval_calls
+        type: 0
+        i18n:
+          zh-CN: EVAL 调用次数
+          en-US: EVAL CALLS
+      - field: cmdstat_eval_usec
+        type: 0
+        unit: us
+        i18n:
+          zh-CN: EVAL 总耗时
+          en-US: EVAL TOTAL TIME
+      - field: cmdstat_eval_usec_per_call
+        type: 0
+        unit: us
+        i18n:
+          zh-CN: EVAL 平均耗时
+          en-US: EVAL AVG TIME
+      - field: cmdstat_ping
+        type: 1
+        i18n:
+          zh-CN: PING 命令统计
+          en-US: PING COMMAND STAT
+      - field: cmdstat_ping_calls
+        type: 0
+        i18n:
+          zh-CN: PING 调用次数
+          en-US: PING CALLS
+      - field: cmdstat_ping_usec
+        type: 0
+        unit: us
+        i18n:
+          zh-CN: PING 总耗时
+          en-US: PING TOTAL TIME
+      - field: cmdstat_ping_usec_per_call
+        type: 0
+        unit: us
+        i18n:
+          zh-CN: PING 平均耗时
+          en-US: PING AVG TIME
+      - field: cmdstat_info
+        type: 1
+        i18n:
+          zh-CN: INFO 命令统计
+          en-US: INFO COMMAND STAT
+      - field: cmdstat_info_calls
+        type: 0
+        i18n:
+          zh-CN: INFO 调用次数
+          en-US: INFO CALLS
+      - field: cmdstat_info_usec
+        type: 0
+        unit: us
+        i18n:
+          zh-CN: INFO 总耗时
+          en-US: INFO TOTAL TIME
+      - field: cmdstat_info_usec_per_call
+        type: 0
+        unit: us
+        i18n:
+          zh-CN: INFO 平均耗时
+          en-US: INFO AVG TIME
+      - field: cmdstat_zrangebyscore
+        type: 1
+        i18n:
+          zh-CN: ZRANGEBYSCORE 命令统计
+          en-US: ZRANGEBYSCORE COMMAND STAT
+      - field: cmdstat_zrangebyscore_calls
+        type: 0
+        i18n:
+          zh-CN: ZRANGEBYSCORE 调用次数
+          en-US: ZRANGEBYSCORE CALLS
+      - field: cmdstat_zrangebyscore_usec
+        type: 0
+        unit: us
+        i18n:
+          zh-CN: ZRANGEBYSCORE 总耗时
+          en-US: ZRANGEBYSCORE TOTAL TIME
+      - field: cmdstat_zrangebyscore_usec_per_call
+        type: 0
+        unit: us
+        i18n:
+          zh-CN: ZRANGEBYSCORE 平均耗时
+          en-US: ZRANGEBYSCORE AVG TIME
+      - field: cmdstat_zrem
+        type: 1
+        i18n:
+          zh-CN: ZREM 命令统计
+          en-US: ZREM COMMAND STAT
+      - field: cmdstat_zrem_calls
+        type: 0
+        i18n:
+          zh-CN: ZREM 调用次数
+          en-US: ZREM CALLS
+      - field: cmdstat_zrem_usec
+        type: 0
+        unit: us
+        i18n:
+          zh-CN: ZREM 总耗时
+          en-US: ZREM TOTAL TIME
+      - field: cmdstat_zrem_usec_per_call
+        type: 0
+        unit: us
+        i18n:
+          zh-CN: ZREM 平均耗时
+          en-US: ZREM AVG TIME
+      - field: cmdstat_del
+        type: 1
+        i18n:
+          zh-CN: DEL 命令统计
+          en-US: DEL COMMAND STAT
+      - field: cmdstat_del_calls
+        type: 0
+        i18n:
+          zh-CN: DEL 调用次数
+          en-US: DEL CALLS
+      - field: cmdstat_del_usec
+        type: 0
+        unit: us
+        i18n:
+          zh-CN: DEL 总耗时
+          en-US: DEL TOTAL TIME
+      - field: cmdstat_del_usec_per_call
+        type: 0
+        unit: us
+        i18n:
+          zh-CN: DEL 平均耗时
+          en-US: DEL AVG TIME
+      - field: cmdstat_auth
+        type: 1
+        i18n:
+          zh-CN: AUTH 命令统计
+          en-US: AUTH COMMAND STAT
+      - field: cmdstat_auth_calls
+        type: 0
+        i18n:
+          zh-CN: AUTH 调用次数
+          en-US: AUTH CALLS
+      - field: cmdstat_auth_usec
+        type: 0
+        unit: us
+        i18n:
+          zh-CN: AUTH 总耗时
+          en-US: AUTH TOTAL TIME
+      - field: cmdstat_auth_usec_per_call
+        type: 0
+        unit: us
+        i18n:
+          zh-CN: AUTH 平均耗时
+          en-US: AUTH AVG TIME
     # the protocol used for monitoring, eg: sql, ssh, http, telnet, wmi, snmp, sdk
     protocol: redis
     # the config content when protocol is redis
@@ -1350,81 +1696,337 @@ metrics:
         i18n:
           zh-CN: db0
           en-US: db0
+      - field: db0_keys
+        type: 0
+        i18n:
+          zh-CN: db0 键数量
+          en-US: db0 Keys
+      - field: db0_expires
+        type: 0
+        i18n:
+          zh-CN: db0 过期键数量
+          en-US: db0 Expires
+      - field: db0_avg_ttl
+        type: 0
+        unit: ms
+        i18n:
+          zh-CN: db0 平均 TTL
+          en-US: db0 AVG TTL
       - field: db1
         type: 1
         i18n:
           zh-CN: db1
           en-US: db1
+      - field: db1_keys
+        type: 0
+        i18n:
+          zh-CN: db1 键数量
+          en-US: db1 Keys
+      - field: db1_expires
+        type: 0
+        i18n:
+          zh-CN: db1 过期键数量
+          en-US: db1 Expires
+      - field: db1_avg_ttl
+        type: 0
+        unit: ms
+        i18n:
+          zh-CN: db1 平均 TTL
+          en-US: db1 AVG TTL
       - field: db2
         type: 1
         i18n:
           zh-CN: db2
           en-US: db2
+      - field: db2_keys
+        type: 0
+        i18n:
+          zh-CN: db2 键数量
+          en-US: db2 Keys
+      - field: db2_expires
+        type: 0
+        i18n:
+          zh-CN: db2 过期键数量
+          en-US: db2 Expires
+      - field: db2_avg_ttl
+        type: 0
+        unit: ms
+        i18n:
+          zh-CN: db2 平均 TTL
+          en-US: db2 AVG TTL
       - field: db3
         type: 1
         i18n:
           zh-CN: db3
           en-US: db3
+      - field: db3_keys
+        type: 0
+        i18n:
+          zh-CN: db3 键数量
+          en-US: db3 Keys
+      - field: db3_expires
+        type: 0
+        i18n:
+          zh-CN: db3 过期键数量
+          en-US: db3 Expires
+      - field: db3_avg_ttl
+        type: 0
+        unit: ms
+        i18n:
+          zh-CN: db3 平均 TTL
+          en-US: db3 AVG TTL
       - field: db4
         type: 1
         i18n:
           zh-CN: db4
           en-US: db4
+      - field: db4_keys
+        type: 0
+        i18n:
+          zh-CN: db4 键数量
+          en-US: db4 Keys
+      - field: db4_expires
+        type: 0
+        i18n:
+          zh-CN: db4 过期键数量
+          en-US: db4 Expires
+      - field: db4_avg_ttl
+        type: 0
+        unit: ms
+        i18n:
+          zh-CN: db4 平均 TTL
+          en-US: db4 AVG TTL
       - field: db5
         type: 1
         i18n:
           zh-CN: db5
           en-US: db5
+      - field: db5_keys
+        type: 0
+        i18n:
+          zh-CN: db5 键数量
+          en-US: db5 Keys
+      - field: db5_expires
+        type: 0
+        i18n:
+          zh-CN: db5 过期键数量
+          en-US: db5 Expires
+      - field: db5_avg_ttl
+        type: 0
+        unit: ms
+        i18n:
+          zh-CN: db5 平均 TTL
+          en-US: db5 AVG TTL
       - field: db6
         type: 1
         i18n:
           zh-CN: db6
           en-US: db6
+      - field: db6_keys
+        type: 0
+        i18n:
+          zh-CN: db6 键数量
+          en-US: db6 Keys
+      - field: db6_expires
+        type: 0
+        i18n:
+          zh-CN: db6 过期键数量
+          en-US: db6 Expires
+      - field: db6_avg_ttl
+        type: 0
+        unit: ms
+        i18n:
+          zh-CN: db6 平均 TTL
+          en-US: db6 AVG TTL
       - field: db7
         type: 1
         i18n:
           zh-CN: db7
           en-US: db7
+      - field: db7_keys
+        type: 0
+        i18n:
+          zh-CN: db7 键数量
+          en-US: db7 Keys
+      - field: db7_expires
+        type: 0
+        i18n:
+          zh-CN: db7 过期键数量
+          en-US: db7 Expires
+      - field: db7_avg_ttl
+        type: 0
+        unit: ms
+        i18n:
+          zh-CN: db7 平均 TTL
+          en-US: db7 AVG TTL
       - field: db8
         type: 1
         i18n:
           zh-CN: db8
           en-US: db8
+      - field: db8_keys
+        type: 0
+        i18n:
+          zh-CN: db8 键数量
+          en-US: db8 Keys
+      - field: db8_expires
+        type: 0
+        i18n:
+          zh-CN: db8 过期键数量
+          en-US: db8 Expires
+      - field: db8_avg_ttl
+        type: 0
+        unit: ms
+        i18n:
+          zh-CN: db8 平均 TTL
+          en-US: db8 AVG TTL
       - field: db9
         type: 1
         i18n:
           zh-CN: db9
           en-US: db9
+      - field: db9_keys
+        type: 0
+        i18n:
+          zh-CN: db9 键数量
+          en-US: db9 Keys
+      - field: db9_expires
+        type: 0
+        i18n:
+          zh-CN: db9 过期键数量
+          en-US: db9 Expires
+      - field: db9_avg_ttl
+        type: 0
+        unit: ms
+        i18n:
+          zh-CN: db9 平均 TTL
+          en-US: db9 AVG TTL
       - field: db10
         type: 1
         i18n:
           zh-CN: db10
           en-US: db10
+      - field: db10_keys
+        type: 0
+        i18n:
+          zh-CN: db10 键数量
+          en-US: db10 Keys
+      - field: db10_expires
+        type: 0
+        i18n:
+          zh-CN: db10 过期键数量
+          en-US: db10 Expires
+      - field: db10_avg_ttl
+        type: 0
+        unit: ms
+        i18n:
+          zh-CN: db10 平均 TTL
+          en-US: db10 AVG TTL
       - field: db11
         type: 1
         i18n:
           zh-CN: db11
           en-US: db11
+      - field: db11_keys
+        type: 0
+        i18n:
+          zh-CN: db11 键数量
+          en-US: db11 Keys
+      - field: db11_expires
+        type: 0
+        i18n:
+          zh-CN: db11 过期键数量
+          en-US: db11 Expires
+      - field: db11_avg_ttl
+        type: 0
+        unit: ms
+        i18n:
+          zh-CN: db11 平均 TTL
+          en-US: db11 AVG TTL
       - field: db12
         type: 1
         i18n:
           zh-CN: db12
           en-US: db12
+      - field: db12_keys
+        type: 0
+        i18n:
+          zh-CN: db12 键数量
+          en-US: db12 Keys
+      - field: db12_expires
+        type: 0
+        i18n:
+          zh-CN: db12 过期键数量
+          en-US: db12 Expires
+      - field: db12_avg_ttl
+        type: 0
+        unit: ms
+        i18n:
+          zh-CN: db12 平均 TTL
+          en-US: db12 AVG TTL
       - field: db13
         type: 1
         i18n:
           zh-CN: db13
           en-US: db13
+      - field: db13_keys
+        type: 0
+        i18n:
+          zh-CN: db13 键数量
+          en-US: db13 Keys
+      - field: db13_expires
+        type: 0
+        i18n:
+          zh-CN: db13 过期键数量
+          en-US: db13 Expires
+      - field: db13_avg_ttl
+        type: 0
+        unit: ms
+        i18n:
+          zh-CN: db13 平均 TTL
+          en-US: db13 AVG TTL
       - field: db14
         type: 1
         i18n:
           zh-CN: db14
           en-US: db14
+      - field: db14_keys
+        type: 0
+        i18n:
+          zh-CN: db14 键数量
+          en-US: db14 Keys
+      - field: db14_expires
+        type: 0
+        i18n:
+          zh-CN: db14 过期键数量
+          en-US: db14 Expires
+      - field: db14_avg_ttl
+        type: 0
+        unit: ms
+        i18n:
+          zh-CN: db14 平均 TTL
+          en-US: db14 AVG TTL
       - field: db15
         type: 1
         i18n:
           zh-CN: db15
           en-US: db15
+      - field: db15_keys
+        type: 0
+        i18n:
+          zh-CN: db15 键数量
+          en-US: db15 Keys
+      - field: db15_expires
+        type: 0
+        i18n:
+          zh-CN: db15 过期键数量
+          en-US: db15 Expires
+      - field: db15_avg_ttl
+        type: 0
+        unit: ms
+        i18n:
+          zh-CN: db15 平均 TTL
+          en-US: db15 AVG TTL
     # the protocol used for monitoring, eg: sql, ssh, http, telnet, wmi, snmp, sdk
     protocol: redis
     # the config content when protocol is redis

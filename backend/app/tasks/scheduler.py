@@ -8,6 +8,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.executors.pool import ThreadPoolExecutor
 import logging
+from sqlalchemy.exc import SQLAlchemyError
 
 logger = logging.getLogger(__name__)
 
@@ -53,12 +54,25 @@ def init_scheduler(app=None):
 
 def load_batch_scan_jobs():
     from app.models.cmdb_model import CmdbModel
+    from app.models.cmdb_relation import RelationTrigger
 
     models = CmdbModel.query.all()
     for model in models:
         config = model.get_config()
         if config.get("batch_scan_enabled") and config.get("batch_scan_cron"):
             add_batch_scan_job(model.id, config.get("batch_scan_cron"))
+
+    try:
+        triggers = RelationTrigger.query.all()
+    except SQLAlchemyError as exc:
+        # During migrations the ORM model may already include new columns
+        # while the database schema has not been upgraded yet.
+        logger.warning(f"加载触发器定时扫描任务时跳过，等待迁移完成: {exc}")
+        return
+
+    for trigger in triggers:
+        if trigger.is_active and trigger.batch_scan_enabled and trigger.batch_scan_cron:
+            add_trigger_scan_job(trigger.id, trigger.batch_scan_cron)
 
 
 def add_batch_scan_job(model_id, cron_expression):
@@ -76,6 +90,37 @@ def add_batch_scan_job(model_id, cron_expression):
 
     if scheduler is None:
         logger.error("调度器未初始化")
+        return False
+
+
+def add_trigger_scan_job(trigger_id, cron_expression):
+    """
+    添加关系触发器定时扫描任务
+    """
+    global scheduler
+
+    if scheduler is None:
+        logger.error("调度器未初始化")
+        return False
+
+    try:
+        trigger = CronTrigger.from_crontab(cron_expression)
+        job_id = f"batch_scan_trigger_{trigger_id}"
+
+        from app.services.trigger_service import execute_scheduled_trigger
+
+        scheduler.add_job(
+            execute_scheduled_trigger,
+            trigger=trigger,
+            id=job_id,
+            args=[trigger_id],
+            replace_existing=True,
+        )
+
+        logger.info(f"已添加触发器定时扫描任务: trigger_id={trigger_id}, cron={cron_expression}")
+        return True
+    except Exception as e:
+        logger.error(f"添加触发器定时扫描任务失败: {e}")
         return False
 
     try:
@@ -125,6 +170,26 @@ def remove_batch_scan_job(model_id):
         return False
 
 
+def remove_trigger_scan_job(trigger_id):
+    """
+    移除关系触发器定时扫描任务
+    """
+    global scheduler
+
+    if scheduler is None:
+        logger.error("调度器未初始化")
+        return False
+
+    try:
+        job_id = f"batch_scan_trigger_{trigger_id}"
+        scheduler.remove_job(job_id)
+        logger.info(f"已移除触发器定时扫描任务: trigger_id={trigger_id}")
+        return True
+    except Exception as e:
+        logger.error(f"移除触发器定时扫描任务失败: {e}")
+        return False
+
+
 def get_scheduled_jobs():
     """
     获取所有已调度的任务
@@ -144,7 +209,20 @@ def get_scheduled_jobs():
             jobs.append(
                 {
                     "job_id": job.id,
+                    "job_type": "model",
                     "model_id": model_id,
+                    "next_run_time": job.next_run_time.isoformat()
+                    if job.next_run_time
+                    else None,
+                }
+            )
+        elif job.id.startswith("batch_scan_trigger_"):
+            trigger_id = int(job.id.replace("batch_scan_trigger_", ""))
+            jobs.append(
+                {
+                    "job_id": job.id,
+                    "job_type": "trigger",
+                    "trigger_id": trigger_id,
                     "next_run_time": job.next_run_time.isoformat()
                     if job.next_run_time
                     else None,

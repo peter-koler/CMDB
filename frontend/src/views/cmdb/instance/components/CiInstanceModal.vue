@@ -88,7 +88,7 @@
               
               <!-- 下拉选择 -->
               <a-select
-                v-else-if="field.field_type === 'select'"
+                v-else-if="field.field_type === 'select' || field.field_type === 'dropdown'"
                 v-model:value="formState.attribute_values[field.code]"
                 :placeholder="field.placeholder || `请选择${field.name}`"
                 allowClear
@@ -178,6 +178,7 @@
                 :file-list="getFileList(field.code)"
                 :custom-request="(options: any) => handleUpload(options, field)"
                 @remove="(file: any) => handleRemoveFile(file, field)"
+                multiple
               >
                 <a-button>
                   <UploadOutlined />
@@ -219,6 +220,7 @@ import { getDepartments } from '@/api/department'
 import { getInstances } from '@/api/ci'
 import { uploadFile } from '@/api/ci'
 import { getUsers } from '@/api/user'
+import { extractFieldsFromFormConfig } from '@/utils/formConfigFields'
 
 interface Props {
   visible: boolean
@@ -391,55 +393,6 @@ const loadSystemUsers = async () => {
   }
 }
 
-const normalizeOptions = (options: any): { label: string; value: any }[] => {
-  if (!Array.isArray(options)) return []
-  return options
-    .map((item: any) => ({
-      label: item?.label ?? item?.name ?? item?.value,
-      value: item?.value ?? item?.code ?? item?.id
-    }))
-    .filter((item) => item.label !== undefined && item.value !== undefined)
-}
-
-const extractFieldsFromFormConfig = (formConfig: any[]): any[] => {
-  const fields: any[] = []
-  const walk = (items: any[], groupMeta?: { id: string; label: string; order: number }) => {
-    items.forEach((item: any, index: number) => {
-      if (item?.controlType === 'group' && Array.isArray(item.children)) {
-        walk(item.children, {
-          id: item.id || `group_${index}`,
-          label: item.props?.label || '属性分组',
-          order: index
-        })
-        return
-      }
-      if (!item?.props?.code) return
-      fields.push({
-        id: item.id || `field_${index}_${item.props.code}`,
-        code: item.props.code,
-        name: item.props.label || item.props.code,
-        field_type: mapControlTypeToFieldType(item.controlType),
-        control_type: item.controlType,
-        required: item.props.required || false,
-        default_value: item.props.defaultValue,
-        placeholder: item.props.placeholder || '',
-        span: item.props.span || 12,
-        sort_order: index,
-        mode: item.props.mode || 'multiple',
-        option_type: item.props.optionType || 'custom',
-        dictionary_code: item.props.dictionaryCode || '',
-        options: normalizeOptions(item.props.options),
-        user_ids: Array.isArray(item.props.userIds) ? item.props.userIds : [],
-        group_id: groupMeta?.id || '__base__',
-        group_label: groupMeta?.label || '基础属性',
-        group_order: groupMeta?.order ?? -1
-      })
-    })
-  }
-  walk(formConfig || [])
-  return fields
-}
-
 const fetchModelDetail = async () => {
   if (!props.modelId) return
   
@@ -469,8 +422,7 @@ const fetchModelDetail = async () => {
           }
         }
       } else {
-        // 使用传统的 regions/fields
-        modelFields.value = res.data.fields || []
+        modelFields.value = []
       }
       
       // 设置默认值
@@ -483,26 +435,6 @@ const fetchModelDetail = async () => {
   } catch (error) {
     console.error(error)
   }
-}
-
-// 将控件类型映射为字段类型
-const mapControlTypeToFieldType = (controlType: string): string => {
-  const typeMap: Record<string, string> = {
-    'text': 'text',
-    'textarea': 'text',
-    'number': 'number',
-    'date': 'date',
-    'datetime': 'datetime',
-    'select': 'select',
-    'radio': 'select',
-    'checkbox': 'multiselect',
-    'switch': 'boolean',
-    'user': 'user',
-    'reference': 'reference',
-    'image': 'image',
-    'file': 'file'
-  }
-  return typeMap[controlType] || 'text'
 }
 
 const fetchDepartments = async () => {
@@ -573,8 +505,33 @@ const handleReferenceSearch = async (keyword: string, field: any) => {
 const getFileList = (fieldCode: string) => {
   const value = formState.attribute_values[fieldCode]
   if (!value) return []
+  if (Array.isArray(value)) {
+    return value
+      .filter((item) => item)
+      .map((item: any, index: number) => {
+        if (typeof item === 'string') {
+          return {
+            uid: `${fieldCode}-${index}-${item}`,
+            name: decodeURIComponent(item.split('?')[0].split('/').pop() || item),
+            status: 'done',
+            url: item
+          }
+        }
+        return {
+          uid: item.uid || `${fieldCode}-${index}-${item.url || item.name || 'file'}`,
+          name: item.name || decodeURIComponent(String(item.url || '').split('?')[0].split('/').pop() || '附件'),
+          status: 'done',
+          url: item.url
+        }
+      })
+  }
   if (typeof value === 'string') {
-    return [{ uid: value, name: value.split('/').pop(), status: 'done', url: value }]
+    return [{
+      uid: value,
+      name: decodeURIComponent(value.split('?')[0].split('/').pop() || value),
+      status: 'done',
+      url: value
+    }]
   }
   return value
 }
@@ -585,7 +542,15 @@ const handleUpload = async (options: any, field: any) => {
   try {
     const res = await uploadFile(file)
     if (res.code === 200) {
-      formState.attribute_values[field.code] = res.data.url
+      if (field.field_type === 'file') {
+        const current = formState.attribute_values[field.code]
+        const currentUrls = Array.isArray(current)
+          ? current.filter((item: any) => item)
+          : (typeof current === 'string' && current ? [current] : [])
+        formState.attribute_values[field.code] = [...currentUrls, res.data.url]
+      } else {
+        formState.attribute_values[field.code] = res.data.url
+      }
       onSuccess(res.data)
       message.success('上传成功')
     }
@@ -596,6 +561,15 @@ const handleUpload = async (options: any, field: any) => {
 }
 
 const handleRemoveFile = (file: any, field: any) => {
+  const current = formState.attribute_values[field.code]
+  if (Array.isArray(current)) {
+    const next = current.filter((item: any) => {
+      const url = typeof item === 'string' ? item : item?.url
+      return url !== file.url
+    })
+    formState.attribute_values[field.code] = next.length ? next : null
+    return
+  }
   formState.attribute_values[field.code] = null
 }
 

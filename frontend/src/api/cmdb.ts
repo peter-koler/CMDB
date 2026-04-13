@@ -145,38 +145,6 @@ export function deleteRegion(id: number) {
   })
 }
 
-// 模型字段
-export function createField(modelId: number, data: any) {
-  return request({
-    url: `/cmdb/models/${modelId}/fields`,
-    method: 'post',
-    data
-  })
-}
-
-export function updateField(id: number, data: any) {
-  return request({
-    url: `/cmdb/fields/${id}`,
-    method: 'put',
-    data
-  })
-}
-
-export function deleteField(id: number) {
-  return request({
-    url: `/cmdb/fields/${id}`,
-    method: 'delete'
-  })
-}
-
-export function sortFields(data: { field_orders: { id: number; sort_order: number }[] }) {
-  return request({
-    url: '/cmdb/fields/sort',
-    method: 'post',
-    data
-  })
-}
-
 // 导入导出
 export function exportModel(id: number) {
   return request({

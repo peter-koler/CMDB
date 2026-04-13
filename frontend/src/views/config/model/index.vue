@@ -60,8 +60,8 @@
                     style="width: 100%"
                     allowClear
                   >
-                    <a-select-option v-for="type in modelTypes" :key="type.id" :value="type.id">
-                      {{ type.name }}
+                    <a-select-option v-for="type in modelTypeDictOptions" :key="type.value" :value="type.value">
+                      {{ type.label }}
                     </a-select-option>
                   </a-select>
                 </a-form-item>
@@ -100,11 +100,11 @@
             <template #bodyCell="{ column, record }">
               <template v-if="column.key === 'icon'">
                 <img
-                  v-if="record.icon_url"
-                  :src="record.icon_url"
+                  v-if="record.icon_url || getModelIconAssetUrl(record.icon)"
+                  :src="record.icon_url || getModelIconAssetUrl(record.icon)"
                   style="width: 20px; height: 20px; object-fit: contain;"
                 />
-                <component v-else :is="iconComponentMap[record.icon] || AppstoreOutlined" />
+                <component v-else :is="getModelIconComponent(record.icon)" />
               </template>
               <template v-else-if="column.key === 'category'">
                 {{ record.category_name }}
@@ -210,16 +210,28 @@
         <a-form-item label="模型图标" name="icon">
           <a-space direction="vertical" style="width: 100%">
             <div class="icon-picker">
-              <button
+              <div
                 v-for="icon in builtinIconOptions"
-                :key="icon"
-                type="button"
-                class="icon-picker-item"
-                :class="{ 'icon-picker-item-selected': iconSelectionMode === 'builtin' && modelForm.icon === icon }"
-                @click="selectBuiltinIcon(icon)"
+                :key="icon.key"
+                class="icon-picker-cell"
               >
-                <component :is="iconComponentMap[icon] || AppstoreOutlined" />
-              </button>
+                <a-tooltip :title="icon.label" trigger="click" placement="top">
+                  <button
+                    type="button"
+                    class="icon-picker-item"
+                    :class="{ 'icon-picker-item-selected': iconSelectionMode === 'builtin' && modelForm.icon === icon.key }"
+                    :aria-label="icon.label"
+                    @click="selectBuiltinIcon(icon.key)"
+                  >
+                    <img
+                      v-if="getModelIconAssetUrl(icon.key)"
+                      :src="getModelIconAssetUrl(icon.key)"
+                      class="icon-picker-image"
+                    />
+                    <component v-else :is="getModelIconComponent(icon.key)" />
+                  </button>
+                </a-tooltip>
+              </div>
               <button
                 v-if="hasUploadedIcon"
                 type="button"
@@ -241,8 +253,18 @@
             </a-upload>
             <a-space align="center">
               <span class="model-form-hint">当前生效图标：</span>
-              <img v-if="iconSelectionMode === 'custom' && hasUploadedIcon" :src="modelForm.icon_url" style="width: 20px; height: 20px; object-fit: contain;" />
-              <component v-else :is="iconComponentMap[modelForm.icon] || AppstoreOutlined" />
+              <img
+                v-if="iconSelectionMode === 'custom' && hasUploadedIcon"
+                :src="modelForm.icon_url"
+                style="width: 20px; height: 20px; object-fit: contain;"
+              />
+              <img
+                v-else-if="getModelIconAssetUrl(modelForm.icon)"
+                :src="getModelIconAssetUrl(modelForm.icon)"
+                style="width: 20px; height: 20px; object-fit: contain;"
+              />
+              <component v-else :is="getModelIconComponent(modelForm.icon)" />
+              <span v-if="iconSelectionMode === 'builtin'" class="model-form-hint">{{ getModelIconLabel(modelForm.icon) }}</span>
             </a-space>
           </a-space>
         </a-form-item>
@@ -278,16 +300,6 @@
 import { ref, reactive, onMounted, h, computed, watch } from 'vue'
 import { message } from 'ant-design-vue'
 import {
-  ApiOutlined,
-  AppstoreOutlined,
-  CloudServerOutlined,
-  ClusterOutlined,
-  ContainerOutlined,
-  DatabaseOutlined,
-  DeploymentUnitOutlined,
-  GlobalOutlined,
-  HddOutlined,
-  LaptopOutlined,
   PlusOutlined,
   ReloadOutlined,
   SearchOutlined
@@ -307,6 +319,12 @@ import {
   exportModel,
   uploadModelIcon
 } from '@/api/cmdb'
+import {
+  getModelIconAssetUrl,
+  getModelIconComponent,
+  getModelIconLabel,
+  modelBuiltinIconOptions
+} from '@/utils/cmdbModelIcons'
 import ModelDesigner from './components/ModelDesigner.vue'
 
 // 目录树
@@ -401,30 +419,7 @@ const iconUploading = ref(false)
 const iconSelectionMode = ref<'builtin' | 'custom'>('builtin')
 const isEditModel = ref(false)
 const modelFormRef = ref()
-const builtinIconOptions = [
-  'AppstoreOutlined',
-  'DatabaseOutlined',
-  'CloudServerOutlined',
-  'ClusterOutlined',
-  'HddOutlined',
-  'ApiOutlined',
-  'DeploymentUnitOutlined',
-  'ContainerOutlined',
-  'LaptopOutlined',
-  'GlobalOutlined'
-]
-const iconComponentMap: Record<string, any> = {
-  AppstoreOutlined,
-  DatabaseOutlined,
-  CloudServerOutlined,
-  ClusterOutlined,
-  HddOutlined,
-  ApiOutlined,
-  DeploymentUnitOutlined,
-  ContainerOutlined,
-  LaptopOutlined,
-  GlobalOutlined
-}
+const builtinIconOptions = modelBuiltinIconOptions
 const KEY_FIELD_ALLOWED_CONTROL_TYPES = ['text', 'textarea', 'number', 'date', 'datetime', 'select', 'radio']
 const keyFieldOptions = ref<{ label: string; value: string }[]>([])
 
@@ -597,7 +592,7 @@ const fetchModels = async () => {
       per_page: pagination.pageSize,
       category_id: currentCategoryId.value,
       keyword: searchKeyword.value,
-      model_type_id: searchType.value
+      model_type_code: searchType.value
     })
     if (res.code === 200) {
       models.value = res.data.items
@@ -961,6 +956,10 @@ const handleDesignerSave = async (data: any) => {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(44px, 1fr));
   gap: 8px;
+}
+
+.icon-picker-cell {
+  min-width: 0;
 }
 
 .icon-picker-item {

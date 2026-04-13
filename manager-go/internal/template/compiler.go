@@ -196,6 +196,9 @@ func buildEffectiveParams(root map[string]any, monitor *model.Monitor) map[strin
 	if _, ok := effective["url"]; !ok && strings.TrimSpace(monitor.Target) != "" && templateUsesHTTPProtocol(root) {
 		effective["url"] = strings.TrimSpace(monitor.Target)
 	}
+	if templateUsesHTTPProtocol(root) && templateHasParam(root, "uri") && strings.TrimSpace(effective["uri"]) == "" {
+		effective["uri"] = "/"
+	}
 	return effective
 }
 
@@ -257,6 +260,20 @@ func templateUsesHTTPProtocol(root map[string]any) bool {
 	for _, item := range asSlice(root["metrics"]) {
 		metric := asMap(item)
 		if strings.EqualFold(strings.TrimSpace(asString(metric["protocol"])), "http") {
+			return true
+		}
+	}
+	return false
+}
+
+func templateHasParam(root map[string]any, field string) bool {
+	needle := strings.TrimSpace(field)
+	if needle == "" {
+		return false
+	}
+	for _, item := range asSlice(root["params"]) {
+		pm := asMap(item)
+		if strings.EqualFold(strings.TrimSpace(asString(pm["field"])), needle) {
 			return true
 		}
 	}

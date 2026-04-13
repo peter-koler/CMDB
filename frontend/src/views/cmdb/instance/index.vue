@@ -126,14 +126,17 @@
                 <a @click="handleView(record)" class="ci-code-link">{{ record.code }}</a>
               </template>
               <template v-else-if="column.key === 'action'">
-                <a-space>
-                  <a-button type="link" size="small" @click="handleView(record)">查看</a-button>
-                  <a-button type="link" size="small" @click="handleEdit(record)">编辑</a-button>
-                  <a-button type="link" size="small" @click="handleCopy(record)">复制</a-button>
+                <div class="ci-row-actions">
+                  <a-button type="link" size="small" class="ci-row-actions__button" @click="handleView(record)">查看</a-button>
+                  <span class="ci-row-actions__divider">|</span>
+                  <a-button type="link" size="small" class="ci-row-actions__button" @click="handleEdit(record)">编辑</a-button>
+                  <span class="ci-row-actions__divider">|</span>
+                  <a-button type="link" size="small" class="ci-row-actions__button" @click="handleCopy(record)">复制</a-button>
+                  <span class="ci-row-actions__divider">|</span>
                   <a-popconfirm title="确定删除吗？" @confirm="handleDelete(record)">
-                    <a-button type="link" size="small" danger>删除</a-button>
+                    <a-button type="link" size="small" class="ci-row-actions__button" danger>删除</a-button>
                   </a-popconfirm>
-                </a-space>
+                </div>
               </template>
             </template>
           </a-table>
@@ -388,6 +391,7 @@ import { getModelsTree, getModelDetail } from '@/api/cmdb'
 import { getDepartments } from '@/api/department'
 import CiInstanceModal from './components/CiInstanceModal.vue'
 import CiDetailDrawer from './components/CiDetailDrawer.vue'
+import { extractFieldsFromFormConfig } from '@/utils/formConfigFields'
 import dayjs from 'dayjs'
 const route = useRoute()
 
@@ -673,32 +677,7 @@ const fetchModelFields = async (modelId: number) => {
   try {
     const res = await getModelDetail(modelId)
     if (res.code === 200 && res.data.form_config) {
-      let formConfig = res.data.form_config
-      if (typeof formConfig === 'string') {
-        formConfig = JSON.parse(formConfig)
-      }
-      const fields: any[] = []
-      if (Array.isArray(formConfig)) {
-        formConfig.forEach((item: any) => {
-          if (item.controlType === 'group' && item.children) {
-            item.children.forEach((child: any) => {
-              if (child.props && child.props.code) {
-                fields.push({
-                  code: child.props.code,
-                  name: child.props.label || child.props.code,
-                  ...child.props
-                })
-              }
-            })
-          } else if (item.props && item.props.code) {
-            fields.push({
-              code: item.props.code,
-              name: item.props.label || item.props.code,
-              ...item.props
-            })
-          }
-        })
-      }
+      const fields = extractFieldsFromFormConfig(res.data.form_config)
       modelFields.value = fields
 
       // 关键属性优先使用模型配置；兼容历史数据（字段里可能有 isKey 标记）
@@ -737,6 +716,46 @@ const fetchModelFields = async (modelId: number) => {
   }
 }
 
+const formatInstanceFieldValue = (field: any, value: any) => {
+  if (value === null || value === undefined) return '-'
+  if (typeof value === 'object') return JSON.stringify(value)
+
+  const text = String(value)
+  const fieldCode = String(field?.code || '').toLowerCase()
+  const fieldName = String(field?.name || '').toLowerCase()
+  const isAttachmentField = fieldCode.includes('file') || fieldCode.includes('attach') || fieldName.includes('附件')
+
+  if (isAttachmentField) {
+    const normalized = text.split('?')[0]
+    const filename = normalized.split('/').pop() || normalized
+    return decodeURIComponent(filename || text)
+  }
+
+  return text
+}
+
+const isAttachmentField = (field: any) => {
+  const fieldCode = String(field?.code || '').toLowerCase()
+  const fieldName = String(field?.name || '').toLowerCase()
+  return fieldCode.includes('file') || fieldCode.includes('attach') || fieldName.includes('附件')
+}
+
+const buildAttachmentLinkItems = (value: any) => {
+  const rawItems = Array.isArray(value) ? value : [value]
+  return rawItems
+    .map((item: any) => {
+      const url = typeof item === 'string' ? item : item?.url
+      if (!url) return null
+      const normalized = String(url).split('?')[0]
+      const filename = decodeURIComponent(normalized.split('/').pop() || normalized)
+      return {
+        url: String(url),
+        filename
+      }
+    })
+    .filter(Boolean) as Array<{ url: string; filename: string }>
+}
+
 const updateColumns = () => {
   const newColumns: any[] = [
     { title: 'CI编码', dataIndex: 'code', key: 'code', width: 160, visible: true }
@@ -758,9 +777,37 @@ const updateColumns = () => {
       customRender: ({ record }: any) => {
         const attrs = record.attributes || record.attribute_values || {}
         const val = attrs[field.code]
-        if (val === null || val === undefined) return '-'
-        if (typeof val === 'object') return JSON.stringify(val)
-        return val
+        if (isAttachmentField(field) && val) {
+          const links = buildAttachmentLinkItems(val)
+          if (!links.length) return '-'
+          return h(
+            'div',
+            { class: 'ci-attachment-cell' },
+            links.map((item, index) =>
+              h(
+                'a',
+                {
+                  key: `${field.code}-${index}-${item.url}`,
+                  class: 'ci-attachment-link',
+                  href: item.url,
+                  target: '_blank',
+                  rel: 'noopener noreferrer',
+                  title: item.filename
+                },
+                item.filename
+              )
+            )
+          )
+        }
+        const displayText = formatInstanceFieldValue(field, val)
+        return h(
+          'div',
+          {
+            class: 'ci-attr-cell',
+            title: displayText === '-' ? '' : String(displayText)
+          },
+          String(displayText)
+        )
       }
     })
   })
@@ -1281,6 +1328,54 @@ const drop = (_e: DragEvent, col: any) => {
   cursor: pointer;
 }
 
+.ci-attr-cell {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ci-attachment-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ci-attachment-link {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--app-accent);
+}
+
+.ci-row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  padding: 2px 0;
+  position: relative;
+  z-index: 2;
+  background: #fff;
+  white-space: nowrap;
+}
+
+.ci-row-actions__button {
+  padding-inline: 4px;
+}
+
+.ci-row-actions__divider {
+  color: var(--app-text-muted);
+  margin: 0 2px;
+}
+
+.ci-row-actions__danger {
+  color: var(--arco-danger);
+}
+
 .column-list {
   max-height: 400px;
   overflow-y: auto;
@@ -1341,6 +1436,31 @@ const drop = (_e: DragEvent, col: any) => {
   color: var(--arco-danger);
   margin-right: 2px;
   font-weight: 600;
+}
+
+:deep(.ant-table-cell-fix-right),
+:deep(.ant-table-cell-fix-right-first) {
+  position: relative;
+  z-index: 3;
+  background: #fff;
+}
+
+:deep(.ant-table-cell-fix-right .ant-table-cell-content),
+:deep(.ant-table-cell-fix-right-first .ant-table-cell-content) {
+  position: relative;
+  z-index: 2;
+  display: block;
+  width: 100%;
+  background: #fff;
+}
+
+:deep(.ant-table-tbody > tr > td) {
+  overflow: hidden;
+}
+
+:deep(.ant-table-cell-fix-right-first::after),
+:deep(.ant-table-cell-fix-right::after) {
+  box-shadow: -8px 0 12px rgba(15, 23, 42, 0.06);
 }
 
 /* 批量编辑样式 */

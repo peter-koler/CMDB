@@ -242,6 +242,16 @@
                   <a-select-option value="true">true</a-select-option>
                   <a-select-option value="false">false</a-select-option>
                 </a-select>
+                <a-select
+                  v-else-if="hasParamOptions(param)"
+                  v-model:value="formState.params[param.field]"
+                  style="width: 100%"
+                  :placeholder="paramPlaceholder(param)"
+                >
+                  <a-select-option v-for="opt in paramOptions(param)" :key="opt.value" :value="opt.value">
+                    {{ opt.label }}
+                  </a-select-option>
+                </a-select>
                 <a-input-password
                   v-else-if="param.type === 'password'"
                   v-model:value="formState.params[param.field]"
@@ -281,6 +291,16 @@
                     >
                       <a-select-option value="true">true</a-select-option>
                       <a-select-option value="false">false</a-select-option>
+                    </a-select>
+                    <a-select
+                      v-else-if="hasParamOptions(param)"
+                      v-model:value="formState.params[param.field]"
+                      style="width: 100%"
+                      :placeholder="paramPlaceholder(param)"
+                    >
+                      <a-select-option v-for="opt in paramOptions(param)" :key="opt.value" :value="opt.value">
+                        {{ opt.label }}
+                      </a-select-option>
                     </a-select>
                     <a-input-password
                       v-else-if="param.type === 'password'"
@@ -382,6 +402,7 @@ interface TemplateParamDef {
   field: string
   name?: Record<string, string> | string
   type?: string
+  options?: Array<{ label?: string; value?: string | number | boolean }>
   required?: boolean
   defaultValue?: string | number | boolean
   placeholder?: string
@@ -651,6 +672,22 @@ function paramPlaceholder(param: TemplateParamDef): string {
   if (param.placeholder) return param.placeholder
   if (param.defaultValue !== undefined && param.defaultValue !== null) return `默认值: ${String(param.defaultValue)}`
   return `请输入 ${param.field}`
+}
+
+function hasParamOptions(param: TemplateParamDef): boolean {
+  return Array.isArray(param?.options) && param.options.length > 0
+}
+
+function paramOptions(param: TemplateParamDef): Array<{ label: string; value: string }> {
+  if (!Array.isArray(param?.options)) return []
+  return param.options
+    .map((item) => {
+      const value = String(item?.value ?? '').trim()
+      if (!value) return null
+      const label = String(item?.label ?? value).trim() || value
+      return { label, value }
+    })
+    .filter((item): item is { label: string; value: string } => Boolean(item))
 }
 
 function buildCategoryTree() {
@@ -1042,37 +1079,14 @@ function applyDefaultTemplateByCategory(categoryKey: string | null) {
 }
 
 async function openModal(record?: MonitoringTarget) {
-  await Promise.all([loadTemplates(), loadCollectors(), loadModels()])
-  editing.value = record || null
-  createContextCategory.value = record ? null : selectedCategory.value
-  resetForm()
-
-  if (record) {
-    syncingFormFromRecord.value = true
-    formState.name = record.name || ''
-    formState.app = record.app || ''
-    formState.target = record.target || record.endpoint || ''
-    formState.interval = Number(record.interval_seconds || record.interval || 60)
-    formState.enabled = record.enabled !== false
-    formState.ci_model_id = record.ci_model_id || undefined
-    formState.ci_id = record.ci_id || undefined
-    formState.params = { ...(record.params || {}) }
-
-    if (formState.ci_model_id) {
-      await loadCiOptions(formState.ci_model_id)
-    }
-    applyTemplateDefaults()
-    const hasOptionalValues = optionalParamDefs.value.some((param) => {
-      const val = formState.params[param.field]
-      return val !== undefined && val !== null && String(val).trim() !== ''
-    })
-    optionalParamsActiveKeys.value = hasOptionalValues ? ['optional'] : []
-    syncingFormFromRecord.value = false
-  } else {
-    applyDefaultTemplateByCategory(createContextCategory.value)
+  if (record?.id) {
+    router.push(`/monitoring/target/${record.id}/edit`)
+    return
   }
-
-  modalOpen.value = true
+  router.push({
+    path: '/monitoring/target/create',
+    query: selectedCategory.value ? { category: selectedCategory.value } : undefined
+  })
 }
 
 async function saveTarget() {

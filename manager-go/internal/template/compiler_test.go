@@ -294,3 +294,46 @@ metrics:
 		t.Fatalf("expected username kept, got %+v", filtered)
 	}
 }
+
+func TestCompileMetricsTasks_HTTPUriDefaultsToRoot(t *testing.T) {
+	rt := RuntimeTemplate{
+		App: "website",
+		Content: `
+app: website
+params:
+  - field: host
+  - field: port
+  - field: uri
+  - field: ssl
+metrics:
+  - name: summary
+    protocol: http
+    fields:
+      - field: responseTime
+        type: 0
+    http:
+      host: ^_^host^_^
+      port: ^_^port^_^
+      url: ^_^uri^_^
+      ssl: ^_^ssl^_^
+`,
+	}
+	monitor := &model.Monitor{
+		ID:     6,
+		App:    "website",
+		Target: "example.com:80",
+	}
+	tasks, err := CompileMetricsTasks(rt, monitor)
+	if err != nil {
+		t.Fatalf("compile failed: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(tasks))
+	}
+	if got := tasks[0].GetParams()["url"]; got != "/" {
+		t.Fatalf("expected default uri '/', got %+v", tasks[0].GetParams())
+	}
+	if got := tasks[0].GetParams()["host"]; got != "example.com" {
+		t.Fatalf("expected host fallback from target, got %+v", tasks[0].GetParams())
+	}
+}

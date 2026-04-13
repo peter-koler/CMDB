@@ -12,6 +12,7 @@ from app.models import (
     MonitorParam,
     MonitorTemplate,
     CiInstance,
+    CmdbModel,
     SingleAlert,
     AlertHistory,
     AlertDefine,
@@ -19,6 +20,7 @@ from app.models import (
     AlertTimelineEvent,
     NoticeRule,
 )
+from app.utils.data_permission import filter_by_data_permissions
 from app.notifications.websocket import socketio
 from app.services.alert_timeline_service import (
     append_base_events,
@@ -162,7 +164,9 @@ def _manager_call(method: str, path: str, payload=None, params=None, fallback=No
                 e.status,
             )
             return jsonify({"code": 200, "data": fallback()})
-        return jsonify({"code": e.status, "message": e.message, "error_code": e.code}), e.status
+        response = jsonify({"code": e.status, "message": e.message, "error_code": e.code})
+        response.status_code = e.status
+        return response
 
 
 def _fetch_manager_payload(path: str, params=None):
@@ -325,6 +329,73 @@ def _list_response(items: list[dict], total: int, page: int, page_size: int):
     )
 
 
+def _normalize_ci_filter_values(raw) -> dict[str, str]:
+    if not isinstance(raw, dict):
+        return {}
+    normalized: dict[str, str] = {}
+    for key, value in raw.items():
+        field = str(key or "").strip()
+        text = str(value or "").strip()
+        if field and text:
+            normalized[field] = text
+    return normalized
+
+
+def _monitor_ci_binding_map(model_id: int | None = None) -> dict[int, list[dict]]:
+    rows = Monitor.query.all()
+    result: dict[int, list[dict]] = {}
+    for row in rows:
+        annotations = _json_load(row.annotations_json, {})
+        if not isinstance(annotations, dict):
+            continue
+        try:
+            ci_id = int(annotations.get("ci_id") or 0)
+        except (TypeError, ValueError):
+            ci_id = 0
+        if ci_id <= 0:
+            continue
+        try:
+            binding_model_id = int(annotations.get("ci_model_id") or 0)
+        except (TypeError, ValueError):
+            binding_model_id = 0
+        if model_id and binding_model_id and binding_model_id != model_id:
+            continue
+        result.setdefault(ci_id, []).append(
+            {
+                "monitor_id": row.id,
+                "monitor_name": row.name,
+                "app": row.app,
+            }
+        )
+    return result
+
+
+def _ci_matches_filters(attributes: dict, filters: dict[str, str]) -> bool:
+    if not filters:
+        return True
+    attrs = attributes if isinstance(attributes, dict) else {}
+    for field, keyword in filters.items():
+        value = attrs.get(field)
+        if keyword.lower() not in str(value or "").lower():
+            return False
+    return True
+
+
+def _monitor_target_ci_option_item(instance: CiInstance, monitored_rows: list[dict], model: CmdbModel | None) -> dict:
+    attrs = instance.get_attribute_values()
+    key_field_codes = model.key_field_codes if model else []
+    return {
+        "id": instance.id,
+        "code": instance.code,
+        "model_id": instance.model_id,
+        "attributes": attrs if isinstance(attrs, dict) else {},
+        "key_field_codes": key_field_codes,
+        "monitored": bool(monitored_rows),
+        "monitor_count": len(monitored_rows),
+        "monitor_names": [item.get("monitor_name") for item in monitored_rows if item.get("monitor_name")],
+    }
+
+
 def _monitor_item_from_row(row: Monitor, params_by_monitor: dict[int, dict[str, str]] | None = None) -> dict:
     annotations = _json_load(row.annotations_json, {})
     if not isinstance(annotations, dict):
@@ -470,6 +541,45 @@ def _merge_ci_labels(payload: dict) -> dict:
         if ci_name_text:
             merged["ci.name"] = ci_name_text
     payload["labels"] = merged
+    return payload
+
+
+def _normalize_http_api_payload(payload: dict) -> dict:
+    if not isinstance(payload, dict):
+        return payload
+    app = str(payload.get("app") or "").strip().lower()
+    if app not in {"api", "api_code"}:
+        return payload
+
+    params = payload.get("params")
+    if not isinstance(params, dict):
+        return payload
+
+    method_raw = str(params.get("httpMethod") or "").strip()
+    uri_raw = str(params.get("uri") or "").strip()
+    method_upper = method_raw.upper()
+    allowed_methods = {"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"}
+
+    method_looks_like_path = (
+        method_raw.startswith("/")
+        or method_raw.startswith("http://")
+        or method_raw.startswith("https://")
+    )
+    if method_looks_like_path:
+        if not uri_raw:
+            params["uri"] = method_raw
+        params["httpMethod"] = "GET"
+        payload["params"] = params
+        return payload
+
+    if method_raw and method_upper in allowed_methods and method_raw != method_upper:
+        params["httpMethod"] = method_upper
+        payload["params"] = params
+        return payload
+
+    if method_raw and method_upper not in allowed_methods:
+        params["httpMethod"] = "GET"
+        payload["params"] = params
     return payload
 
 
@@ -835,6 +945,72 @@ def list_targets():
     )
 
 
+@monitoring_target_bp.route("/target-ci-options", methods=["GET"])
+@jwt_required()
+@require_any_permission("monitoring:target", "monitoring:list", "cmdb:instance")
+def list_target_ci_options():
+    model_id = request.args.get("model_id", type=int)
+    page = max(request.args.get("page", 1, type=int), 1)
+    per_page = request.args.get("per_page", 10, type=int)
+    if per_page not in {10, 20, 50}:
+        per_page = 10
+    scope = str(request.args.get("scope") or "unmonitored").strip().lower()
+
+    if not model_id:
+        return jsonify({"code": 400, "message": "请选择CI模型"}), 400
+
+    model = CmdbModel.query.get(model_id)
+    if not model:
+        return jsonify({"code": 404, "message": "CI模型不存在"}), 404
+
+    filters = _normalize_ci_filter_values(
+        {
+            key[5:]: request.args.get(key)
+            for key in request.args.keys()
+            if str(key).startswith("attr_")
+        }
+    )
+
+    query = CiInstance.query.filter_by(model_id=model_id)
+    query = filter_by_data_permissions(query, CiInstance)
+    instances = query.order_by(CiInstance.created_at.desc()).all()
+    monitored_map = _monitor_ci_binding_map(model_id)
+
+    filtered_items: list[dict] = []
+    for instance in instances:
+        attrs = instance.get_attribute_values()
+        monitored_rows = monitored_map.get(instance.id, [])
+        if scope != "all" and monitored_rows:
+            continue
+        if not _ci_matches_filters(attrs, filters):
+            continue
+        filtered_items.append(_monitor_target_ci_option_item(instance, monitored_rows, model))
+
+    total = len(filtered_items)
+    start = (page - 1) * per_page
+    end = start + per_page
+    page_items = filtered_items[start:end]
+    return jsonify(
+        {
+            "code": 200,
+            "message": "success",
+            "data": {
+                "items": page_items,
+                "total": total,
+                "page": page,
+                "per_page": per_page,
+                "scope": scope,
+                "model": {
+                    "id": model.id,
+                    "name": model.name,
+                    "code": model.code,
+                    "key_field_codes": model.key_field_codes,
+                },
+            },
+        }
+    )
+
+
 @monitoring_target_bp.route("/targets", methods=["POST"])
 @jwt_required()
 @require_any_permission("monitoring:target:create", "monitoring:list:create")
@@ -842,6 +1018,7 @@ def create_target():
     payload = request.get_json() or {}
     apply_default_alerts = bool(payload.pop("apply_default_alerts", False))
     payload = _merge_ci_labels(payload)
+    payload = _normalize_http_api_payload(payload)
 
     # 前端兼容字段：interval -> interval_seconds
     if "interval_seconds" not in payload and "interval" in payload:
@@ -948,6 +1125,7 @@ def test_target_connectivity(monitor_id: int):
 @require_any_permission("monitoring:target:update", "monitoring:list:edit")
 def update_target(monitor_id: int):
     payload = _merge_ci_labels(request.get_json() or {})
+    payload = _normalize_http_api_payload(payload)
     return _manager_call("PUT", f"/api/v1/monitors/{monitor_id}", payload=payload)
 
 

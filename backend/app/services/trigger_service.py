@@ -268,6 +268,128 @@ def process_ci_triggers(ci: CiInstance) -> dict:
     return result
 
 
+def process_single_trigger(ci: CiInstance, trigger: RelationTrigger) -> dict:
+    """
+    对单个 CI 执行指定触发器。
+    """
+    result = {
+        "created_count": 0,
+        "skipped_count": 0,
+        "failed_count": 0,
+    }
+
+    if not trigger or not trigger.is_active:
+        return result
+    if ci.model_id != trigger.source_model_id:
+        return result
+
+    try:
+        target_cis = match_trigger_condition(ci, trigger)
+        expected_target_ids = {target_ci.id for target_ci in target_cis}
+
+        existing_relations = (
+            CmdbRelation.query.join(CiInstance, CmdbRelation.target_ci_id == CiInstance.id)
+            .filter(
+                CmdbRelation.source_ci_id == ci.id,
+                CmdbRelation.relation_type_id == trigger.relation_type_id,
+                CmdbRelation.source_type == "rule",
+                CiInstance.model_id == trigger.target_model_id,
+            )
+            .all()
+        )
+
+        for relation in existing_relations:
+            if relation.target_ci_id not in expected_target_ids:
+                db.session.delete(relation)
+        db.session.commit()
+
+        if not target_cis:
+            log_trigger_execution(
+                trigger_id=trigger.id,
+                source_ci_id=ci.id,
+                target_ci_id=None,
+                status="skipped",
+                message="未找到匹配的目标 CI",
+            )
+            result["skipped_count"] += 1
+            return result
+
+        for target_ci in target_cis:
+            relation, created = create_relation_with_skip_duplicate(
+                source_ci_id=ci.id,
+                target_ci_id=target_ci.id,
+                relation_type_id=trigger.relation_type_id,
+            )
+            if created:
+                log_trigger_execution(
+                    trigger_id=trigger.id,
+                    source_ci_id=ci.id,
+                    target_ci_id=target_ci.id,
+                    status="success",
+                    message="关系创建成功",
+                )
+                result["created_count"] += 1
+            else:
+                log_trigger_execution(
+                    trigger_id=trigger.id,
+                    source_ci_id=ci.id,
+                    target_ci_id=target_ci.id,
+                    status="skipped",
+                    message="关系已存在",
+                )
+                result["skipped_count"] += 1
+    except Exception as exc:
+        logger.error(f"执行触发器 {trigger.id} 失败: {exc}")
+        log_trigger_execution(
+            trigger_id=trigger.id,
+            source_ci_id=ci.id,
+            target_ci_id=None,
+            status="failed",
+            message=str(exc),
+        )
+        result["failed_count"] += 1
+
+    return result
+
+
+def process_trigger_for_model(trigger: RelationTrigger) -> dict:
+    """
+    对指定触发器的源模型下全部 CI 执行一次关系重建。
+    """
+    result = {
+        "processed_ci_count": 0,
+        "created_count": 0,
+        "skipped_count": 0,
+        "failed_count": 0,
+    }
+    if not trigger or not trigger.source_model_id:
+        return result
+
+    source_cis = CiInstance.query.filter_by(model_id=trigger.source_model_id).all()
+    for ci in source_cis:
+        per_ci = process_single_trigger(ci, trigger)
+        result["processed_ci_count"] += 1
+        result["created_count"] += per_ci["created_count"]
+        result["skipped_count"] += per_ci["skipped_count"]
+        result["failed_count"] += per_ci["failed_count"]
+    return result
+
+
+def execute_scheduled_trigger(trigger_id: int) -> dict:
+    """
+    供 APScheduler 调用的触发器定时扫描入口。
+    """
+    trigger = RelationTrigger.query.get(trigger_id)
+    if not trigger or not trigger.is_active:
+        return {
+            "processed_ci_count": 0,
+            "created_count": 0,
+            "skipped_count": 0,
+            "failed_count": 0,
+        }
+    return process_trigger_for_model(trigger)
+
+
 def process_ci_triggers_async(ci_id: int) -> None:
     app = current_app._get_current_object()
 

@@ -76,9 +76,9 @@
                       draggable="true"
                       @click="selectItem(item)"
                       @dragstart="handleCanvasDragStart($event, index)"
-                      @dragover.prevent="handleCanvasDragOver($event, index)"
+                      @dragover.prevent.stop="handleCanvasDragOver($event, index)"
                       @dragleave="handleCanvasDragLeave"
-                      @drop="handleCanvasDrop($event, index)"
+                      @drop.stop="handleCanvasDrop($event, index)"
                       @dragend="handleCanvasDragEnd"
                     >
                       <div class="group-header">
@@ -109,7 +109,12 @@
                           </a-button>
                         </div>
                       </div>
-                      <div class="group-content" v-show="!item.props.collapsed">
+                      <div
+                        class="group-content"
+                        v-show="!item.props.collapsed"
+                        @dragover.prevent.stop="handleGroupDragOver($event, item, index)"
+                        @drop.stop="handleDropInGroup($event, item)"
+                      >
                     <a-row :gutter="12">
                       <a-col
                         v-for="(child, childIndex) in item.children"
@@ -135,8 +140,14 @@
                             <template v-else-if="child.controlType === 'date'">
                               <a-date-picker :placeholder="child.props.placeholder" disabled style="width: 100%" />
                             </template>
-                            <template v-else-if="child.controlType === 'select'">
+                            <template v-else-if="child.controlType === 'datetime'">
+                              <a-date-picker :placeholder="child.props.placeholder" show-time disabled style="width: 100%" />
+                            </template>
+                            <template v-else-if="child.controlType === 'select' || child.controlType === 'dropdown'">
                               <a-select :placeholder="child.props.placeholder" disabled style="width: 100%" />
+                            </template>
+                            <template v-else-if="child.controlType === 'cascade'">
+                              <a-cascader :placeholder="child.props.placeholder" :options="child.props.options" disabled style="width: 100%" />
                             </template>
                             <template v-else-if="child.controlType === 'radio'">
                               <a-radio-group disabled>
@@ -165,6 +176,9 @@
                             </template>
                             <template v-else-if="child.controlType === 'reference'">
                               <a-select :placeholder="child.props.placeholder" disabled style="width: 100%" />
+                            </template>
+                            <template v-else-if="child.controlType === 'richtext'">
+                              <a-textarea :placeholder="child.props.placeholder" :rows="4" disabled />
                             </template>
                             <template v-else-if="child.controlType === 'image'">
                               <a-upload disabled>
@@ -217,8 +231,8 @@
                     <div
                       v-if="item.props.allowDrop"
                       class="drop-hint"
-                      @dragover.prevent
-                      @drop="handleDropInGroup($event, item)"
+                      @dragover.prevent.stop="handleGroupDragOver($event, item, index)"
+                      @drop.stop="handleDropInGroup($event, item)"
                     >
                       拖拽控件到此处
                     </div>
@@ -255,8 +269,14 @@
                     <template v-else-if="item.controlType === 'date'">
                       <a-date-picker :placeholder="item.props.placeholder" disabled style="width: 100%" />
                     </template>
-                    <template v-else-if="item.controlType === 'select'">
+                    <template v-else-if="item.controlType === 'datetime'">
+                      <a-date-picker :placeholder="item.props.placeholder" show-time disabled style="width: 100%" />
+                    </template>
+                    <template v-else-if="item.controlType === 'select' || item.controlType === 'dropdown'">
                       <a-select :placeholder="item.props.placeholder" disabled style="width: 100%" />
+                    </template>
+                    <template v-else-if="item.controlType === 'cascade'">
+                      <a-cascader :placeholder="item.props.placeholder" :options="item.props.options" disabled style="width: 100%" />
                     </template>
                     <template v-else-if="item.controlType === 'radio'">
                       <a-radio-group disabled>
@@ -285,6 +305,9 @@
                     </template>
                     <template v-else-if="item.controlType === 'reference'">
                       <a-select :placeholder="item.props.placeholder" disabled style="width: 100%" />
+                    </template>
+                    <template v-else-if="item.controlType === 'richtext'">
+                      <a-textarea :placeholder="item.props.placeholder" :rows="4" disabled />
                     </template>
                     <template v-else-if="item.controlType === 'image'">
                       <a-upload disabled>
@@ -428,7 +451,7 @@
                   <a-input-number v-model:value="selectedItem.props.max" style="width: 100%" />
                 </a-form-item>
                 
-                <a-form-item label="日期格式" v-if="selectedItem.controlType === 'date'">
+                <a-form-item label="日期格式" v-if="selectedItem.controlType === 'date' || selectedItem.controlType === 'datetime'">
                   <a-select v-model:value="selectedItem.props.format">
                     <a-select-option value="YYYY-MM-DD">YYYY-MM-DD</a-select-option>
                     <a-select-option value="YYYY-MM-DD HH:mm:ss">YYYY-MM-DD HH:mm:ss</a-select-option>
@@ -456,9 +479,9 @@
                   <a-switch v-model:checked="selectedItem.props.collapsed" />
                 </a-form-item>
                 
-                <a-divider v-if="selectedItem.controlType === 'select' || selectedItem.controlType === 'radio' || selectedItem.controlType === 'checkbox'">选项配置</a-divider>
+                <a-divider v-if="['select', 'dropdown', 'radio', 'checkbox', 'cascade'].includes(selectedItem.controlType)">选项配置</a-divider>
                 
-                <template v-if="selectedItem.controlType === 'select' || selectedItem.controlType === 'radio' || selectedItem.controlType === 'checkbox'">
+                <template v-if="['select', 'dropdown', 'radio', 'checkbox', 'cascade'].includes(selectedItem.controlType)">
                   <a-form-item label="选项类型">
                     <a-radio-group v-model:value="selectedItem.props.optionType">
                       <a-radio value="custom">自定义</a-radio>
@@ -641,12 +664,18 @@
             <template v-else-if="item.controlType === 'date'">
               <a-date-picker v-model:value="previewForm[item.props.code]" :placeholder="item.props.placeholder" :format="item.props.format" style="width: 100%" />
             </template>
-            <template v-else-if="item.controlType === 'select'">
+            <template v-else-if="item.controlType === 'datetime'">
+              <a-date-picker v-model:value="previewForm[item.props.code]" :placeholder="item.props.placeholder" :format="item.props.format" show-time style="width: 100%" />
+            </template>
+            <template v-else-if="item.controlType === 'select' || item.controlType === 'dropdown'">
               <a-select v-model:value="previewForm[item.props.code]" :placeholder="item.props.placeholder" style="width: 100%">
                 <a-select-option v-for="opt in item.props.options" :key="opt.value" :value="opt.value">
                   {{ opt.label }}
                 </a-select-option>
               </a-select>
+            </template>
+            <template v-else-if="item.controlType === 'cascade'">
+              <a-cascader v-model:value="previewForm[item.props.code]" :placeholder="item.props.placeholder" :options="item.props.options" style="width: 100%" />
             </template>
             <template v-else-if="item.controlType === 'radio'">
               <a-radio-group v-model:value="previewForm[item.props.code]">
@@ -677,6 +706,9 @@
             <template v-else-if="item.controlType === 'reference'">
               <a-select v-model:value="previewForm[item.props.code]" :placeholder="item.props.placeholder" style="width: 100%">
               </a-select>
+            </template>
+            <template v-else-if="item.controlType === 'richtext'">
+              <a-textarea v-model:value="previewForm[item.props.code]" :placeholder="item.props.placeholder" :rows="6" />
             </template>
             <template v-else-if="item.controlType === 'image'">
               <a-upload>
@@ -727,12 +759,18 @@
                   <template v-else-if="child.controlType === 'date'">
                     <a-date-picker v-model:value="previewForm[child.props.code]" :placeholder="child.props.placeholder" style="width: 100%" />
                   </template>
-                  <template v-else-if="child.controlType === 'select'">
+                  <template v-else-if="child.controlType === 'datetime'">
+                    <a-date-picker v-model:value="previewForm[child.props.code]" :placeholder="child.props.placeholder" :format="child.props.format" show-time style="width: 100%" />
+                  </template>
+                  <template v-else-if="child.controlType === 'select' || child.controlType === 'dropdown'">
                     <a-select v-model:value="previewForm[child.props.code]" :placeholder="child.props.placeholder" style="width: 100%">
                       <a-select-option v-for="opt in child.props.options" :key="opt.value" :value="opt.value">
                         {{ opt.label }}
                       </a-select-option>
                     </a-select>
+                  </template>
+                  <template v-else-if="child.controlType === 'cascade'">
+                    <a-cascader v-model:value="previewForm[child.props.code]" :placeholder="child.props.placeholder" :options="child.props.options" style="width: 100%" />
                   </template>
                   <template v-else-if="child.controlType === 'radio'">
                     <a-radio-group v-model:value="previewForm[child.props.code]">
@@ -759,6 +797,12 @@
                       :options="getUserOptionList(child.props)"
                       style="width: 100%"
                     />
+                  </template>
+                  <template v-else-if="child.controlType === 'reference'">
+                    <a-select v-model:value="previewForm[child.props.code]" :placeholder="child.props.placeholder" style="width: 100%" />
+                  </template>
+                  <template v-else-if="child.controlType === 'richtext'">
+                    <a-textarea v-model:value="previewForm[child.props.code]" :placeholder="child.props.placeholder" :rows="6" />
                   </template>
                   <div v-if="child.props.helpText" class="help-text">{{ child.props.helpText }}</div>
                 </a-form-item>
@@ -859,12 +903,16 @@ const basicControls = [
   { type: 'number', name: '数字', icon: '#' },
   { type: 'numberRange', name: '数字范围', icon: '⬌' },
   { type: 'date', name: '日期', icon: '📅' },
+  { type: 'datetime', name: '日期时间', icon: '🕒' },
   { type: 'select', name: '下拉选择', icon: '▼' },
+  { type: 'dropdown', name: '下拉菜单', icon: '▾' },
   { type: 'radio', name: '单选', icon: '◯' },
   { type: 'checkbox', name: '多选', icon: '☐' },
+  { type: 'cascade', name: '级联选择', icon: '⋯' },
   { type: 'switch', name: '开关', icon: 'S' },
   { type: 'user', name: '人员', icon: '👤' },
   { type: 'reference', name: '引用', icon: '🔗' },
+  { type: 'richtext', name: '富文本', icon: '✎' },
   { type: 'image', name: '图片', icon: '🖼' },
   { type: 'file', name: '附件', icon: '📎' }
 ]
@@ -876,12 +924,12 @@ const layoutControls = [
 
 const showPlaceholder = computed(() => {
   if (!selectedItem.value) return false
-  return ['text', 'textarea', 'number', 'date', 'select', 'user', 'reference'].includes(selectedItem.value.controlType)
+  return ['text', 'textarea', 'number', 'date', 'datetime', 'select', 'dropdown', 'cascade', 'user', 'reference', 'richtext'].includes(selectedItem.value.controlType)
 })
 
 const showDefaultValue = computed(() => {
   if (!selectedItem.value) return false
-  return ['text', 'textarea', 'number', 'select'].includes(selectedItem.value.controlType)
+  return ['text', 'textarea', 'number', 'select', 'dropdown', 'richtext'].includes(selectedItem.value.controlType)
 })
 
 watch(() => props.visible, (val) => {
@@ -1024,7 +1072,7 @@ const getUserOptionList = (fieldProps: Record<string, any>) => {
 
 const preloadDynamicConfig = async () => {
   const walk = async (item: CanvasItem) => {
-    if (['select', 'radio', 'checkbox'].includes(item.controlType) && item.props.optionType === 'dictionary') {
+    if (['select', 'dropdown', 'radio', 'checkbox', 'cascade'].includes(item.controlType) && item.props.optionType === 'dictionary') {
       await ensureDictOptionsLoaded(item.props.dictionaryCode)
       if (!Array.isArray(item.props.options) || item.props.options.length === 0) {
         item.props.options = getDictionaryOptionList(item.props.dictionaryCode)
@@ -1112,14 +1160,18 @@ const defaultProps: Record<string, Record<string, any>> = {
   number: { label: '数字', code: '', placeholder: '请输入', required: false, disabled: false, min: undefined, max: undefined, helpText: '', description: '', customValidation: false, span: 24 },
   numberRange: { label: '数字范围', code: '', placeholder: '请输入', required: false, disabled: false, helpText: '', description: '', customValidation: false, span: 24 },
   date: { label: '日期', code: '', placeholder: '请选择', required: false, disabled: false, format: 'YYYY-MM-DD', helpText: '', description: '', customValidation: false, span: 24 },
+  datetime: { label: '日期时间', code: '', placeholder: '请选择', required: false, disabled: false, format: 'YYYY-MM-DD HH:mm:ss', helpText: '', description: '', customValidation: false, span: 24 },
   select: { label: '下拉选择', code: '', placeholder: '请选择', required: false, disabled: false, optionType: 'custom', dictionaryCode: '', options: [{ label: '选项1', value: 'option1' }], helpText: '', description: '', customValidation: false, span: 24 },
+  dropdown: { label: '下拉菜单', code: '', placeholder: '请选择', required: false, disabled: false, optionType: 'custom', dictionaryCode: '', options: [{ label: '选项1', value: 'option1' }], helpText: '', description: '', customValidation: false, span: 24 },
   radio: { label: '单选', code: '', required: false, disabled: false, optionType: 'custom', dictionaryCode: '', options: [{ label: '选项1', value: 'option1' }], helpText: '', description: '', customValidation: false, span: 24 },
   checkbox: { label: '多选', code: '', required: false, disabled: false, optionType: 'custom', dictionaryCode: '', options: [{ label: '选项1', value: 'option1' }], helpText: '', description: '', customValidation: false, span: 24 },
+  cascade: { label: '级联选择', code: '', placeholder: '请选择', required: false, disabled: false, optionType: 'custom', dictionaryCode: '', options: [{ label: '选项1', value: 'option1' }], helpText: '', description: '', customValidation: false, span: 24 },
   switch: { label: '开关', code: '', required: false, disabled: false, defaultValue: false, helpText: '', description: '', customValidation: false, span: 24 },
   user: { label: '人员', code: '', placeholder: '请选择', required: false, disabled: false, mode: 'multiple', userIds: [], helpText: '', description: '', customValidation: false, span: 24 },
   reference: { label: '引用', code: '', placeholder: '请选择', required: false, disabled: false, refModelId: undefined, helpText: '', description: '', customValidation: false, span: 24 },
+  richtext: { label: '富文本', code: '', placeholder: '请输入', required: false, disabled: false, rows: 6, helpText: '', description: '', customValidation: false, span: 24 },
   image: { label: '图片', code: '', required: false, disabled: false, maxCount: 1, helpText: '', description: '', customValidation: false, span: 24 },
-  file: { label: '附件', code: '', required: false, disabled: false, maxCount: 1, helpText: '', description: '', customValidation: false, span: 24 },
+  file: { label: '附件', code: '', required: false, disabled: false, helpText: '', description: '', customValidation: false, span: 24 },
   group: { label: '分组标题', groupCode: '', allowDrop: true, collapsed: false, description: '', span: 24 },
   table: {
     label: '表格',
@@ -1144,6 +1196,7 @@ const handleDragStart = (event: DragEvent, control: any) => {
 }
 
 const handleDrop = (event: DragEvent) => {
+  event.preventDefault()
   const controlType = event.dataTransfer?.getData('controlType')
   if (!controlType) return
   
@@ -1162,6 +1215,8 @@ const handleDrop = (event: DragEvent) => {
 }
 
 const handleDropInGroup = (event: DragEvent, group: CanvasItem) => {
+  event.preventDefault()
+  event.stopPropagation()
   const controlType = event.dataTransfer?.getData('controlType')
   if (!controlType || controlType === 'group' || controlType === 'table') return
   
@@ -1175,6 +1230,8 @@ const handleDropInGroup = (event: DragEvent, group: CanvasItem) => {
     group.children = []
   }
   group.children.push(newItem)
+  selectedItem.value = newItem
+  dragOverIndex.value = null
 }
 
 const handleCanvasDragStart = (event: DragEvent, index: number) => {
@@ -1189,12 +1246,31 @@ const handleCanvasDragOver = (event: DragEvent, index: number) => {
   dragOverIndex.value = index
 }
 
+const handleGroupDragOver = (event: DragEvent, group: CanvasItem, index: number) => {
+  event.preventDefault()
+  event.stopPropagation()
+  const controlType = event.dataTransfer?.getData('controlType')
+  if (controlType && group.props.allowDrop !== false) {
+    dragOverIndex.value = index
+    return
+  }
+  handleCanvasDragOver(event, index)
+}
+
 const handleCanvasDragLeave = () => {
   dragOverIndex.value = null
 }
 
 const handleCanvasDrop = (event: DragEvent, targetIndex: number) => {
   event.preventDefault()
+  const controlType = event.dataTransfer?.getData('controlType')
+  if (controlType) {
+    const targetItem = canvasItems.value[targetIndex]
+    if (targetItem?.controlType === 'group' && targetItem?.props?.allowDrop !== false) {
+      handleDropInGroup(event, targetItem)
+      return
+    }
+  }
   if (draggedIndex.value === null || draggedIndex.value === targetIndex) {
     dragOverIndex.value = null
     draggedIndex.value = null
@@ -1502,7 +1578,7 @@ const handleSave = async () => {
   saving.value = true
   try {
     const normalizeItem = (item: CanvasItem) => {
-      if (['select', 'radio', 'checkbox'].includes(item.controlType)) {
+      if (['select', 'dropdown', 'radio', 'checkbox', 'cascade'].includes(item.controlType)) {
         if (item.props.optionType === 'dictionary') {
           item.props.options = getDictionaryOptionList(item.props.dictionaryCode)
         }

@@ -132,36 +132,6 @@
             </a-form-item>
           </a-col>
         </a-row>
-        <a-row :gutter="16">
-          <a-col :span="12">
-            <a-form-item label="允许的源模型">
-              <a-select
-                v-model:value="form.source_model_ids"
-                mode="multiple"
-                placeholder="请选择允许的源模型"
-                style="width: 100%"
-              >
-                <a-select-option v-for="model in models" :key="model.id" :value="model.id">
-                  {{ model.name }}
-                </a-select-option>
-              </a-select>
-            </a-form-item>
-          </a-col>
-          <a-col :span="12">
-            <a-form-item label="允许的目标模型">
-              <a-select
-                v-model:value="form.target_model_ids"
-                mode="multiple"
-                placeholder="请选择允许的目标模型"
-                style="width: 100%"
-              >
-                <a-select-option v-for="model in models" :key="model.id" :value="model.id">
-                  {{ model.name }}
-                </a-select-option>
-              </a-select>
-            </a-form-item>
-          </a-col>
-        </a-row>
         <a-form-item label="允许自环">
           <a-switch v-model:checked="form.allow_self_loop" />
         </a-form-item>
@@ -209,7 +179,6 @@ import { ref, reactive, onMounted } from 'vue'
 import { message } from 'ant-design-vue'
 import { PlusOutlined, SearchOutlined, ReloadOutlined } from '@ant-design/icons-vue'
 import { getRelationTypes, createRelationType, updateRelationType, deleteRelationType } from '@/api/cmdb-relation'
-import { getModels } from '@/api/cmdb'
 
 const loading = ref(false)
 const submitLoading = ref(false)
@@ -219,7 +188,6 @@ const searchKeyword = ref('')
 const formRef = ref()
 
 const relationTypes = ref<any[]>([])
-const models = ref<any[]>([])
 
 const pagination = reactive({
   current: 1,
@@ -248,8 +216,6 @@ const form = reactive({
   target_label: '',
   direction: 'directed',
   cardinality: 'many_many',
-  source_model_ids: [] as number[],
-  target_model_ids: [] as number[],
   allow_self_loop: false,
   description: '',
   style: {
@@ -293,17 +259,6 @@ const fetchRelationTypes = async () => {
   }
 }
 
-const fetchModels = async () => {
-  try {
-    const res = await getModels({ per_page: 1000 })
-    if (res.code === 200) {
-      models.value = res.data.items
-    }
-  } catch (error) {
-    console.error(error)
-  }
-}
-
 const showModal = (record?: any) => {
   isEdit.value = !!record
   if (record) {
@@ -315,8 +270,6 @@ const showModal = (record?: any) => {
       target_label: record.target_label,
       direction: record.direction,
       cardinality: record.cardinality,
-      source_model_ids: record.source_model_ids || [],
-      target_model_ids: record.target_model_ids || [],
       allow_self_loop: record.allow_self_loop,
       description: record.description || '',
       style: {
@@ -335,8 +288,6 @@ const showModal = (record?: any) => {
       target_label: '',
       direction: 'directed',
       cardinality: 'many_many',
-      source_model_ids: [],
-      target_model_ids: [],
       allow_self_loop: false,
       description: '',
       style: {
@@ -408,7 +359,6 @@ const handleTableChange = (pag: any) => {
 
 onMounted(() => {
   fetchRelationTypes()
-  fetchModels()
 })
 </script>
 

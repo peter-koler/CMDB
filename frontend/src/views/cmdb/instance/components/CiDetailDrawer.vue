@@ -144,6 +144,9 @@
                 {{ getOperationText(record.operation) }}
               </a-tag>
             </template>
+            <template v-else-if="column.key === 'attribute_name'">
+              {{ getFieldNameByCode(record.attribute_name) }}
+            </template>
             <template v-else-if="column.key === 'change'">
               <div v-if="record.old_value || record.new_value">
                 <span v-if="record.old_value" class="history-old-value">
@@ -244,11 +247,11 @@
                 <a-descriptions title="节点信息" :column="1" size="small" bordered>
                   <a-descriptions-item label="模型图标">
                     <img
-                      v-if="selectedTopologyNode.model_icon_url"
-                      :src="selectedTopologyNode.model_icon_url"
+                      v-if="selectedTopologyNode.model_icon_url || getModelIconAssetUrl(selectedTopologyNode.model_icon)"
+                      :src="selectedTopologyNode.model_icon_url || getModelIconAssetUrl(selectedTopologyNode.model_icon)"
                       style="width: 18px; height: 18px; object-fit: contain;"
                     />
-                    <component v-else :is="selectedTopologyNode.model_icon || 'AppstoreOutlined'" />
+                    <component v-else :is="getModelIconComponent(selectedTopologyNode.model_icon)" />
                   </a-descriptions-item>
                   <a-descriptions-item label="CI名称">
                     {{ selectedTopologyNode.name || '-' }}
@@ -322,20 +325,12 @@ import {
   CaretDownOutlined,
   ZoomInOutlined,
   ZoomOutOutlined,
-  FullscreenOutlined,
-  ApiOutlined,
-  AppstoreOutlined,
-  CloudServerOutlined,
-  ClusterOutlined,
-  ContainerOutlined,
-  DatabaseOutlined,
-  DeploymentUnitOutlined,
-  GlobalOutlined,
-  HddOutlined,
-  LaptopOutlined
+  FullscreenOutlined
 } from '@ant-design/icons-vue'
 import { Graph } from '@antv/g6'
 import dayjs from 'dayjs'
+import { getModelIconAssetUrl, getModelIconComponent } from '@/utils/cmdbModelIcons'
+import { extractFieldsFromFormConfig } from '@/utils/formConfigFields'
 
 interface Props {
   visible: boolean
@@ -389,19 +384,6 @@ const graphEdges = ref<any[]>([])
 const selectedTopologyNode = ref<any>(null)
 const getActiveInstanceId = () => currentInstanceId.value ?? props.instanceId
 
-const iconComponentMap: Record<string, any> = {
-  AppstoreOutlined,
-  DatabaseOutlined,
-  CloudServerOutlined,
-  ClusterOutlined,
-  HddOutlined,
-  ApiOutlined,
-  DeploymentUnitOutlined,
-  ContainerOutlined,
-  LaptopOutlined,
-  GlobalOutlined
-}
-
 const builtinIconDataUrlCache: Record<string, string> = {}
 
 const getThemeColor = (name: string, fallback: string) => {
@@ -411,7 +393,7 @@ const getThemeColor = (name: string, fallback: string) => {
 }
 
 const getAntdIconSvgMarkup = (iconName?: string) => {
-  const iconComponent = iconComponentMap[iconName || ''] || AppstoreOutlined
+  const iconComponent = getModelIconComponent(iconName)
   const accentColor = getThemeColor('--app-accent', '#1677ff')
   const container = document.createElement('div')
   const app = createApp({
@@ -452,6 +434,11 @@ const getBuiltinIconDataUrl = (iconName?: string) => {
   const cacheKey = iconName || 'AppstoreOutlined'
   if (builtinIconDataUrlCache[cacheKey]) {
     return builtinIconDataUrlCache[cacheKey]
+  }
+  const assetUrl = getModelIconAssetUrl(cacheKey)
+  if (assetUrl) {
+    builtinIconDataUrlCache[cacheKey] = assetUrl
+    return assetUrl
   }
   const svg = getAntdIconSvgMarkup(cacheKey)
   const dataUrl = svg ? toSvgBase64DataUrl(svg) : ''
@@ -775,11 +762,18 @@ const historyPagination = ref({
 
 const historyColumns = [
   { title: '操作类型', dataIndex: 'operation', key: 'operation', width: 100 },
-  { title: '属性名称', dataIndex: 'attribute_name', key: 'attribute_name', width: 120 },
+  { title: '属性名称', key: 'attribute_name', width: 120 },
   { title: '变更内容', key: 'change' },
   { title: '操作人', dataIndex: 'operator_name', key: 'operator_name', width: 100 },
   { title: '操作时间', dataIndex: 'created_at', key: 'created_at', width: 160 }
 ]
+
+// 获取字段名称（从编码转换为标签）
+const getFieldNameByCode = (code: string) => {
+  if (!code) return '-'
+  const field = modelFields.value.find((f) => f.code === code)
+  return field?.name || code
+}
 
 const attributeValues = computed(() => {
   try {
@@ -913,74 +907,30 @@ const isValuePresent = (value: any): boolean => {
   return true
 }
 
-const parseMaybeJson = (value: any) => {
-  let parsed = value
-  if (typeof parsed === 'string') {
-    try {
-      parsed = JSON.parse(parsed)
-    } catch {
-      return value
-    }
-  }
-  if (typeof parsed === 'string') {
-    try {
-      parsed = JSON.parse(parsed)
-    } catch {
-      return parsed
-    }
-  }
-  return parsed
-}
-
-const buildFormField = (item: any, indexKey: string) => {
-  const props = item?.props || {}
-  const code = props.code || item?.id || ''
-  if (!code || item?.controlType === 'table' || item?.controlType === 'group') return null
-  return {
-    id: item.id || `field_${indexKey}`,
-    code,
-    name: props.label || code,
-    control_type: item.controlType || 'text',
-    field_type: mapControlTypeToFieldType(item.controlType),
-    span: Number(props.span) || 12,
-    required: !!props.required,
-    helpText: props.helpText || '',
-    description: props.description || '',
-    options: Array.isArray(props.options) ? props.options : []
-  }
-}
-
 const buildAttributeSchema = (formConfig: any) => {
-  const parsed = parseMaybeJson(formConfig)
-  if (!Array.isArray(parsed)) {
-    return { fields: [], sections: [] }
-  }
-
-  const fields: any[] = []
+  const fields = extractFieldsFromFormConfig(formConfig)
+  if (!fields.length) return { fields: [], sections: [] }
   const sections: any[] = []
   const defaultSectionFields: any[] = []
 
-  parsed.forEach((item: any, index: number) => {
-    if (item?.controlType === 'group' && Array.isArray(item.children)) {
-      const groupFields = item.children
-        .map((child: any, childIndex: number) => buildFormField(child, `${index}_${childIndex}`))
-        .filter(Boolean)
-      if (groupFields.length > 0) {
-        fields.push(...groupFields)
-        sections.push({
-          key: `group_${index}`,
-          title: item?.props?.label || `属性分组 ${index + 1}`,
-          collapsed: !!item?.props?.collapsed,
-          fields: groupFields
-        })
-      }
+  const grouped = new Map<string, any[]>()
+  fields.forEach((field) => {
+    const key = field.group_id || '__base__'
+    if (!grouped.has(key)) grouped.set(key, [])
+    grouped.get(key)?.push(field)
+  })
+
+  grouped.forEach((groupFields, key) => {
+    if (key === '__base__') {
+      defaultSectionFields.push(...groupFields)
       return
     }
-    const field = buildFormField(item, String(index))
-    if (field) {
-      fields.push(field)
-      defaultSectionFields.push(field)
-    }
+    sections.push({
+      key,
+      title: groupFields[0]?.group_label || '属性分组',
+      collapsed: false,
+      fields: groupFields
+    })
   })
 
   if (defaultSectionFields.length > 0) {
@@ -1009,7 +959,7 @@ const formatFieldDisplay = (field: any, rawValue: any) => {
     }
   }
 
-  if (field.field_type === 'select' || field.field_type === 'multiselect') {
+  if (field.field_type === 'select' || field.field_type === 'dropdown' || field.field_type === 'multiselect') {
     const options = Array.isArray(field.options) ? field.options : []
     const optionMap = new Map(options.map((opt: any) => [String(opt.value), opt.label || opt.value]))
     if (Array.isArray(rawValue)) {
@@ -1071,23 +1021,9 @@ const fetchDetail = async () => {
           return acc
         }, {})
       } else {
-        const fields = (res.data.model?.fields || []).map((field: any) => ({
-          id: field.id || field.code,
-          code: field.code,
-          name: field.name || field.code,
-          field_type: field.field_type || 'text',
-          control_type: field.field_type || 'text',
-          span: 12,
-          required: false,
-          helpText: '',
-          description: '',
-          options: []
-        }))
-        modelFields.value = fields
-        attributeSections.value = fields.length
-          ? [{ key: 'default_fields', title: '基础属性', fields }]
-          : []
-        sectionCollapsedMap.value = { default_fields: false }
+        modelFields.value = []
+        attributeSections.value = []
+        sectionCollapsedMap.value = {}
       }
     }
   } catch (error) {
@@ -1194,26 +1130,6 @@ const getOperationText = (operation: string) => {
     'DELETE': '删除'
   }
   return textMap[operation] || operation
-}
-
-const mapControlTypeToFieldType = (controlType: string): string => {
-  const typeMap: Record<string, string> = {
-    'text': 'text',
-    'textarea': 'text',
-    'number': 'number',
-    'date': 'date',
-    'datetime': 'datetime',
-    'select': 'select',
-    'radio': 'select',
-    'checkbox': 'multiselect',
-    'switch': 'boolean',
-    'user': 'user',
-    'reference': 'reference',
-    'image': 'image',
-    'file': 'file',
-    'numberRange': 'numberRange'
-  }
-  return typeMap[controlType] || 'text'
 }
 
 const openImageInNewWindow = (url: string) => {

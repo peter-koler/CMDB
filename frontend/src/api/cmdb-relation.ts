@@ -67,3 +67,7 @@ export function deleteRelationTrigger(id: number) {
 export function toggleRelationTrigger(id: number) {
   return request.put(`/cmdb/relation-triggers/${id}/toggle`)
 }
+
+export function executeRelationTrigger(id: number) {
+  return request.post(`/cmdb/relation-triggers/${id}/execute`)
+}

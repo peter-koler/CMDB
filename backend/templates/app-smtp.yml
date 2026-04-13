@@ -21,11 +21,13 @@ app: smtp
 name:
   zh-CN: SMTP邮件服务器
   en-US: SMTP Email Server
+  ja-JP: SMTPメールサーバー
 # The description and help of this monitoring type
 help:
   zh-CN: HertzBeat 对 SMTP 服务的(Banner,helo响应)相关指标进行监测。<br>您可以点击 “<i>新建 SMTP邮件服务器</i>” 并进行配置，或者选择“<i>更多操作</i>”，导入已有配置。
   en-US: HertzBeat monitors the banner and hello response related metrics of the SMTP service.<br>You can click "<i>New SMTP Email Server</i>" and configure it, or select "<i>More Action</i>" to import the existing configuration.
   zh-TW: HertzBeat對SMTP服務的（Banner，helo響應）相關名額進行監測。<br>您可以點擊 “<i>新建 SMTP邮件服务器</i>” 並進行配置，或者選擇“<i>更多操作</i>”，導入已有配置。
+  ja-JP: HertzBeat は SMTPメールサーバーの一般的なメトリクスを監視します。<br>「<i>新規 SMTPメールサーバー</i>」をクリックしてパラメタを設定した後、新規することができます。
 # Input params define for monitoring(render web ui by the definition)
 params:
   # field-param field key
@@ -34,6 +36,7 @@ params:
     name:
       zh-CN: SMTP的Host
       en-US: Target Host
+      ja-JP: 目標ホスト
     # type-param field type(most mapping the html input type)
     type: host
     # required-true or false
@@ -44,20 +47,38 @@ params:
     name:
       zh-CN: 端口
       en-US: Port
+      ja-JP: ポート
     # type-param field type(most mapping the html input type)
     type: number
     # when type is number, range is required
     range: '[0,65535]'
     # required-true or false
     required: true
-    # default value 25
+    # default value 25(plain SMTP). For SSL SMTP commonly use 465, for STARTTLS commonly use 587.
     defaultValue: 25
+  - field: ssl
+    name:
+      zh-CN: 启用SSL/TLS直连
+      en-US: Enable SSL/TLS
+      ja-JP: SSL/TLSを有効化
+    type: boolean
+    required: false
+    defaultValue: false
+  - field: starttls
+    name:
+      zh-CN: 启用STARTTLS升级
+      en-US: Enable STARTTLS
+      ja-JP: STARTTLSを有効化
+    type: boolean
+    required: false
+    defaultValue: false
   # field-param field key
   - field: timeout
     # name-param field display i18n name
     name:
       zh-CN: 连接超时时间(ms)
       en-US: Connect Timeout(ms)
+      ja-JP: 接続タイムアウト（ｍｓ）
     # type-param field type(most mapping the html input type)
     type: number
     # when type is number, range is required
@@ -71,6 +92,7 @@ params:
     name:
       zh-CN: email
       en-US: email
+      ja-JP: 電子メール
     type: text
     # required-true or false
     required: true
@@ -81,6 +103,7 @@ metrics:
     i18n:
       zh-CN: 概要
       en-US: Summary
+      ja-JP: 概要
     # metrics scheduling priority(0->127)->(high->low), metrics with the same priority will be scheduled in parallel
     # priority 0's metrics is availability metrics, it will be scheduled first, only availability metrics collect success will the scheduling continue
     priority: 0
@@ -92,25 +115,29 @@ metrics:
         i18n:
           zh-CN: 响应时间
           en-US: Response Time
+          ja-JP: 応答時間
       - field: response
         type: 1
         i18n:
           zh-CN: 响应状态
           en-US: Response
+          ja-JP: 応答状態
       - field: smtpBanner
         type: 1
         i18n:
           zh-CN: SMTP Banner
           en-US: SMTP Banner
+          ja-JP: SMTP バナー
       - field: heloInfo
         type: 1
         i18n:
           zh-CN: Helo日志
           en-US: HeloInfo
+          ja-JP: Helo情報
 
     # the protocol used for monitoring, eg: sql, ssh, http, telnet, wmi, snmp, sdk
     protocol: smtp
-    # Specific collection configuration when protocol is telnet protocol
+    # Specific collection configuration when protocol is smtp protocol
     smtp:
       # telnet host
       host: ^_^host^_^
@@ -118,6 +145,10 @@ metrics:
       port: ^_^port^_^
       # timeout
       timeout: ^_^timeout^_^
+      # SSL/TLS direct connection (usually 465)
+      ssl: ^_^ssl^_^
+      # STARTTLS upgrade on plain connection (usually 587)
+      starttls: ^_^starttls^_^
       # email
       email: ^_^email^_^
 

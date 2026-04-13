@@ -32,7 +32,21 @@ func (c *redisCacheCollector) Collect(_ context.Context, task model.MetricsTask)
 		return map[string]string{
 			"used_memory":       "100",
 			"connected_clients": "10",
+			"db0":               "keys=10,expires=2,avg_ttl=1000",
+			"db0_keys":          "10",
+			"db0_expires":       "2",
+			"db0_avg_ttl":       "1000",
 			"identity":          "127.0.0.1:6379",
+		}, "ok", nil
+	}
+	if task.Params["section"] == "commandstats" {
+		return map[string]string{
+			"cmdstat_get":               "calls=8,usec=16,usec_per_call=2.00",
+			"cmdstat_get_calls":         "8",
+			"cmdstat_get_usec":          "16",
+			"cmdstat_get_usec_per_call": "2.00",
+			"identity":                  task.Params["host"] + ":" + task.Params["port"],
+			"section":                   task.Params["section"],
 		}, "ok", nil
 	}
 	return map[string]string{
@@ -180,6 +194,42 @@ func TestRedisCycleCacheReuse(t *testing.T) {
 	// With ~3 cycles in 120ms this should stay <= 4 (allowing timer jitter).
 	if rc.count.Load() > 4 {
 		t.Fatalf("expected redis collect reuse, too many collects: %d", rc.count.Load())
+	}
+}
+
+func TestCollectWithRedisCacheFallsBackToMissingSection(t *testing.T) {
+	rc := &redisCacheCollector{}
+	d := &Dispatcher{}
+	cache := newRedisCycleCache()
+	task := model.MetricsTask{
+		Name:     "commandstats",
+		Protocol: "redis",
+		Timeout:  time.Second,
+		Params: map[string]string{
+			"host":    "127.0.0.1",
+			"port":    "6379",
+			"section": "commandstats",
+		},
+		FieldSpecs: []model.FieldSpec{
+			{Field: "cmdstat_get"},
+			{Field: "cmdstat_get_calls"},
+			{Field: "cmdstat_get_usec"},
+			{Field: "cmdstat_get_usec_per_call"},
+		},
+	}
+
+	got, msg, err := d.collectWithRedisCache(context.Background(), rc, task, cache)
+	if err != nil {
+		t.Fatalf("collectWithRedisCache returned error: %v", err)
+	}
+	if msg != "ok" {
+		t.Fatalf("unexpected message: %s", msg)
+	}
+	if got["cmdstat_get_calls"] != "8" {
+		t.Fatalf("expected commandstats fallback fields, got %+v", got)
+	}
+	if rc.count.Load() != 2 {
+		t.Fatalf("expected one INFO fetch plus one section fallback, got %d collects", rc.count.Load())
 	}
 }
 

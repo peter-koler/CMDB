@@ -36,6 +36,7 @@ class Config:
 
     PAGE_DEFAULT_SIZE = 20
     PAGE_MAX_SIZE = 100
+    CMDB_TOPOLOGY_MAX_DEPTH = int(os.environ.get("CMDB_TOPOLOGY_MAX_DEPTH", "10"))
 
     # SocketIO configuration
     SOCKETIO_CORS_ALLOWED_ORIGINS = ["http://localhost:3000", "http://localhost:5173"]

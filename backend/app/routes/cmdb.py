@@ -3,7 +3,6 @@ from datetime import datetime
 from app.models.model_category import ModelCategory
 from app.models.cmdb_model import CmdbModel, ModelType
 from app.models.model_region import ModelRegion
-from app.models.model_field import ModelField
 from app.models.ci_instance import CiInstance
 from app.models.cmdb_dict import CmdbDictType, CmdbDictItem
 from app.utils.auth import token_required, admin_required
@@ -401,6 +400,7 @@ def get_models():
     """获取模型列表"""
     category_id = request.args.get('category_id', type=int)
     model_type_id = request.args.get('model_type_id', type=int)
+    model_type_code = request.args.get('model_type_code', type=str)
     keyword = request.args.get('keyword', '')
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 20, type=int)
@@ -412,6 +412,9 @@ def get_models():
 
     if model_type_id:
         query = query.filter_by(model_type_id=model_type_id)
+    
+    if model_type_code:
+        query = query.filter(CmdbModel.config.contains(f'"model_type_code": "{model_type_code}"'))
     
     if keyword:
         query = query.filter(
@@ -683,110 +686,12 @@ def update_region(id):
 def delete_region(id):
     """删除模型区域"""
     region = ModelRegion.query.get_or_404(id)
-    
-    if region.fields.count() > 0:
-        return jsonify({'code': 400, 'message': '该区域下存在字段，无法删除'}), 400
-    
     region.delete()
     
     return jsonify({
         'code': 200,
         'message': '删除成功'
     })
-
-
-# ==================== 模型字段管理 ====================
-
-@cmdb_bp.route('/models/<int:model_id>/fields', methods=['POST'])
-@token_required
-@admin_required
-@log_operation(operation_type='CREATE', operation_object='model_field')
-def create_field(model_id):
-    """创建模型字段"""
-    CmdbModel.query.get_or_404(model_id)
-    data = request.get_json()
-    
-    if not data.get('name') or not data.get('code'):
-        return jsonify({'code': 400, 'message': '名称和编码不能为空'}), 400
-    
-    if not data.get('field_type'):
-        return jsonify({'code': 400, 'message': '字段类型不能为空'}), 400
-    
-    field = ModelField(
-        model_id=model_id,
-        region_id=data.get('region_id'),
-        name=data['name'],
-        code=data['code'],
-        field_type=data['field_type'],
-        is_required=data.get('is_required', False),
-        is_unique=data.get('is_unique', False),
-        default_value=data.get('default_value'),
-        options=json.dumps(data.get('options', [])),
-        validation_rules=json.dumps(data.get('validation_rules', {})),
-        reference_model_id=data.get('reference_model_id'),
-        date_format=data.get('date_format'),
-        sort_order=data.get('sort_order', 0),
-        config=json.dumps(data.get('config', {}))
-    )
-    field.save()
-    
-    return jsonify({
-        'code': 200,
-        'message': '创建成功',
-        'data': field.to_dict()
-    })
-
-
-@cmdb_bp.route('/fields/<int:id>', methods=['PUT'])
-@token_required
-@admin_required
-@log_operation(operation_type='UPDATE', operation_object='model_field')
-def update_field(id):
-    """更新模型字段"""
-    field = ModelField.query.get_or_404(id)
-    data = request.get_json()
-    
-    field.name = data.get('name', field.name)
-    field.code = data.get('code', field.code)
-    field.field_type = data.get('field_type', field.field_type)
-    field.is_required = data.get('is_required', field.is_required)
-    field.is_unique = data.get('is_unique', field.is_unique)
-    field.default_value = data.get('default_value', field.default_value)
-    field.region_id = data.get('region_id', field.region_id)
-    field.reference_model_id = data.get('reference_model_id', field.reference_model_id)
-    field.date_format = data.get('date_format', field.date_format)
-    field.sort_order = data.get('sort_order', field.sort_order)
-    
-    if 'options' in data:
-        field.options = json.dumps(data['options'])
-    if 'validation_rules' in data:
-        field.validation_rules = json.dumps(data['validation_rules'])
-    if 'config' in data:
-        field.config = json.dumps(data['config'])
-    
-    field.save()
-    
-    return jsonify({
-        'code': 200,
-        'message': '更新成功',
-        'data': field.to_dict()
-    })
-
-
-@cmdb_bp.route('/fields/<int:id>', methods=['DELETE'])
-@token_required
-@admin_required
-@log_operation(operation_type='DELETE', operation_object='model_field')
-def delete_field(id):
-    """删除模型字段"""
-    field = ModelField.query.get_or_404(id)
-    field.delete()
-    
-    return jsonify({
-        'code': 200,
-        'message': '删除成功'
-    })
-
 
 # ==================== 导入导出 ====================
 
@@ -865,53 +770,10 @@ def import_model():
         region.save()
         region_map[region_data['id']] = region.id
     
-    # 导入字段
-    for field_data in model_data.get('fields', []):
-        field = ModelField(
-            model_id=model.id,
-            region_id=region_map.get(field_data.get('region_id')),
-            name=field_data['name'],
-            code=field_data['code'],
-            field_type=field_data['field_type'],
-            is_required=field_data.get('is_required', False),
-            is_unique=field_data.get('is_unique', False),
-            default_value=field_data.get('default_value'),
-            options=json.dumps(field_data.get('options', [])),
-            validation_rules=json.dumps(field_data.get('validation_rules', {})),
-            date_format=field_data.get('date_format'),
-            sort_order=field_data.get('sort_order', 0),
-            config=json.dumps(field_data.get('config', {}))
-        )
-        field.save()
-    
     return jsonify({
         'code': 200,
         'message': '导入成功',
         'data': model.to_full_dict()
-    })
-
-
-# ==================== 字段排序 ====================
-
-@cmdb_bp.route('/fields/sort', methods=['POST'])
-@token_required
-@admin_required
-@log_operation(operation_type='UPDATE', operation_object='model_field')
-def sort_fields():
-    """批量更新字段排序"""
-    data = request.get_json()
-    field_orders = data.get('field_orders', [])
-    
-    for item in field_orders:
-        field = ModelField.query.get(item['id'])
-        if field:
-            field.sort_order = item['sort_order']
-    
-    db.session.commit()
-    
-    return jsonify({
-        'code': 200,
-        'message': '排序更新成功'
     })
 
 

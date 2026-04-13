@@ -257,7 +257,9 @@ def get_batch_scan_config(model_id):
 
     next_run_at = None
     for job in scheduled_jobs:
-        if job["model_id"] == model_id:
+        if job.get("job_type") != "model":
+            continue
+        if job.get("model_id") == model_id:
             next_run_at = job["next_run_time"]
             break
 
@@ -302,14 +304,20 @@ def update_batch_scan_config(model_id):
         config["batch_scan_enabled"] = data["batch_scan_enabled"]
 
     if "batch_scan_cron" in data:
-        cron = data["batch_scan_cron"]
-        try:
-            from apscheduler.triggers.cron import CronTrigger
+        cron = (data["batch_scan_cron"] or "").strip()
+        if cron:
+            try:
+                from apscheduler.triggers.cron import CronTrigger
 
-            CronTrigger.from_crontab(cron)
-            config["batch_scan_cron"] = cron
-        except Exception as e:
-            return jsonify({"code": 400, "message": f"无效的 Cron 表达式: {e}"}), 400
+                CronTrigger.from_crontab(cron)
+                config["batch_scan_cron"] = cron
+            except Exception as e:
+                return jsonify({"code": 400, "message": f"无效的 Cron 表达式: {e}"}), 400
+        else:
+            config["batch_scan_cron"] = ""
+
+    if config.get("batch_scan_enabled") and not (config.get("batch_scan_cron") or "").strip():
+        return jsonify({"code": 400, "message": "启用批量扫描时 Cron 表达式不能为空"}), 400
 
     model.set_config(config)
     db.session.commit()

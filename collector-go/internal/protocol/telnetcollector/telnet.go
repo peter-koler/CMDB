@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,20 +26,25 @@ func (c *Collector) Collect(ctx context.Context, task model.MetricsTask) (map[st
 	if host == "" || port == "" {
 		return nil, "", fmt.Errorf("missing telnet host or port")
 	}
-	if cmd == "" {
-		return nil, "", fmt.Errorf("missing telnet cmd")
-	}
 	timeout := task.Timeout
 	if timeout <= 0 {
 		timeout = 5 * time.Second
 	}
 	address := net.JoinHostPort(host, port)
 	dialer := &net.Dialer{Timeout: timeout}
+	start := time.Now()
 	conn, err := dialer.DialContext(ctx, "tcp", address)
 	if err != nil {
 		return nil, "", err
 	}
 	defer conn.Close()
+	latencyMs := time.Since(start).Milliseconds()
+	if cmd == "" {
+		return map[string]string{
+			"responseTime": strconv.FormatInt(latencyMs, 10),
+			"reachable":    "1",
+		}, "ok", nil
+	}
 	_ = conn.SetDeadline(time.Now().Add(timeout))
 	if _, err := conn.Write([]byte(cmd)); err != nil {
 		return nil, "", err
@@ -57,6 +63,12 @@ func (c *Collector) Collect(ctx context.Context, task model.MetricsTask) (map[st
 		}
 	}
 	fields := parseTelnetResult(task, data)
+	if _, ok := fields["responseTime"]; !ok {
+		fields["responseTime"] = strconv.FormatInt(latencyMs, 10)
+	}
+	if _, ok := fields["reachable"]; !ok {
+		fields["reachable"] = "1"
+	}
 	return fields, "ok", nil
 }
 

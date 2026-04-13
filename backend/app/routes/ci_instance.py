@@ -2,8 +2,6 @@ from flask import Blueprint, request, jsonify, send_from_directory
 from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 from app.models.ci_instance import CiInstance, CiHistory
 from app.models.cmdb_model import CmdbModel
-from app.models.model_field import ModelField
-from app.models.model_region import ModelRegion
 from app.models.cmdb_relation import CmdbRelation, RelationTrigger
 from app.services.relation_service import (
     create_relation_with_validation,
@@ -18,31 +16,13 @@ import os
 import json
 import csv
 import io
+from app.utils.form_config_fields import extract_form_field_map, extract_form_fields
 
 ci_bp = Blueprint("ci", __name__, url_prefix="/api/v1/cmdb/instances")
 
 # 文件上传配置
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads")
-ALLOWED_EXTENSIONS = {
-    "png",
-    "jpg",
-    "jpeg",
-    "gif",
-    "pdf",
-    "doc",
-    "docx",
-    "xls",
-    "xlsx",
-    "txt",
-    "zip",
-}
-
-
-def allowed_file(filename):
-    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
-
-
 def require_admin():
     claims = get_jwt()
     return claims.get("role") == "admin"
@@ -397,131 +377,10 @@ def get_batch_edit_fields():
     if not model:
         return jsonify({"code": 400, "message": "模型不存在"}), 400
 
-    # 获取模型字段和区域信息
-    fields = (
-        ModelField.query.filter_by(model_id=model_id)
-        .order_by(ModelField.sort_order)
-        .all()
-    )
-    regions = ModelRegion.query.filter_by(model_id=model_id).all()
-    region_map = {region.id: region for region in regions}
-
-    # 从 form_config 提取字段（与导出功能保持一致）
-    def extract_form_fields(form_config):
-        if not form_config:
-            return []
-        config_data = form_config
-        # 处理双重编码的 JSON 字符串
-        if isinstance(config_data, str):
-            try:
-                config_data = json.loads(config_data)
-            except Exception:
-                return []
-        # 如果解析后还是字符串，再解析一次
-        if isinstance(config_data, str):
-            try:
-                config_data = json.loads(config_data)
-            except Exception:
-                return []
-        if not isinstance(config_data, list):
-            return []
-        result = []
-        seen = set()
-
-        def add_field(code, name, group_label, group_order, field_order, field_type="text", options=None):
-            if not code or code in seen:
-                return
-            result.append({
-                "code": code,
-                "name": name,
-                "group_label": group_label,
-                "group_order": group_order,
-                "field_order": field_order,
-                "field_type": field_type,
-                "options": options or [],
-            })
-            seen.add(code)
-
-        def walk(items, group_label="基础属性", group_order=-1):
-            for item in items:
-                if not isinstance(item, dict):
-                    continue
-                control_type = item.get("controlType")
-                props = item.get("props") if isinstance(item.get("props"), dict) else {}
-                code = props.get("code")
-                if control_type == "group":
-                    group_name = props.get("label") or "属性分组"
-                    children = item.get("children")
-                    if isinstance(children, list):
-                        walk(children, group_name, item.get("sortOrder", group_order))
-                    continue
-                if code:
-                    name = props.get("label") or code
-                    # 解析选项
-                    options = []
-                    raw_options = props.get("options", [])
-                    if isinstance(raw_options, list):
-                        for opt in raw_options:
-                            if isinstance(opt, dict):
-                                options.append({
-                                    "label": opt.get("label", ""),
-                                    "value": opt.get("value", "")
-                                })
-                    add_field(code, name, group_label, group_order, props.get("sortOrder", 0), control_type or "text", options)
-                children = item.get("children")
-                if isinstance(children, list):
-                    walk(children, group_label, group_order)
-
-        walk(config_data)
-        return result
-
-    # 构建字段映射
-    field_map = {}
-    for field in fields:
-        group_label = "基础属性"
-        group_order = -1
-        region = region_map.get(field.region_id)
-        if region:
-            group_label = region.name
-            group_order = region.sort_order if region.sort_order is not None else 0
-        field_map[field.code] = {
-            "id": field.id,
-            "code": field.code,
-            "name": field.name,
-            "field_type": field.field_type,
-            "is_required": field.is_required,
-            "options": field.to_dict().get("options", []),
-            "region_id": field.region_id,
-            "group_label": group_label,
-            "group_order": group_order,
-            "field_order": field.sort_order if field.sort_order is not None else 0,
-        }
-
-    # 从 form_config 提取字段并合并
-    form_fields = extract_form_fields(model.form_config)
-    for field in form_fields:
-        if field["code"] not in field_map:
-            field_map[field["code"]] = {
-                "id": None,
-                "code": field["code"],
-                "name": field["name"],
-                "field_type": field["field_type"],
-                "is_required": False,
-                "options": field.get("options", []),
-                "region_id": None,
-                "group_label": field.get("group_label", "基础属性"),
-                "group_order": field.get("group_order", -1),
-                "field_order": field.get("field_order", 0),
-            }
-
-    # 过滤出允许批量编辑的字段
     editable_fields = []
-    for field in field_map.values():
+    for field in extract_form_fields(model.form_config):
         if field["field_type"] in ALLOWED_BATCH_EDIT_TYPES:
             editable_fields.append(field)
-
-    # 按分组和排序号排序
-    editable_fields.sort(key=lambda x: (x.get("group_order", -1), x.get("field_order", 0)))
 
     return jsonify(
         {
@@ -558,9 +417,10 @@ def batch_update():
     if not updates:
         return jsonify({"code": 400, "message": "请提供要更新的属性"}), 400
 
-    # 获取模型字段定义，校验字段类型
-    model_fields = ModelField.query.filter_by(model_id=model_id).all()
-    field_type_map = {f.code: f.field_type for f in model_fields}
+    field_type_map = {
+        code: field.get("field_type", "text")
+        for code, field in extract_form_field_map(CmdbModel.query.get(model_id).form_config).items()
+    }
 
     # 校验所有要更新的字段是否允许批量编辑
     disallowed_fields = []
@@ -837,9 +697,6 @@ def upload_file():
     if file.filename == "":
         return jsonify({"code": 400, "message": "没有选择文件"}), 400
 
-    if not allowed_file(file.filename):
-        return jsonify({"code": 400, "message": "不支持的文件类型"}), 400
-
     # 生成唯一文件名
     filename = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{file.filename}"
 
@@ -930,96 +787,7 @@ def export_instances():
 
     instances = query.all()
 
-    fields = (
-        ModelField.query.filter_by(model_id=model_id)
-        .order_by(ModelField.sort_order)
-        .all()
-    )
-    regions = ModelRegion.query.filter_by(model_id=model_id).all()
-    region_map = {region.id: region for region in regions}
-
-    def extract_form_fields(form_config):
-        if not form_config:
-            return []
-        config_data = form_config
-        # 处理双重编码的 JSON 字符串
-        if isinstance(config_data, str):
-            try:
-                config_data = json.loads(config_data)
-            except Exception:
-                return []
-        # 如果解析后还是字符串，再解析一次
-        if isinstance(config_data, str):
-            try:
-                config_data = json.loads(config_data)
-            except Exception:
-                return []
-        if not isinstance(config_data, list):
-            return []
-        result = []
-        seen = set()
-
-        def add_field(code, name, group_label, group_order, field_order):
-            if not code or code in seen:
-                return
-            result.append(
-                {
-                    "code": code,
-                    "name": name,
-                    "group_label": group_label,
-                    "group_order": group_order,
-                    "field_order": field_order,
-                }
-            )
-            seen.add(code)
-
-        def walk(items, group_label="基础属性", group_order=-1):
-            for item in items:
-                if not isinstance(item, dict):
-                    continue
-                control_type = item.get("controlType")
-                props = item.get("props") if isinstance(item.get("props"), dict) else {}
-                code = props.get("code")
-                if control_type == "group":
-                    group_name = props.get("label") or "属性分组"
-                    children = item.get("children")
-                    if isinstance(children, list):
-                        walk(children, group_name, item.get("sortOrder", group_order))
-                    continue
-                if code:
-                    name = props.get("label") or code
-                    add_field(
-                        code, name, group_label, group_order, props.get("sortOrder", 0)
-                    )
-                children = item.get("children")
-                if isinstance(children, list):
-                    walk(children, group_label, group_order)
-
-        walk(config_data)
-        return result
-
-    field_map = {}
-    for field in fields:
-        group_label = "基础属性"
-        group_order = -1
-        region = region_map.get(field.region_id)
-        if region:
-            group_label = region.name
-            group_order = region.sort_order if region.sort_order is not None else 0
-        field_map[field.code] = {
-            "code": field.code,
-            "name": field.name,
-            "group_label": group_label,
-            "group_order": group_order,
-            "field_order": field.sort_order if field.sort_order is not None else 0,
-        }
-
-    form_fields = extract_form_fields(model.form_config)
-    for field in form_fields:
-        if field["code"] not in field_map:
-            field_map[field["code"]] = field
-
-    field_defs = list(field_map.values())
+    field_defs = extract_form_fields(model.form_config)
     if not field_defs:
         attr_keys = set()
         for instance in instances:
@@ -1034,10 +802,6 @@ def export_instances():
             }
             for key in sorted(attr_keys)
         ]
-    field_defs.sort(
-        key=lambda item: (item.get("group_order", -1), item.get("field_order", 0))
-    )
-
     output = io.StringIO()
     headers = ["CI编码", "CI名称", "部门", "创建人", "创建时间"]
 
@@ -1108,27 +872,21 @@ def import_instances():
     if not model:
         return jsonify({"code": 400, "message": "模型不存在"}), 400
 
-    fields = (
-        ModelField.query.filter_by(model_id=model_id)
-        .order_by(ModelField.sort_order)
-        .all()
-    )
-
     def normalize_header(value):
         return (value or "").strip().replace("(必填)", "").lstrip("*").strip()
 
     field_alias_to_code = {}
     required_field_codes = set()
     field_by_code = {}
-    for field in fields:
-        field_by_code[field.code] = field
-        if field.is_required:
-            required_field_codes.add(field.code)
-        aliases = [field.code, field.name, f"*{field.name}", f"*{field.name}(必填)"]
+    for field in extract_form_fields(model.form_config):
+        field_by_code[field["code"]] = field
+        if field.get("is_required"):
+            required_field_codes.add(field["code"])
+        aliases = [field["code"], field["name"], f"*{field['name']}", f"*{field['name']}(必填)"]
         for alias in aliases:
             key = normalize_header(alias)
             if key:
-                field_alias_to_code[key] = field.code
+                field_alias_to_code[key] = field["code"]
 
     try:
         stream = io.StringIO(file.stream.read().decode("UTF-8"), newline=None)
@@ -1176,7 +934,7 @@ def import_instances():
                     if idx < len(row):
                         value = row[idx].strip()
                         field = field_by_code.get(field_code)
-                        if field and field.field_type == "number" and value:
+                        if field and field.get("field_type") == "number" and value:
                             try:
                                 value = int(value)
                             except Exception:
@@ -1189,11 +947,11 @@ def import_instances():
                 if not name:
                     for field in fields:
                         if (
-                            field.is_required
-                            and field.field_type in ("text", "string")
-                            and field.code in attr_values
+                            field.get("is_required")
+                            and field.get("field_type") in ("text", "string")
+                            and field["code"] in attr_values
                         ):
-                            name = str(attr_values[field.code])
+                            name = str(attr_values[field["code"]])
                             break
                     if not name:
                         name = code
@@ -1204,7 +962,7 @@ def import_instances():
                     val = attr_values.get(required_code)
                     if val is None or str(val).strip() == "":
                         required_name = (
-                            field_by_code.get(required_code).name
+                            field_by_code.get(required_code).get("name")
                             if field_by_code.get(required_code)
                             else required_code
                         )
@@ -1268,111 +1026,8 @@ def download_import_template():
     if not model:
         return jsonify({"code": 400, "message": "模型不存在"}), 400
 
-    # 获取模型字段和区域信息
-    fields = (
-        ModelField.query.filter_by(model_id=model_id)
-        .order_by(ModelField.sort_order)
-        .all()
-    )
-    regions = ModelRegion.query.filter_by(model_id=model_id).all()
-    region_map = {region.id: region for region in regions}
-
-    # 从 form_config 提取字段（与导出功能保持一致）
-    def extract_form_fields(form_config):
-        if not form_config:
-            return []
-        config_data = form_config
-        # 处理双重编码的 JSON 字符串
-        if isinstance(config_data, str):
-            try:
-                config_data = json.loads(config_data)
-            except Exception:
-                return []
-        # 如果解析后还是字符串，再解析一次
-        if isinstance(config_data, str):
-            try:
-                config_data = json.loads(config_data)
-            except Exception:
-                return []
-        if not isinstance(config_data, list):
-            return []
-        result = []
-        seen = set()
-
-        def add_field(
-            code, name, group_label, group_order, field_order, field_type="text"
-        ):
-            if not code or code in seen:
-                return
-            result.append(
-                {
-                    "code": code,
-                    "name": name,
-                    "group_label": group_label,
-                    "group_order": group_order,
-                    "field_order": field_order,
-                    "field_type": field_type,
-                }
-            )
-            seen.add(code)
-
-        def walk(items, group_label="基础属性", group_order=-1):
-            for item in items:
-                if not isinstance(item, dict):
-                    continue
-                control_type = item.get("controlType")
-                props = item.get("props") if isinstance(item.get("props"), dict) else {}
-                code = props.get("code")
-                if control_type == "group":
-                    group_name = props.get("label") or "属性分组"
-                    children = item.get("children")
-                    if isinstance(children, list):
-                        walk(children, group_name, item.get("sortOrder", group_order))
-                    continue
-                if code:
-                    name = props.get("label") or code
-                    add_field(
-                        code,
-                        name,
-                        group_label,
-                        group_order,
-                        props.get("sortOrder", 0),
-                        control_type or "text",
-                    )
-                children = item.get("children")
-                if isinstance(children, list):
-                    walk(children, group_label, group_order)
-
-        walk(config_data)
-        return result
-
-    # 构建字段映射
-    field_map = {}
-    for field in fields:
-        group_label = "基础属性"
-        group_order = -1
-        region = region_map.get(field.region_id)
-        if region:
-            group_label = region.name
-            group_order = region.sort_order if region.sort_order is not None else 0
-        field_map[field.code] = {
-            "code": field.code,
-            "name": field.name,
-            "group_label": group_label,
-            "group_order": group_order,
-            "field_order": field.sort_order if field.sort_order is not None else 0,
-            "field_type": field.field_type,
-            "is_required": field.is_required,
-        }
-
-    # 从 form_config 提取字段并合并
-    form_fields = extract_form_fields(model.form_config)
-    for field in form_fields:
-        if field["code"] not in field_map:
-            field_map[field["code"]] = field
-
-    # 如果没有字段定义，返回空模板
-    if not field_map:
+    field_defs = extract_form_fields(model.form_config)
+    if not field_defs:
         return jsonify(
             {
                 "code": 200,
@@ -1383,12 +1038,6 @@ def download_import_template():
                 },
             }
         )
-
-    # 转换为列表并排序
-    field_defs = list(field_map.values())
-    field_defs.sort(
-        key=lambda item: (item.get("group_order", -1), item.get("field_order", 0))
-    )
 
     output = io.StringIO()
     writer = csv.writer(output)
