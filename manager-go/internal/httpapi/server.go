@@ -37,6 +37,7 @@ type Server struct {
 	licenseManager   *license.Manager
 	vmQuery          *metrics.VMClient
 	stringLatest     func(monitorID int64, names []string) map[string]StringLatestValue
+	topologyStore    *store.TopologyTemplateStore
 }
 
 type Option func(*Server)
@@ -82,6 +83,12 @@ func WithVMQueryClient(client *metrics.VMClient) Option {
 func WithStringLatestProvider(provider func(monitorID int64, names []string) map[string]StringLatestValue) Option {
 	return func(s *Server) {
 		s.stringLatest = provider
+	}
+}
+
+func WithTopologyTemplateStore(st *store.TopologyTemplateStore) Option {
+	return func(s *Server) {
+		s.topologyStore = st
 	}
 }
 
@@ -160,6 +167,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/v1/labels/", s.handleLabelByID)
 	s.mux.HandleFunc("/api/v1/status-pages", s.handleStatusPages)
 	s.mux.HandleFunc("/api/v1/status-pages/", s.handleStatusPageByID)
+	s.mux.HandleFunc("/api/v1/cmdb/topology-templates", s.handleCMDBTopologyTemplates)
+	s.mux.HandleFunc("/api/v1/cmdb/topology-templates/", s.handleCMDBTopologyTemplateByID)
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
@@ -1233,6 +1242,146 @@ func (s *Server) handleStatusPages(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleStatusPageByID(w http.ResponseWriter, r *http.Request) {
 	s.handleResourceByID(w, r, "/api/v1/status-pages/", "status-pages")
+}
+
+func (s *Server) handleCMDBTopologyTemplates(w http.ResponseWriter, r *http.Request) {
+	if s.topologyStore == nil {
+		writeErr(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "topology template store is not configured")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		page, pageSize := pageParams(r)
+		keyword := strings.TrimSpace(r.URL.Query().Get("keyword"))
+		items, total, err := s.topologyStore.List(keyword, page, pageSize)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"items":     items,
+			"total":     total,
+			"page":      page,
+			"page_size": pageSize,
+		})
+	case http.MethodPost:
+		payload, ok := decodeMapBody(w, r)
+		if !ok {
+			return
+		}
+		in, err := decodeTopologyTemplatePayload(payload)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error())
+			return
+		}
+		if strings.TrimSpace(in.Name) == "" {
+			writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "name is required")
+			return
+		}
+		item, err := s.topologyStore.Create(in)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+			return
+		}
+		writeJSON(w, http.StatusCreated, item)
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) handleCMDBTopologyTemplateByID(w http.ResponseWriter, r *http.Request) {
+	if s.topologyStore == nil {
+		writeErr(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "topology template store is not configured")
+		return
+	}
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/cmdb/topology-templates/")
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) == 0 || parts[0] == "" {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	id := strings.TrimSpace(parts[0])
+
+	if len(parts) == 1 {
+		switch r.Method {
+		case http.MethodGet:
+			item, err := s.topologyStore.Get(id)
+			if err != nil {
+				if errors.Is(err, store.ErrNotFound) {
+					writeErr(w, http.StatusNotFound, "RESOURCE_NOT_FOUND", "topology template not found")
+					return
+				}
+				writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+				return
+			}
+			writeJSON(w, http.StatusOK, item)
+		case http.MethodPut:
+			payload, ok := decodeMapBody(w, r)
+			if !ok {
+				return
+			}
+			in, err := decodeTopologyTemplatePayload(payload)
+			if err != nil {
+				writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error())
+				return
+			}
+			if strings.TrimSpace(in.Name) == "" {
+				writeErr(w, http.StatusBadRequest, "INVALID_ARGUMENT", "name is required")
+				return
+			}
+			item, err := s.topologyStore.Update(id, in)
+			if err != nil {
+				if errors.Is(err, store.ErrNotFound) {
+					writeErr(w, http.StatusNotFound, "RESOURCE_NOT_FOUND", "topology template not found")
+					return
+				}
+				writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+				return
+			}
+			writeJSON(w, http.StatusOK, item)
+		case http.MethodDelete:
+			if err := s.topologyStore.Delete(id); err != nil {
+				if errors.Is(err, store.ErrNotFound) {
+					writeErr(w, http.StatusNotFound, "RESOURCE_NOT_FOUND", "topology template not found")
+					return
+				}
+				writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+		return
+	}
+
+	if len(parts) == 2 && parts[1] == "clone" && r.Method == http.MethodPost {
+		item, err := s.topologyStore.Clone(id, "")
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				writeErr(w, http.StatusNotFound, "RESOURCE_NOT_FOUND", "topology template not found")
+				return
+			}
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, item)
+		return
+	}
+
+	w.WriteHeader(http.StatusNotFound)
+}
+
+func decodeTopologyTemplatePayload(payload map[string]any) (store.TopologyTemplate, error) {
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return store.TopologyTemplate{}, err
+	}
+	var out store.TopologyTemplate
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return store.TopologyTemplate{}, err
+	}
+	return out, nil
 }
 
 func (s *Server) handleResourceCollection(w http.ResponseWriter, r *http.Request, name string) {

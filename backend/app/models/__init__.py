@@ -12,6 +12,7 @@ from app.models.ci_instance import CiInstance, CiHistory, CodeSequence
 from app.models.cmdb_relation import RelationType, CmdbRelation, RelationTrigger
 from app.models.cmdb_dict import CmdbDictType, CmdbDictItem
 from app.models.custom_view import CustomView, CustomViewNode, CustomViewNodePermission
+from app.models.cmdb_topology_template import CmdbTopologyTemplate
 from app.models.hertzbeat_models import (
     # 采集器管理
     Collector,
@@ -81,6 +82,7 @@ __all__ = [
     "CustomView",
     "CustomViewNode",
     "CustomViewNodePermission",
+    "CmdbTopologyTemplate",
     # HertzBeat 模型
     "Collector",
     "CollectorMonitorBind",

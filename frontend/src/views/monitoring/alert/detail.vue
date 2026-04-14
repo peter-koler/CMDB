@@ -30,7 +30,12 @@
         <a-descriptions-item label="阈值">{{ alertDetail?.threshold ?? '-' }}</a-descriptions-item>
         <a-descriptions-item label="实例">{{ alertDetail?.instance || '-' }}</a-descriptions-item>
         <a-descriptions-item label="目标">{{ monitorDetail?.target || '-' }}</a-descriptions-item>
-        <a-descriptions-item label="CI编码">{{ monitorDetail?.ci_code || '-' }}</a-descriptions-item>
+        <a-descriptions-item label="CI编码">
+          <a v-if="monitorDetail?.ci_id" @click="openCiDetail(monitorDetail.ci_id)" style="cursor: pointer; color: var(--app-accent);">
+            {{ monitorDetail?.ci_code || '-' }}
+          </a>
+          <span v-else>{{ monitorDetail?.ci_code || '-' }}</span>
+        </a-descriptions-item>
         <a-descriptions-item label="CI名称">{{ monitorDetail?.ci_name || '-' }}</a-descriptions-item>
         <a-descriptions-item label="告警描述" :span="2">{{ alertDescription }}</a-descriptions-item>
       </a-descriptions>
@@ -260,6 +265,13 @@
       </a-tabs>
       </a-space>
     </a-card>
+
+    <!-- CI详情弹窗 -->
+    <CiDetailDrawer
+      :visible="ciDetailVisible"
+      :instance-id="selectedCiId"
+      @update:visible="ciDetailVisible = $event"
+    />
   </div>
 </template>
 
@@ -304,6 +316,7 @@ import {
 } from '@/api/monitoring'
 import { fetchTrendSeries, formatMetricValue } from '@/composables/useMonitorMetrics'
 import AlertTopology from './components/AlertTopology.vue'
+import CiDetailDrawer from '@/views/cmdb/instance/components/CiDetailDrawer.vue'
 
 echarts.use([LineChart, GridComponent, TooltipComponent, DataZoomComponent, LegendComponent, CanvasRenderer])
 
@@ -316,6 +329,20 @@ const userStore = useUserStore()
 const alertDetail = ref<AlertItem | null>(null)
 const monitorDetail = ref<MonitoringTarget | null>(null)
 const activeTab = ref<'metrics' | 'related' | 'history' | 'process' | 'escalation' | 'topology' | 'rules' | 'notices'>('metrics')
+
+// CI详情弹窗
+const ciDetailVisible = ref(false)
+const selectedCiId = ref<number | null>(null)
+
+const openCiDetail = (ciId: number) => {
+  selectedCiId.value = ciId
+  ciDetailVisible.value = true
+}
+
+const closeCiDetail = () => {
+  ciDetailVisible.value = false
+  selectedCiId.value = null
+}
 
 const canClaim = computed(() =>
   userStore.hasPermission('monitoring:alert:claim') ||

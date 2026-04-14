@@ -21,7 +21,17 @@
 
             <a-divider orientation="left">入口节点锚定</a-divider>
             <a-form-item label="Seed 模型（可多选）">
-              <a-select v-model:value="form.seedModels" mode="multiple" :options="modelOptions" />
+              <a-select
+                v-model:value="form.seedModels"
+                mode="multiple"
+                :loading="baseOptionsLoading"
+                placeholder="请选择 Seed 模型"
+                allow-clear
+              >
+                <a-select-option v-for="item in modelOptions" :key="item.value" :value="item.value">
+                  {{ item.label }}
+                </a-select-option>
+              </a-select>
             </a-form-item>
 
             <a-form-item label="关系穿透方向">
@@ -33,18 +43,26 @@
             </a-form-item>
 
             <a-form-item label="允许关系类型">
-              <a-checkbox-group v-model:value="form.allowedRelationTypes" :options="relationTypeOptions" />
+              <a-checkbox-group v-model:value="form.allowedRelationTypes" :options="relationTypeOptionItems" />
             </a-form-item>
 
             <a-divider orientation="left">展开/收起资源类型（模型剪枝）</a-divider>
-            <a-tree
-              checkable
-              block-node
-              default-expand-all
-              :tree-data="modelTreeData"
-              :checked-keys="safeCheckedModelKeys"
-              @check="handleModelTreeCheck"
-            />
+            <a-form-item label="可见模型（多选）">
+              <a-select
+                v-model:value="form.visibleModelKeys"
+                mode="multiple"
+                show-search
+                option-filter-prop="label"
+                :loading="baseOptionsLoading"
+                placeholder="请选择可见模型（支持模糊搜索）"
+                allow-clear
+                :max-tag-count="4"
+              >
+                <a-select-option v-for="item in modelOptions" :key="item.value" :value="item.value" :label="item.label">
+                  {{ item.label }}
+                </a-select-option>
+              </a-select>
+            </a-form-item>
 
             <a-divider orientation="left">拓扑分层（Layout Mapping）</a-divider>
             <a-space direction="vertical" style="width: 100%" size="small">
@@ -61,9 +79,15 @@
                   v-model:value="layer.modelKeys"
                   mode="multiple"
                   size="small"
-                  :options="modelOptions"
+                  :loading="baseOptionsLoading"
+                  style="width: 100%"
                   placeholder="选择归属模型"
-                />
+                  allow-clear
+                >
+                  <a-select-option v-for="item in modelOptions" :key="item.value" :value="item.value">
+                    {{ item.label }}
+                  </a-select-option>
+                </a-select>
               </div>
             </a-space>
 
@@ -122,54 +146,43 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { message } from 'ant-design-vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  buildModelTree,
   createEmptyTemplate,
-  getTopologyTemplate,
   modelDefs,
-  relationTypeOptions,
+  relationTypeOptions
+} from './utils/template-meta'
+import { getModels, getModelsTree } from '@/api/cmdb'
+import { getRelationTypes } from '@/api/cmdb-relation'
+import {
+  createCmdbTopologyTemplate,
+  getCmdbTopologyTemplate,
   TopologyTemplate,
-  upsertTopologyTemplate
-} from '@/mock/topology-template'
+  updateCmdbTopologyTemplate
+} from '@/api/cmdb-topology-template'
 
 const route = useRoute()
 const router = useRouter()
 const id = computed(() => String(route.params.id || 'new'))
 const isNew = computed(() => id.value === 'new')
 
+type OptionItem = { label: string; value: string }
+
+const modelOptions = ref<OptionItem[]>(modelDefs.map((item) => ({ label: item.label, value: item.key })))
+const relationTypeOptionItems = ref<OptionItem[]>(relationTypeOptions.map((item) => ({ label: item.label, value: item.value })))
+const baseOptionsLoading = ref(false)
+
 const modelByKey = computed<Record<string, { key: string; label: string }>>(() => {
   const map: Record<string, { key: string; label: string }> = {}
-  modelDefs.forEach((item) => {
-    map[item.key] = item
+  modelOptions.value.forEach((item) => {
+    map[item.value] = { key: item.value, label: item.label }
   })
   return map
 })
 
-const modelOptions = modelDefs.map((item) => ({ label: item.label, value: item.key }))
-
 const form = reactive<TopologyTemplate>(createEmptyTemplate())
-
-const modelTreeData = computed(() => buildModelTree(form.seedModels, modelByKey.value))
-
-const collectTreeKeys = (nodes: any[]): string[] => {
-  return nodes.flatMap((node) => [
-    String(node.key),
-    ...(Array.isArray(node.children) ? collectTreeKeys(node.children) : [])
-  ])
-}
-
-const treeModelKeySet = computed(() => new Set(collectTreeKeys(modelTreeData.value)))
-const safeCheckedModelKeys = computed(() => form.visibleModelKeys.filter((key) => treeModelKeySet.value.has(key)))
-
-const sanitizeVisibleModelKeys = () => {
-  const sanitized = form.visibleModelKeys.filter((key) => treeModelKeySet.value.has(key))
-  if (sanitized.length !== form.visibleModelKeys.length) {
-    form.visibleModelKeys = sanitized
-  }
-}
 
 const getModelLabel = (modelKey: string) => modelByKey.value[modelKey]?.label || modelKey
 
@@ -189,24 +202,103 @@ const syncForm = (target: TopologyTemplate) => {
   form.updatedAt = target.updatedAt
 }
 
+const normalizeFormByOptions = () => {
+  const validModelKeys = new Set(modelOptions.value.map((item) => item.value))
+  form.seedModels = form.seedModels.filter((key) => validModelKeys.has(key))
+  form.visibleModelKeys = form.visibleModelKeys.filter((key) => validModelKeys.has(key))
+  form.layers = form.layers.map((layer) => ({
+    ...layer,
+    modelKeys: layer.modelKeys.filter((key) => validModelKeys.has(key))
+  }))
+  if (form.seedModels.length === 0 && modelOptions.value.length > 0) {
+    form.seedModels = [modelOptions.value[0].value]
+  }
+  if (form.visibleModelKeys.length === 0) {
+    form.visibleModelKeys = modelOptions.value.map((item) => item.value)
+  }
+}
+
+const flattenModelTree = (tree: any[]): OptionItem[] => {
+  const result: OptionItem[] = []
+  const walk = (nodes: any[]) => {
+    nodes.forEach((node) => {
+      if (!node || typeof node !== 'object') return
+      if (node.is_model && node.code) {
+        result.push({
+          value: String(node.code),
+          label: String(node.title || node.name || node.code)
+        })
+      }
+      if (Array.isArray(node.children)) {
+        walk(node.children)
+      }
+    })
+  }
+  walk(tree || [])
+  return result
+}
+
+const loadBaseOptions = async () => {
+  baseOptionsLoading.value = true
+  try {
+    const [modelsTreeRes, relationTypesRes] = await Promise.all([
+      getModelsTree(),
+      getRelationTypes({ page: 1, per_page: 1000 })
+    ])
+
+    const modelItems = flattenModelTree(Array.isArray(modelsTreeRes?.data) ? modelsTreeRes.data : [])
+    const relationItems = Array.isArray(relationTypesRes?.data?.items) ? relationTypesRes.data.items : []
+
+    if (modelItems.length > 0) {
+      modelOptions.value = modelItems
+    }
+
+    if (relationItems.length > 0) {
+      relationTypeOptionItems.value = relationItems
+        .map((item: any) => ({
+          value: String(item?.code || item?.name || item?.id || ''),
+          label: String(item?.name || item?.code || item?.id || '')
+        }))
+        .filter((item: OptionItem) => item.value && item.label)
+    }
+  } catch {
+    // models/tree 失败时回退 models 列表接口，尽量保证可选
+    try {
+      const fallbackRes = await getModels({ page: 1, per_page: 1000 })
+      const fallbackItems = Array.isArray(fallbackRes?.data?.items) ? fallbackRes.data.items : []
+      if (fallbackItems.length > 0) {
+        modelOptions.value = fallbackItems
+          .map((item: any) => ({
+            value: String(item?.code || ''),
+            label: String(item?.name || item?.code || '')
+          }))
+          .filter((item: OptionItem) => item.value && item.label)
+      }
+    } catch {
+      message.warning('模型或关系类型加载失败，已使用默认选项')
+    }
+  } finally {
+    normalizeFormByOptions()
+    baseOptionsLoading.value = false
+  }
+}
+
 const loadTemplate = () => {
   if (isNew.value) {
     syncForm(createEmptyTemplate())
+    normalizeFormByOptions()
     return
   }
-  const current = getTopologyTemplate(id.value)
-  if (!current) {
-    message.error('模板不存在')
-    router.push('/cmdb/topology-template')
-    return
-  }
-  syncForm(current)
-  sanitizeVisibleModelKeys()
-}
-
-const handleModelTreeCheck = (checked: any) => {
-  const keys = Array.isArray(checked) ? checked : checked?.checked
-  form.visibleModelKeys = ((keys || []) as string[]).filter((key) => treeModelKeySet.value.has(key))
+  void (async () => {
+    const res = await getCmdbTopologyTemplate(id.value)
+    if (res.code !== 200 || !res.data) {
+      message.error('模板不存在')
+      router.push('/cmdb/topology-template')
+      return
+    }
+    syncForm(res.data)
+    normalizeFormByOptions()
+  })()
 }
 
 const moveLayer = (index: number, delta: number) => {
@@ -234,7 +326,7 @@ const addLayer = () => {
   ]
 }
 
-const saveTemplate = () => {
+const saveTemplate = async () => {
   if (!form.name.trim()) {
     message.warning('请输入模板名称')
     return
@@ -243,13 +335,40 @@ const saveTemplate = () => {
     message.warning('请至少选择一个 Seed 模型')
     return
   }
-  upsertTopologyTemplate({ ...form })
-  message.success('模板保存成功')
+  const payload = { ...form }
+  const res = isNew.value
+    ? await createCmdbTopologyTemplate(payload)
+    : await updateCmdbTopologyTemplate(form.id, payload)
+  if (res.code !== 200) {
+    message.error(res.message || '模板保存失败')
+    return
+  }
+  if (res.data?.id) {
+    form.id = res.data.id
+  }
+  message.success(isNew.value ? '模板创建成功' : '模板保存成功')
   router.push('/cmdb/topology-template')
 }
 
-const previewTopology = () => {
-  upsertTopologyTemplate({ ...form })
+const previewTopology = async () => {
+  if (!form.name.trim()) {
+    message.warning('请先输入模板名称')
+    return
+  }
+  if (isNew.value) {
+    const created = await createCmdbTopologyTemplate({ ...form })
+    if (created.code !== 200 || !created.data?.id) {
+      message.error(created.message || '保存模板失败，无法预览')
+      return
+    }
+    form.id = created.data.id
+  } else {
+    const updated = await updateCmdbTopologyTemplate(form.id, { ...form })
+    if (updated.code !== 200) {
+      message.error(updated.message || '保存模板失败，无法预览')
+      return
+    }
+  }
   router.push(`/cmdb/topology-manage?templateId=${form.id}`)
 }
 
@@ -258,21 +377,16 @@ const goBack = () => {
 }
 
 onMounted(() => {
-  loadTemplate()
+  void (async () => {
+    await loadBaseOptions()
+    loadTemplate()
+  })()
 })
-
-watch(
-  treeModelKeySet,
-  () => {
-    sanitizeVisibleModelKeys()
-  },
-  { immediate: true }
-)
 
 watch(
   () => form.seedModels,
   () => {
-    sanitizeVisibleModelKeys()
+    normalizeFormByOptions()
   },
   { deep: true, flush: 'sync' }
 )

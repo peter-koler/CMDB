@@ -247,7 +247,6 @@ const currentVisibleFields = computed<TemplateMetricField[]>(() => {
 })
 const rowTrendFields = computed<TemplateMetricField[]>(() => {
   if (!currentIsRowMode.value) return []
-  if (!isOsApp.value) return currentVisibleFields.value
   return currentVisibleFields.value.filter((field) => field.type === 'number')
 })
 const currentSearchKeyword = computed({
@@ -996,13 +995,14 @@ function resolveRowMetricNameFromRecord(record: MetricGroupRow, fieldKey: string
 }
 
 function canOpenRowTrend(record: MetricGroupRow, field: TemplateMetricField): boolean {
+  if (field.type !== 'number') return false
   const metricName = resolveRowMetricNameFromRecord(record, field.field)
   return !!metricName
 }
 
 function openRowTrend(record: MetricGroupRow, field: TemplateMetricField) {
-  if (isOsApp.value && field.type !== 'number') {
-    message.warning('操作系统行模式仅支持数值指标趋势')
+  if (field.type !== 'number') {
+    message.warning('行模式仅支持数值指标趋势')
     return
   }
   const metricName = resolveRowMetricNameFromRecord(record, field.field)

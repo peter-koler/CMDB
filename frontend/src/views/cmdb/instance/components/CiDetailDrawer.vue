@@ -166,6 +166,14 @@
         </a-table>
       </a-tab-pane>
 
+      <a-tab-pane key="current_alerts" tab="当前告警">
+        <CiCurrentAlertsTab
+          :ci-id="getActiveInstanceId()"
+          :active="activeTab === 'current_alerts'"
+          :visible="visible"
+        />
+      </a-tab-pane>
+
       <a-tab-pane key="relations" tab="关系管理">
         <a-card :bordered="false" style="margin-bottom: 16px;">
           <a-space wrap>
@@ -296,21 +304,42 @@
             </a-select-option>
           </a-select>
         </a-form-item>
+        <a-form-item label="目标模型" name="target_model_id">
+          <a-select
+            v-model:value="addRelationForm.target_model_id"
+            placeholder="请选择目标模型"
+            style="width: 100%"
+            allow-clear
+            @change="addRelationForm.target_ci_id = null"
+          >
+            <a-select-option v-for="model in modelList" :key="model.id" :value="model.id">
+              {{ model.name }}
+            </a-select-option>
+          </a-select>
+        </a-form-item>
         <a-form-item label="目标CI" name="target_ci_id">
           <a-select
             v-model:value="addRelationForm.target_ci_id"
             placeholder="请选择目标CI"
             style="width: 100%"
-            :filter-option="filterCiOption"
             show-search
+            :filter-option="filterCiOption"
+            :disabled="!addRelationForm.target_model_id"
           >
-            <a-select-option v-for="ci in candidateCis" :key="ci.id" :value="ci.id">
-              {{ ci.code }} - {{ ci.name }}
+            <a-select-option v-for="ci in filteredCandidateCis" :key="ci.id" :value="ci.id">
+              {{ formatCiOptionLabel(ci) }}
             </a-select-option>
           </a-select>
         </a-form-item>
       </a-form>
     </a-modal>
+
+    <!-- 拓扑图节点CI详情弹窗 -->
+    <CiDetailDrawer
+      :visible="topologyNodeDetailVisible"
+      :instance-id="topologyNodeDetailId"
+      @update:visible="topologyNodeDetailVisible = $event"
+    />
   </a-drawer>
 </template>
 
@@ -331,6 +360,7 @@ import { Graph } from '@antv/g6'
 import dayjs from 'dayjs'
 import { getModelIconAssetUrl, getModelIconComponent } from '@/utils/cmdbModelIcons'
 import { extractFieldsFromFormConfig } from '@/utils/formConfigFields'
+import CiCurrentAlertsTab from './CiCurrentAlertsTab.vue'
 
 interface Props {
   visible: boolean
@@ -363,7 +393,15 @@ const addRelationLoading = ref(false)
 const addRelationFormRef = ref()
 const addRelationForm = reactive({
   relation_type_id: null as number | null,
+  target_model_id: null as number | null,
   target_ci_id: null as number | null
+})
+
+// 模型列表
+const modelList = ref<any[]>([])
+const filteredCandidateCis = computed(() => {
+  if (!addRelationForm.target_model_id) return candidateCis.value
+  return candidateCis.value.filter((ci: any) => ci.model_id === addRelationForm.target_model_id)
 })
 
 // 删除确认弹窗相关
@@ -1197,16 +1235,56 @@ const fetchCandidateCis = async () => {
     const res = await getInstances({ per_page: 1000 })
     if (res.code === 200) {
       candidateCis.value = res.data.items.filter((ci: any) => ci.id !== instanceId)
+      // 提取所有模型ID并去重
+      const modelIds = [...new Set(candidateCis.value.map((ci: any) => ci.model_id).filter(Boolean))]
+      // 获取模型列表
+      await fetchModelList(modelIds)
     }
   } catch (error) {
     console.error(error)
   }
 }
 
+const fetchModelList = async (modelIds: number[]) => {
+  if (modelIds.length === 0) {
+    modelList.value = []
+    return
+  }
+  try {
+    const { getModels } = await import('@/api/cmdb')
+    const res = await getModels({ per_page: 1000 })
+    if (res.code === 200) {
+      // 只保留有CI的模型
+      modelList.value = res.data.items.filter((model: any) => modelIds.includes(model.id))
+    }
+  } catch (error) {
+    console.error(error)
+  }
+}
+
+// 格式化CI选项显示：关键属性 + CIID
+const formatCiOptionLabel = (ci: any): string => {
+  const keyAttrs = ci.display_subtitles || []
+  const keyAttrStr = keyAttrs.length > 0 ? keyAttrs.join(' | ') : ''
+  if (keyAttrStr) {
+    return `${keyAttrStr} (ID: ${ci.id})`
+  }
+  return `${ci.name || ci.code} (ID: ${ci.id})`
+}
+
+// CI选项搜索过滤
+const filterCiOption = (input: string, option: any): boolean => {
+  const ci = filteredCandidateCis.value.find((c: any) => c.id === option.value)
+  if (!ci) return false
+  const searchStr = `${ci.name || ''} ${ci.code || ''} ${ci.id} ${(ci.display_subtitles || []).join(' ')}`.toLowerCase()
+  return searchStr.includes(input.toLowerCase())
+}
+
 const showAddRelationModal = () => {
   fetchRelationTypes()
   fetchCandidateCis()
   addRelationForm.relation_type_id = null
+  addRelationForm.target_model_id = null
   addRelationForm.target_ci_id = null
   addRelationModalVisible.value = true
 }
@@ -1269,20 +1347,22 @@ const deleteRelation = async (id: number) => {
   }
 }
 
-const filterCiOption = (input: string, option: any) => {
-  return option.label.toLowerCase().indexOf(input.toLowerCase()) >= 0
-}
+// 拓扑图节点详情弹窗
+const topologyNodeDetailVisible = ref(false)
+const topologyNodeDetailId = ref<number | null>(null)
 
-const openTopologyNodeDetail = async (instanceId?: number) => {
+const openTopologyNodeDetail = (instanceId?: number) => {
   const targetId = Number(instanceId || selectedTopologyNode.value?.id)
   if (!targetId) return
-  if (targetId === getActiveInstanceId()) return
+  
+  // 打开新的CI详情弹窗
+  topologyNodeDetailId.value = targetId
+  topologyNodeDetailVisible.value = true
+}
 
-  currentInstanceId.value = targetId
-  activeTab.value = 'basic'
-  relationViewTab.value = 'list'
-  await fetchDetail()
-  await fetchHistory()
+const closeTopologyNodeDetail = () => {
+  topologyNodeDetailVisible.value = false
+  topologyNodeDetailId.value = null
 }
 
 onMounted(() => {

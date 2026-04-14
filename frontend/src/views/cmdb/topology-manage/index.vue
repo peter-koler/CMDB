@@ -84,6 +84,9 @@
                     <div class="ci-type">{{ getModelLabel(activeNode.modelKey) }}</div>
                   </div>
                 </div>
+                <div style="margin-top: 10px" v-if="activeNode.nodeKind !== 'aggregate'">
+                  <a-button type="primary" ghost size="small" @click="openCiDetail">查看CI详情</a-button>
+                </div>
                 <a-divider style="margin: 12px 0" />
                 <a-descriptions :column="1" size="small" layout="horizontal">
                   <a-descriptions-item label="实时状态">
@@ -99,22 +102,30 @@
         </a-col>
       </a-row>
     </a-card>
+    <CiDetailDrawer
+      v-model:visible="detailDrawerVisible"
+      :instance-id="currentInstanceId"
+      @deleted="handleNodeDeleted"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, createApp, h, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { Graph } from '@antv/g6'
 import { useRoute, useRouter } from 'vue-router'
 import {
   buildRenderedGraphData,
-  CiNode,
   extractByTemplate,
-  getTopologyTemplate,
-  listTopologyTemplates,
-  modelDefs,
-  TopologyTemplate
-} from '@/mock/topology-template'
+  RenderNode
+} from './utils/topology-template-runtime'
+import { listCmdbTopologyTemplates, TopologyTemplate as ApiTopologyTemplate } from '@/api/cmdb-topology-template'
+import { getTopology, getRelationTypes } from '@/api/cmdb-relation'
+import { getModels } from '@/api/cmdb'
+import { message } from 'ant-design-vue'
+import { getModelIconAssetUrl, getModelIconComponent } from '@/utils/cmdbModelIcons'
+import { buildNodeToggleBadges, resolveNodeToggleAction } from '../topology/utils/topologyVisibility'
+import CiDetailDrawer from '@/views/cmdb/instance/components/CiDetailDrawer.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -122,11 +133,17 @@ const graphContainer = ref<HTMLElement>()
 const loading = ref(false)
 
 // --- 状态数据 ---
-const templates = ref<TopologyTemplate[]>([])
+const templates = ref<ApiTopologyTemplate[]>([])
 const selectedTemplateId = ref('')
-const activeNode = ref<CiNode | null>(null)
+const activeNode = ref<RenderNode | null>(null)
 const activeNodeId = ref('')
 const collapsedNodeIds = ref<Set<string>>(new Set())
+const detailDrawerVisible = ref(false)
+const currentInstanceId = ref<number | null>(null)
+const topologyNodes = ref<any[]>([])
+const topologyEdges = ref<any[]>([])
+const cmdbModels = ref<any[]>([])
+const relationTypes = ref<any[]>([])
 let graph: Graph | null = null
 
 // --- 视觉规范 ---
@@ -146,20 +163,106 @@ const getModelStyle = (key: string) => {
 
 // --- 计算逻辑 ---
 const templateOptions = computed(() => templates.value.map(t => ({ label: t.name, value: t.id })))
-const currentTemplate = computed(() => templates.value.find(t => t.id === selectedTemplateId.value))
+const currentTemplate = computed<ApiTopologyTemplate | undefined>(() => {
+  const found = templates.value.find(t => t.id === selectedTemplateId.value)
+  if (!found) return undefined
+  return found
+})
+const modelById = computed<Record<number, any>>(() => {
+  const map: Record<number, any> = {}
+  cmdbModels.value.forEach((item: any) => {
+    const id = Number(item?.id || 0)
+    if (id > 0) map[id] = item
+  })
+  return map
+})
+const relationTypeById = computed<Record<number, any>>(() => {
+  const map: Record<number, any> = {}
+  relationTypes.value.forEach((item: any) => {
+    const id = Number(item?.id || 0)
+    if (id > 0) map[id] = item
+  })
+  return map
+})
 const renderedData = computed(() => {
   if (!currentTemplate.value) return { nodes: [], edges: [], combos: [] }
-  return buildRenderedGraphData(currentTemplate.value, collapsedNodeIds.value)
+  return buildRenderedGraphData(
+    currentTemplate.value,
+    topologyNodes.value,
+    topologyEdges.value,
+    { modelById: modelById.value, relationTypeById: relationTypeById.value },
+    collapsedNodeIds.value
+  )
 })
 const fullExtractedData = computed(() => {
   if (!currentTemplate.value) return { nodes: [], edges: [], seedNodeIds: [] as string[] }
-  return extractByTemplate(currentTemplate.value, new Set())
+  return extractByTemplate(
+    currentTemplate.value,
+    topologyNodes.value,
+    topologyEdges.value,
+    { modelById: modelById.value, relationTypeById: relationTypeById.value },
+    new Set()
+  )
 })
 const stats = computed(() => ({
   nodeCount: renderedData.value.nodes?.length || 0,
   edgeCount: renderedData.value.edges?.length || 0
 }))
-const getModelLabel = (key: string) => modelDefs.find(m => m.key === key)?.label || (key === 'aggregate' ? '聚合池' : key)
+const getModelLabel = (key: string) => {
+  if (key === 'aggregate') return '聚合池'
+  const found = cmdbModels.value.find((item: any) => String(item?.code || '') === key)
+  return String(found?.name || key)
+}
+
+const getThemeColor = (name: string, fallback: string) => {
+  if (typeof window === 'undefined') return fallback
+  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+  return value || fallback
+}
+
+const toSvgBase64DataUrl = (svg: string) => {
+  const utf8 = unescape(encodeURIComponent(svg))
+  const base64 = window.btoa(utf8)
+  return `data:image/svg+xml;base64,${base64}`
+}
+
+const getAntdIconDataUrl = (iconName?: string) => {
+  const iconComponent = getModelIconComponent(iconName)
+  const container = document.createElement('div')
+  const app = createApp({
+    render() {
+      return h(iconComponent, {
+        style: {
+          fontSize: '24px',
+          color: getThemeColor('--app-accent', '#1677ff')
+        }
+      })
+    }
+  })
+  app.mount(container)
+  const svg = container.querySelector('svg') as SVGElement | null
+  if (!svg) {
+    app.unmount()
+    return ''
+  }
+  svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+  svg.setAttribute('width', '24')
+  svg.setAttribute('height', '24')
+  svg.setAttribute('viewBox', svg.getAttribute('viewBox') || '64 64 896 896')
+  svg.setAttribute('fill', 'currentColor')
+  svg.style.color = getThemeColor('--app-accent', '#1677ff')
+  const result = toSvgBase64DataUrl(svg.outerHTML)
+  app.unmount()
+  return result
+}
+
+const getNodeIconSrc = (node: any) => {
+  if (node?.modelIconUrl) return String(node.modelIconUrl)
+  const iconKey = String(node?.modelIcon || modelById.value[Number(node?.modelId || 0)]?.icon || 'AppstoreOutlined')
+  const asset = getModelIconAssetUrl(iconKey)
+  if (asset) return asset
+  return getAntdIconDataUrl(iconKey)
+}
 
 const layerPreview = computed(() => {
   if (!currentTemplate.value) return []
@@ -197,36 +300,25 @@ const initGraph = () => {
     height: graphContainer.value.clientHeight,
     autoResize: true,
     data: { nodes: [], edges: [] },
-    // 节点样式升级
     node: {
       style: {
-        size: [120, 40], // 采用长方形卡片风格
-        type: 'rect',
-        radius: 4,
+        size: 56,
+        type: 'circle',
         fill: '#ffffff',
-        stroke: (d: any) => d.status === 'ALARM' ? '#ff4d4f' : '#e8e8e8',
-        lineWidth: (d: any) => d.status === 'ALARM' ? 2 : 1,
-        // 节点内文字
-        labelText: (d: any) => {
-          const raw = String(d.name || '')
-          const markerMatch = raw.match(/\s(\[\+\]|\[-\])$/)
-          const marker = markerMatch ? markerMatch[1] : ''
-          const base = markerMatch ? raw.replace(/\s(\[\+\]|\[-\])$/, '') : raw
-          const shortBase = base.length > 12 ? `${base.substring(0, 10)}...` : base
-          return marker ? `${shortBase} ${marker}` : shortBase
-        },
-        labelFill: '#262626',
-        labelFontSize: 13,
-        labelPlacement: 'center',
-        // 增加左侧装饰色条
-        iconText: ' ',
-        iconFontSize: 12,
-        shadowColor: 'rgba(0,0,0,0.04)',
-        shadowBlur: 8,
+        stroke: (d: any) => d.status === 'ALARM' ? '#ef4444' : '#bcd8ff',
+        lineWidth: (d: any) => d.status === 'ALARM' ? 2.6 : 1.8,
+        icon: true,
+        iconWidth: 22,
+        iconHeight: 22,
+        labelFill: '#1f1f1f',
+        labelFontSize: 12,
+        labelPlacement: 'bottom',
+        shadowColor: 'rgba(59,130,246,0.24)',
+        shadowBlur: 12,
         cursor: 'pointer',
       },
       state: {
-        selected: { stroke: '#1677ff', lineWidth: 2, fill: '#f0f7ff' },
+        selected: { stroke: '#1677ff', lineWidth: 2.8, fill: '#ffffff' },
         hover: { shadowBlur: 12, shadowColor: 'rgba(0,0,0,0.1)' }
       }
     },
@@ -250,18 +342,27 @@ const initGraph = () => {
   graph.on('node:click', (evt: any) => {
     const nodeId = String(evt?.target?.id || evt?.item?.id || '')
     if (!nodeId) return
+    const action = resolveNodeToggleAction(evt)
+    if (action) {
+      if (action === 'expand') {
+        collapsedNodeIds.value.delete(nodeId)
+        collapsedNodeIds.value = new Set(collapsedNodeIds.value)
+      } else {
+        const hasChildrenInFullGraph = fullExtractedData.value.edges.some((edge: any) => edge.source === nodeId)
+        if (hasChildrenInFullGraph) {
+          collapsedNodeIds.value.add(nodeId)
+          collapsedNodeIds.value = new Set(collapsedNodeIds.value)
+        }
+      }
+      return
+    }
+
     activeNodeId.value = nodeId
     activeNode.value = renderedData.value.nodes.find((n: any) => n.id === nodeId) || null
 
     const isCollapsed = collapsedNodeIds.value.has(nodeId)
-    const hasChildrenInFullGraph = fullExtractedData.value.edges.some((edge: any) => edge.source === nodeId)
     if (isCollapsed) {
       collapsedNodeIds.value.delete(nodeId)
-      collapsedNodeIds.value = new Set(collapsedNodeIds.value)
-      return
-    }
-    if (hasChildrenInFullGraph) {
-      collapsedNodeIds.value.add(nodeId)
       collapsedNodeIds.value = new Set(collapsedNodeIds.value)
     }
   })
@@ -329,6 +430,46 @@ const projectNodesToLayerLanes = (nodes: any[]) => {
   return placed
 }
 
+const fetchTopologyByTemplate = async () => {
+  if (!currentTemplate.value) {
+    topologyNodes.value = []
+    topologyEdges.value = []
+    return
+  }
+  const seedModelCodes = new Set(currentTemplate.value.seedModels || [])
+  const visibleModelCodes = new Set(currentTemplate.value.visibleModelKeys || [])
+  const modelIdList = cmdbModels.value
+    .filter((item: any) => {
+      const code = String(item?.code || '')
+      if (!code) return false
+      if (visibleModelCodes.size > 0) return visibleModelCodes.has(code)
+      return seedModelCodes.has(code)
+    })
+    .map((item: any) => Number(item.id))
+    .filter((id: number) => id > 0)
+
+  const depth = Math.max(1, Math.min(10, (currentTemplate.value.layers?.length || 1) + 1))
+
+  loading.value = true
+  try {
+    const res = await getTopology({
+      model_ids: modelIdList.join(','),
+      depth
+    })
+    if (res.code !== 200) {
+      throw new Error(res.message || '拓扑数据加载失败')
+    }
+    topologyNodes.value = Array.isArray(res.data?.nodes) ? res.data.nodes : []
+    topologyEdges.value = Array.isArray(res.data?.edges) ? res.data.edges : []
+  } catch (error: any) {
+    topologyNodes.value = []
+    topologyEdges.value = []
+    message.error(error?.message || '拓扑数据加载失败')
+  } finally {
+    loading.value = false
+  }
+}
+
 const updateGraph = async () => {
   if (!graph || !renderedData.value.nodes.length) {
     if (graph) graph.setData({ nodes: [], edges: [] })
@@ -348,21 +489,30 @@ const updateGraph = async () => {
       fullExtractedData.value.edges.map((edge: any) => String(edge.source))
     )
 
-    const gData = {
+    const gData: any = {
       nodes: projectedNodes.map((n: any) => ({
         id: n.id,
-        name: (() => {
-          const baseName = n.nodeKind === 'aggregate' ? `📦 ${n.name} (${n.count})` : `🔹 ${n.name}`
-          if (!expandableNodeSet.has(String(n.id))) return baseName
-          return `${baseName} ${collapsedNodeIds.value.has(String(n.id)) ? '[+]' : '[-]'}`
-        })(),
+        name: n.name,
         status: n.status,
         modelKey: n.modelKey,
         style: {
           x: n.x,
           y: n.y,
-          stroke: n.id === activeNodeId.value ? '#1677ff' : undefined,
-          lineWidth: n.id === activeNodeId.value ? 2 : undefined
+          size: 58,
+          fill: '#ffffff',
+          stroke: n.status === 'ALARM' ? '#ef4444' : (n.id === activeNodeId.value ? '#1677ff' : '#bcd8ff'),
+          lineWidth: n.status === 'ALARM' ? 2.6 : (n.id === activeNodeId.value ? 2.6 : 1.8),
+          icon: true,
+          iconSrc: getNodeIconSrc(n),
+          iconWidth: 22,
+          iconHeight: 22,
+          badges: buildNodeToggleBadges(String(n.id), collapsedNodeIds.value, expandableNodeSet) as any,
+          labelText: String(n.primaryText || n.name || ''),
+          labelPlacement: 'bottom',
+          labelFill: '#1f1f1f',
+          labelFontSize: 12,
+          shadowColor: n.status === 'ALARM' ? 'rgba(239,68,68,0.35)' : 'rgba(59,130,246,0.2)',
+          shadowBlur: n.id === activeNodeId.value ? 16 : 12
         },
         data: { ...n }
       })),
@@ -374,7 +524,7 @@ const updateGraph = async () => {
         style: {
           ...(edgeStyleByRelation[e.type] || { stroke: '#d9d9d9' }),
           lineWidth: 1,
-          endArrow: true,
+          endArrow: e.direction !== 'undirected',
           labelText: e.type,
           labelFontSize: 10,
           labelFill: '#8c8c8c',
@@ -409,7 +559,17 @@ const collapseToSeed = () => {
   collapsedNodeIds.value = new Set(seeds)
 }
 
-watch([selectedTemplateId, collapsedNodeIds], () => updateGraph())
+watch(selectedTemplateId, () => {
+  void (async () => {
+    collapsedNodeIds.value = new Set()
+    activeNodeId.value = ''
+    activeNode.value = null
+    await fetchTopologyByTemplate()
+    await updateGraph()
+  })()
+})
+
+watch(collapsedNodeIds, () => updateGraph())
 
 const onResize = () => {
   if (graph && graphContainer.value) {
@@ -419,16 +579,24 @@ const onResize = () => {
 }
 
 onMounted(() => {
-  templates.value = listTopologyTemplates()
-  const qId = route.query.templateId as string
-  if (qId) selectedTemplateId.value = qId
-  else if (templates.value.length > 0) selectedTemplateId.value = templates.value[0].id
-
-  nextTick(() => {
-    initGraph()
-    updateGraph()
-    window.addEventListener('resize', onResize)
-  })
+  void (async () => {
+    const [tplRes, modelRes, relationRes] = await Promise.all([
+      listCmdbTopologyTemplates(),
+      getModels({ page: 1, per_page: 1000 }),
+      getRelationTypes({ page: 1, per_page: 1000 })
+    ])
+    templates.value = tplRes.code === 200 && Array.isArray(tplRes.data?.items) ? tplRes.data.items : []
+    cmdbModels.value = modelRes.code === 200 && Array.isArray(modelRes.data?.items) ? modelRes.data.items : []
+    relationTypes.value = relationRes.code === 200 && Array.isArray(relationRes.data?.items) ? relationRes.data.items : []
+    const qId = String(route.query.templateId || '')
+    if (qId) selectedTemplateId.value = qId
+    else if (templates.value.length > 0) selectedTemplateId.value = String(templates.value[0].id)
+    nextTick(() => {
+      initGraph()
+      updateGraph()
+      window.addEventListener('resize', onResize)
+    })
+  })()
 })
 
 onUnmounted(() => {
@@ -438,6 +606,21 @@ onUnmounted(() => {
 
 const goTemplateList = () => router.push('/cmdb/topology-template')
 const goTemplateEdit = () => router.push(`/cmdb/topology-template/edit/${selectedTemplateId.value}`)
+
+const openCiDetail = () => {
+  if (!activeNode.value || activeNode.value.nodeKind === 'aggregate') return
+  const ciId = Number(activeNode.value.id)
+  if (Number.isNaN(ciId) || ciId <= 0) {
+    message.warning('当前节点没有可查看的CI详情')
+    return
+  }
+  currentInstanceId.value = ciId
+  detailDrawerVisible.value = true
+}
+
+const handleNodeDeleted = () => {
+  detailDrawerVisible.value = false
+}
 </script>
 
 <style scoped>

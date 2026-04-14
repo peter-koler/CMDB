@@ -43,12 +43,33 @@ class CiInstance(db.Model):
         """设置属性值"""
         self.attribute_values = json.dumps(values, ensure_ascii=False)
 
+    def get_display_subtitles(self):
+        """获取关键属性显示值列表"""
+        subtitles = []
+        attrs = self.get_attribute_values()
+        
+        if self.model and self.model.config:
+            try:
+                model_config = json.loads(self.model.config)
+                key_field_codes = model_config.get("key_field_codes", [])
+                
+                for field_code in key_field_codes:
+                    value = attrs.get(field_code)
+                    if value is not None and value != "":
+                        subtitles.append(str(value))
+            except Exception:
+                pass
+        
+        return subtitles
+
     def to_dict(self):
         return {
             "id": self.id,
             "model_id": self.model_id,
             "code": self.code,
+            "name": self.name,
             "attributes": self.get_attribute_values(),
+            "display_subtitles": self.get_display_subtitles(),
             "department_id": self.department_id,
             "created_by": self.created_by,
             "updated_by": self.updated_by,

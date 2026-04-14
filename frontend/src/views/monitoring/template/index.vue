@@ -692,6 +692,7 @@ const loadDefaultPolicyDraft = () => {
 const syncPolicyDraftToYaml = () => {
   if (mutePolicySync.value) return
   if (!selectedTemplate.value) return
+  if (activeRightTab.value !== 'default-policy') return
   try {
     const baseContent = templateYaml.value || selectedTemplate.value.content || ''
     const doc = parseYamlObject(baseContent)
@@ -1333,7 +1334,10 @@ const handleSave = async () => {
     message.error(policyErrors[0])
     return
   }
-  syncPolicyDraftToYaml()
+  const savingFromPolicyTab = activeRightTab.value === 'default-policy' && Boolean(selectedTemplate.value)
+  if (savingFromPolicyTab) {
+    syncPolicyDraftToYaml()
+  }
 
   const raw = templateYaml.value.trim()
   if (!raw) {
@@ -1347,7 +1351,6 @@ const handleSave = async () => {
     if (normalized.duplicates.length) {
       message.warning(`检测到重复 params 字段并自动去重: ${Array.from(new Set(normalized.duplicates)).join(', ')}`)
     }
-    const savingFromPolicyTab = activeRightTab.value === 'default-policy' && Boolean(selectedTemplate.value)
     let finalApp = normalized.app
     let finalCategory = normalized.category
     let finalName = normalized.name

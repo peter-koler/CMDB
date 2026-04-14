@@ -34,6 +34,22 @@
           <a-col :xs="24" :sm="12" :md="6">
             <a-button type="primary" @click="handleSearch">查询</a-button>
             <a-button style="margin-left: 8px" @click="handleReset">重置</a-button>
+            <a-dropdown style="margin-left: 8px">
+              <a-button>
+                导出Excel
+                <DownOutlined />
+              </a-button>
+              <template #overlay>
+                <a-menu>
+                  <a-menu-item key="selected" @click="handleExportSelected" :disabled="selectedRowKeys.length === 0">
+                    导出选中 ({{ selectedRowKeys.length }}条)
+                  </a-menu-item>
+                  <a-menu-item key="all" @click="handleExportAll">
+                    导出全部 ({{ pagination.total }}条)
+                  </a-menu-item>
+                </a-menu>
+              </template>
+            </a-dropdown>
           </a-col>
         </a-row>
 
@@ -43,6 +59,7 @@
           :loading="loading"
           :pagination="pagination"
           row-key="id"
+          :row-selection="rowSelection"
           @change="handleTableChange"
         >
           <template #bodyCell="{ column, record }">
@@ -87,7 +104,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
+import { message } from 'ant-design-vue'
+import { DownOutlined } from '@ant-design/icons-vue'
 import { getAllCiHistory } from '@/api/ci'
 import CiDetailDrawer from '@/views/cmdb/instance/components/CiDetailDrawer.vue'
 import dayjs from 'dayjs'
@@ -102,10 +121,26 @@ const loading = ref(false)
 const detailDrawerVisible = ref(false)
 const currentCiId = ref<number | null>(null)
 
+// 选中行
+const selectedRowKeys = ref<number[]>([])
+const selectedRows = ref<any[]>([])
+
+// 行选择配置
+const rowSelection = computed(() => ({
+  selectedRowKeys: selectedRowKeys.value,
+  onChange: (keys: number[], rows: any[]) => {
+    selectedRowKeys.value = keys
+    selectedRows.value = rows
+  }
+}))
+
 const pagination = ref({
   current: 1,
   pageSize: 20,
-  total: 0
+  total: 0,
+  showSizeChanger: true,
+  pageSizeOptions: ['20', '30', '50'],
+  showTotal: (total: number) => `共 ${total} 条`
 })
 
 const columns = [
@@ -205,6 +240,72 @@ const getOperationText = (operation: string) => {
 const truncate = (str: string, maxLen: number) => {
   if (!str) return ''
   return str.length > maxLen ? str.substring(0, maxLen) + '...' : str
+}
+
+// 导出数据到CSV
+const exportToCSV = (data: any[], filename: string) => {
+  if (data.length === 0) {
+    message.warning('暂无数据可导出')
+    return
+  }
+
+  // 准备导出数据
+  const exportData = data.map((record: any) => ({
+    'CI名称': record.ci?.name || record.ci_id || '-',
+    '操作类型': getOperationText(record.operation),
+    '变更属性': record.attribute_name || '-',
+    '变更前': record.old_value || '-',
+    '变更后': record.new_value || '-',
+    '操作人': record.operator_name || '-',
+    'IP地址': record.ip_address || '-',
+    '操作时间': formatDateTime(record.created_at)
+  }))
+
+  // 创建CSV内容
+  const headers = Object.keys(exportData[0])
+  const csvContent = [
+    headers.join(','),
+    ...exportData.map((row: any) =>
+      headers.map((header: string) => {
+        const value = row[header as keyof typeof row] || ''
+        // 处理包含逗号或换行符的值
+        if (typeof value === 'string' && (value.includes(',') || value.includes('\n') || value.includes('"'))) {
+          return `"${value.replace(/"/g, '""')}"`
+        }
+        return value
+      }).join(',')
+    )
+  ].join('\n')
+
+  // 添加BOM以支持中文
+  const BOM = '\uFEFF'
+  const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' })
+
+  // 下载文件
+  const link = document.createElement('a')
+  const timestamp = dayjs().format('YYYYMMDD_HHmmss')
+  link.href = URL.createObjectURL(blob)
+  link.download = `${filename}_${timestamp}.csv`
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(link.href)
+
+  message.success('导出成功')
+}
+
+// 导出选中的数据
+const handleExportSelected = () => {
+  if (selectedRowKeys.value.length === 0) {
+    message.warning('请先选择要导出的记录')
+    return
+  }
+  exportToCSV(selectedRows.value, '变更历史_选中')
+}
+
+// 导出全部数据
+const handleExportAll = () => {
+  exportToCSV(historyList.value, '变更历史_全部')
 }
 </script>
 

@@ -14,6 +14,7 @@ from app.routes.template import template_bp
 from app.routes.monitoring_target import monitoring_target_bp
 from app.routes.monitoring_alert_admin import monitoring_alert_admin_bp
 from app.routes.license import license_bp
+from app.routes.cmdb_topology_template import cmdb_topology_template_bp
 
 
 def register_routes(app):
@@ -33,3 +34,4 @@ def register_routes(app):
     app.register_blueprint(monitoring_target_bp)
     app.register_blueprint(monitoring_alert_admin_bp)
     app.register_blueprint(license_bp)
+    app.register_blueprint(cmdb_topology_template_bp)

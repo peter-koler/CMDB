@@ -101,6 +101,14 @@ func main() {
 	} else {
 		log.Printf("[Manager] Monitor store connected: %s", maskDSNForLog(monitorDSN))
 	}
+	topologyTemplateStore, topologyErr := store.NewTopologyTemplateStoreWithPath(monitorDSN)
+	if topologyErr != nil {
+		log.Printf("[Manager] Failed to create topology template store: %v", topologyErr)
+		topologyTemplateStore = nil
+	} else {
+		log.Printf("[Manager] Topology template store connected: %s", maskDSNForLog(monitorDSN))
+		defer topologyTemplateStore.Close()
+	}
 	registry := collector.NewRegistry()
 	alertStore := alert.NewAlertStore()
 	deadLetters := alert.NewDeadLetterStore()
@@ -897,6 +905,7 @@ func main() {
 		httpapi.WithLicenseManager(licenseManager),
 		httpapi.WithVMQueryClient(vmQueryClient),
 		httpapi.WithStringLatestProvider(loadStringSnapshot),
+		httpapi.WithTopologyTemplateStore(topologyTemplateStore),
 	)
 
 	if licenseManager != nil {

@@ -1,6 +1,17 @@
 <template>
   <div class="app-page template-list-page">
     <a-card :bordered="false" title="拓扑模板列表" class="app-surface-card">
+      <a-form layout="inline" class="template-filter-form">
+        <a-form-item label="关键词">
+          <a-input v-model:value="keyword" placeholder="按名称/说明筛选" allow-clear style="width: 220px" />
+        </a-form-item>
+        <a-form-item>
+          <a-space>
+            <a-button type="primary" @click="loadTemplates">查询</a-button>
+            <a-button @click="resetFilter">重置</a-button>
+          </a-space>
+        </a-form-item>
+      </a-form>
       <template #extra>
         <a-space>
           <a-button @click="loadTemplates">刷新</a-button>
@@ -37,14 +48,15 @@ import { message } from 'ant-design-vue'
 import { useRouter } from 'vue-router'
 import dayjs from 'dayjs'
 import {
-  cloneTopologyTemplate,
-  deleteTopologyTemplate,
-  listTopologyTemplates,
+  cloneCmdbTopologyTemplate,
+  deleteCmdbTopologyTemplate,
+  listCmdbTopologyTemplates,
   TopologyTemplate
-} from '@/mock/topology-template'
+} from '@/api/cmdb-topology-template'
 
 const router = useRouter()
 const templates = ref<TopologyTemplate[]>([])
+const keyword = ref('')
 
 const columns = [
   { title: '模板名称', dataIndex: 'name', key: 'name' },
@@ -54,8 +66,11 @@ const columns = [
   { title: '操作', key: 'action', width: 220 }
 ]
 
-const loadTemplates = () => {
-  templates.value = listTopologyTemplates()
+const loadTemplates = async () => {
+  const res = await listCmdbTopologyTemplates({ keyword: keyword.value || undefined })
+  if (res.code === 200) {
+    templates.value = Array.isArray(res.data?.items) ? res.data.items : []
+  }
 }
 
 const formatTime = (value: string) => {
@@ -70,19 +85,29 @@ const editTemplate = (id: string) => {
   router.push(`/cmdb/topology-template/edit/${id}`)
 }
 
-const copyTemplate = (id: string) => {
-  const next = cloneTopologyTemplate(id)
-  if (!next) {
-    message.error('复制失败')
+const copyTemplate = async (id: string) => {
+  const res = await cloneCmdbTopologyTemplate(id)
+  if (res.code !== 200) {
+    message.error(res.message || '复制失败')
     return
   }
   message.success('模板已复制')
-  loadTemplates()
+  await loadTemplates()
 }
 
-const removeTemplate = (id: string) => {
-  templates.value = deleteTopologyTemplate(id)
+const removeTemplate = async (id: string) => {
+  const res = await deleteCmdbTopologyTemplate(id)
+  if (res.code !== 200) {
+    message.error(res.message || '删除失败')
+    return
+  }
   message.success('模板已删除')
+  await loadTemplates()
+}
+
+const resetFilter = () => {
+  keyword.value = ''
+  void loadTemplates()
 }
 
 onMounted(() => {
@@ -93,5 +118,9 @@ onMounted(() => {
 <style scoped>
 .template-list-page {
   min-height: calc(100vh - 120px);
+}
+
+.template-filter-form {
+  margin-bottom: 12px;
 }
 </style>

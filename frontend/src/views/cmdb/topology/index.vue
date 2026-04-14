@@ -152,6 +152,11 @@ import { getModels } from '@/api/cmdb'
 import { getInstances } from '@/api/ci'
 import CiDetailDrawer from '@/views/cmdb/instance/components/CiDetailDrawer.vue'
 import { getModelIconAssetUrl, getModelIconComponent } from '@/utils/cmdbModelIcons'
+import {
+  buildNodeToggleBadges,
+  buildVisibleTopology,
+  resolveNodeToggleAction
+} from './utils/topologyVisibility'
 
 const TOPOLOGY_DEPTH_LIMIT = Math.max(1, Number((import.meta as any)?.env?.VITE_TOPOLOGY_DEPTH_LIMIT || 10) || 10)
 
@@ -166,6 +171,7 @@ const nodes = ref<any[]>([])
 const edges = ref<any[]>([])
 const hasSearched = ref(false)
 const selectedNodeId = ref<string | null>(null)
+const collapsedNodeIds = ref<Set<string>>(new Set())
 const models = ref<any[]>([])
 const candidateCis = ref<any[]>([])
 const detailDrawerVisible = ref(false)
@@ -404,13 +410,16 @@ const initGraph = () => {
         opacity: 0.9
       }
     },
+    animation: true,
     layout: {
       type: layout.value,
       preventOverlap: true,
       rankdir: 'LR',
       nodesep: 60,
       ranksep: 140,
-      nodeSize: 72
+      nodeSize: 72,
+      animation: true,
+      animationDuration: 320
     }
   } as any)
 
@@ -419,6 +428,25 @@ const initGraph = () => {
     if (node) {
       const model = typeof node.getModel === 'function' ? node.getModel() : node
       const nodeId = String(model?.id || '')
+      const rawNodeId = String(model?.ci_id ?? nodeId.replace(/^ci-/, ''))
+      const action = resolveNodeToggleAction(evt)
+      if (action && rawNodeId) {
+        if (action === 'expand') {
+          if (collapsedNodeIds.value.has(rawNodeId)) {
+            collapsedNodeIds.value.delete(rawNodeId)
+            collapsedNodeIds.value = new Set(collapsedNodeIds.value)
+            void renderGraph()
+          }
+          return
+        }
+        const visibility = buildVisibleTopology(nodes.value, edges.value, collapsedNodeIds.value)
+        if (visibility.collapsibleNodeIds.has(rawNodeId)) {
+          collapsedNodeIds.value.add(rawNodeId)
+          collapsedNodeIds.value = new Set(collapsedNodeIds.value)
+          void renderGraph()
+        }
+        return
+      }
       selectedNodeId.value = nodeId || null
       void renderGraph()
     }
@@ -491,12 +519,20 @@ const applyTopologyFocusState = async (focusNodeId: string | null) => {
 
 const renderGraph = async ({ fit = false }: { fit?: boolean } = {}) => {
   if (!graph) return
-  const focusedNodeId = selectedNodeId.value
+  const visibility = buildVisibleTopology(nodes.value, edges.value, collapsedNodeIds.value)
+  const visibleNodes = visibility.nodes
+  const visibleEdges = visibility.edges
+  const collapsibleNodeIds = visibility.collapsibleNodeIds
+  const visibleNodeIdSet = new Set(visibleNodes.map((node) => `ci-${String(node.id)}`))
+  const focusedNodeId = visibleNodeIdSet.has(selectedNodeId.value || '') ? selectedNodeId.value : null
+  if (selectedNodeId.value && !focusedNodeId) {
+    selectedNodeId.value = null
+  }
   const activeNodeIdSet = new Set<string>()
   const activeEdgeIdSet = new Set<string>()
   if (focusedNodeId) {
     activeNodeIdSet.add(focusedNodeId)
-    edges.value.forEach((edge, index) => {
+    visibleEdges.forEach((edge, index) => {
       const edgeId = `rel-${String(edge.id || index)}`
       const sourceId = `ci-${String(edge.source)}`
       const targetId = `ci-${String(edge.target)}`
@@ -508,7 +544,7 @@ const renderGraph = async ({ fit = false }: { fit?: boolean } = {}) => {
     })
   }
 
-  const graphNodes = nodes.value.map((node) => ({
+  const graphNodes = visibleNodes.map((node) => ({
     id: `ci-${String(node.id)}`,
     ci_id: Number(node.id),
     model_id: node.model_id,
@@ -524,6 +560,7 @@ const renderGraph = async ({ fit = false }: { fit?: boolean } = {}) => {
       iconSrc: getGraphNodeIconSrc(node),
       iconWidth: 22,
       iconHeight: 22,
+      badges: buildNodeToggleBadges(String(node.id), collapsedNodeIds.value, collapsibleNodeIds),
       labelText: getNodePrimaryText(node),
       labelPlacement: 'bottom',
       labelFill: getThemeColor('--app-text-primary', '#1f1f1f'),
@@ -534,7 +571,7 @@ const renderGraph = async ({ fit = false }: { fit?: boolean } = {}) => {
     label: getNodePrimaryText(node)
   }))
 
-  const graphEdges = edges.value.map((edge, index) => ({
+  const graphEdges = visibleEdges.map((edge, index) => ({
     id: `rel-${String(edge.id || index)}`,
     source: `ci-${String(edge.source)}`,
     target: `ci-${String(edge.target)}`,
@@ -581,6 +618,7 @@ const fetchTopology = async () => {
         source_name: nodes.value.find(n => n.id === edge.source)?.name || edge.source,
         target_name: nodes.value.find(n => n.id === edge.target)?.name || edge.target
       }))
+      collapsedNodeIds.value = new Set()
       await nextTick()
       if (!graph && graphContainer.value) {
         initGraph()
@@ -646,6 +684,7 @@ const handleReset = () => {
   relationDepth.value = 1
   hasSearched.value = false
   selectedNodeId.value = null
+  collapsedNodeIds.value = new Set()
   nodes.value = []
   edges.value = []
   if (graph) {
@@ -747,13 +786,17 @@ watch(layout, () => {
           rankdir: 'LR',
           nodesep: 60,
           ranksep: 140,
-          nodeSize: 72
+          nodeSize: 72,
+          animation: true,
+          animationDuration: 320
         }
       : {
           type: layout.value,
           preventOverlap: true,
           nodeSpacing: 80,
-          linkDistance: 130
+          linkDistance: 130,
+          animation: true,
+          animationDuration: 320
         }
     if (typeof graph.updateLayout === 'function') {
       graph.updateLayout(layoutOptions)
