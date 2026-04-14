@@ -49,6 +49,14 @@ node_modules/
 npm-debug.log*
 yarn-debug.log*
 
+# Local only directories (not synced to GitHub)
+docs/
+specs/
+init-scripts/
+logs/*.png
+vue-vben-admin-main/
+vue-vben-admin-main.zip
+
 # Hertzbeat (local only)
 hertzbeat-master/
 hertzbeat-master.zip
